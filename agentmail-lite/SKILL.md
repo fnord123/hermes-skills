@@ -86,7 +86,7 @@ Whenever this skill activates and the agent does not already know which `inbox_i
 
 ## Common-task recipes
 
-**All operations below use the typed `mcp_agentmail_*` tools.** Do not substitute `curl`, `fetch`, `wget`, Python `requests`, or any other HTTP client — even if you "know" the AgentMail REST endpoint. The MCP tools are the only sanctioned path.
+**All operations below use the typed `mcp_agentmail_*` tools.** Do not substitute `curl`, `fetch`, `wget`, Python `requests`, or any other HTTP client. The MCP tools are the only sanctioned path; they handle networking, auth, and schema for you.
 
 ### Read recent mail
 
@@ -153,7 +153,7 @@ To trash an entire thread, fetch its messages with `get_thread` and apply `updat
 
 ## Anti-patterns
 
-- ❌ **Never invoke the AgentMail REST API directly.** Do not call `https://api.agentmail.to/...` (or any AgentMail HTTP endpoint) from `curl`, `wget`, `fetch`, Python `requests`, or any other HTTP client. All AgentMail operations go through the registered `mcp_agentmail_*` tools — those handle auth, pagination, schema, and error mapping for you.
+- ❌ **Never make outbound HTTP requests to AgentMail.** No `curl`, `wget`, `fetch`, Python `requests`, JS `fetch`, or any other HTTP client. All AgentMail operations go through the registered `mcp_agentmail_*` tools — those handle auth, pagination, schema, and error mapping for you.
 - ❌ **Never invoke `agentmail-mcp` from a terminal/shell tool.** It is a stdio MCP server, not a CLI. Running it via `terminal` would launch a duplicate process with no JSON-RPC peer; it would hang and produce nothing useful. Use the typed `mcp_agentmail_*` tools instead.
 - ❌ **Don't guess label names.** AgentMail's only documented system label is `trash` (lowercase). For anything else, use a label the user has explicitly mentioned.
 
