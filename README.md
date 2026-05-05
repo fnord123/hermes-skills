@@ -30,12 +30,12 @@ Other models welcome — open an [issue](https://github.com/fnord123/hermes-skil
 
 ## Installation
 
-Each skill installs independently via `hermes skill install`:
+Each skill installs independently via `hermes skills install`:
 
 ```bash
-hermes skill install fnord123/hermes-skills/agentmail-lite
-hermes skill install fnord123/hermes-skills/stock-investment-analysis
-hermes skill install fnord123/hermes-skills/investment-hypothesis-investigation
+hermes skills install fnord123/hermes-skills/agentmail-lite
+hermes skills install fnord123/hermes-skills/stock-investment-analysis
+hermes skills install fnord123/hermes-skills/investment-hypothesis-investigation
 ```
 
 Some skills require additional setup (API keys, MCP server config). See each skill's `SKILL.md` for details.
