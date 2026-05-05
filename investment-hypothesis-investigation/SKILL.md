@@ -279,13 +279,15 @@ When the user requests additions or refinements:
 2. **Confirmation cascade.** If your evidence-for section is twice as long as evidence-against, you have not done the work. Force-search for the strongest counter-argument from a credible source.
 3. **Vague probability.** "Likely" is not an estimate. "55–65% with medium confidence" is.
 4. **No null-edge finding.** If the market is already pricing the hypothesis correctly, that is the right answer. Say so. Do not manufacture edge.
-5. **Trade list without specifics.** "Long electrical-component names" is useless. "GEV at $X (as-of date), 12-month target $Y based on 18× forward EPS, breaks if data-center capex guidance cuts >15% in next two earnings cycles" is a trade.
+5. **Trade list without specifics.** Every named instrument in Section 7 must include all five fields: (a) ticker, (b) current price with explicit as-of date, (c) market cap or notional size, (d) one-line rationale for why it expresses the view, (e) the specific risk that breaks the trade even if the hypothesis is right. "Long electrical-component names" is useless. "GEV at $X (as-of YYYY-MM-DD), 12-month target $Y based on 18× forward EPS, breaks if data-center capex guidance cuts >15% in next two earnings cycles" is a trade. **If you cannot fill all five fields for an instrument, strike it from the list rather than including a half-formed entry.** Generic ETF baskets ("dry bulk ETFs", "shipping stocks") without named tickers count as half-formed.
 6. **Footnote drift.** Every `[^N]` reference in the body must have a matching `[^N]: ...` definition at the end of the report, and every definition must be referenced at least once. No gaps in numbering. Verify before saving.
 7. **Saving to the wrong directory.** Reports go to `~/.hermes/reports/research/`, not `cwd`, not `/tmp`. Create the directory if missing.
 8. **Renumbering on edit.** When extending the report, append new footnotes with the next available number. Never renumber existing ones — the user may have linked to them.
 9. **Stale prices.** Any quoted price, multiple, or yield must have an as-of date. Pull live, do not rely on training data.
 10. **Skipping stock-investment-analysis when a specific ticker is named.** If the user says "analyze [company]" or names a ticker, that's a single-stock request — delegate to `stock-investment-analysis`. Do not try to do valuation, bull/bear cases, or financial deep dives within this skill.
 11. **Overclaiming certainty on market timing.** Even with strong evidence, assign probabilities honestly. A 70% conviction thesis can still lose money if the catalyst is priced in.
+12. **Citing blogs and social media as primary evidence.** Footnotes whose URLs point to Substack, Medium, X/Twitter, personal blogs, or SaaS-company marketing pages are secondary at best. Replace with the underlying primary source — the SEC filing, government data (EIA, BLS, IMF, Treasury, central bank), regulatory release, court document, peer-reviewed paper, or major-publication article they are paraphrasing. If you cannot find the primary source, demote that claim's weight rather than treating the blog as canonical. Target ≥75% of footnotes pointing to primary sources.
+13. **Stale data without flagging.** When citing a report, filing, or assessment whose date is older than the most recently filed quarter (for fundamentals) or older than 30 days (for prices, prediction-market odds, multiples), explicitly note the as-of date in the body and flag that the figure may be stale. Do not silently treat year-old assessments as current.
 
 ## Verification
 
@@ -296,6 +298,9 @@ Before reporting completion to the user, confirm:
 3. Phase 2 quantifies the market-implied baseline with at least one cited number.
 4. Sections 3 and 4 have comparable rigor — count the citations; if Section 4 has fewer than 60% of Section 3's citations, do another adversarial pass.
 5. Section 6 has a numeric probability estimate and a numeric market-implied probability, with a stated edge.
-6. Every `[^N]` reference in the body has a matching `[^N]: ...` definition at the end of the file, and every definition is referenced at least once. Numbering is consecutive with no gaps.
-7. The disclaimer line appears immediately before the footnote definitions block.
-8. Tell the user the exact path to the report and offer to extend it.
+6. **Footnote primary-source check.** Count footnote URLs that point to blog or social-media domains (Substack, Medium, X/Twitter, personal blogs, SaaS-company marketing pages, wikis). If they exceed 25% of total footnotes, replace at least half with primary sources (filings, government data, peer-reviewed papers, major-publication articles) before delivering.
+7. **Section 7 instrument completeness.** For every named ticker or instrument across 7.1–7.4, all five fields are present: ticker, current price with as-of date, market cap or notional size, one-line thesis-expression rationale, and the specific trade-breaking risk. If any field is missing for any instrument, fill it or strike that instrument from the list. No generic baskets without tickers.
+8. **No silent stale data.** Any cited figure, assessment, filing, or prediction-market price older than 30 days (for prices/multiples/odds) or older than the most recently filed quarter (for fundamentals) is explicitly date-stamped in the body and flagged as potentially stale.
+9. Every `[^N]` reference in the body has a matching `[^N]: ...` definition at the end of the file, and every definition is referenced at least once. Numbering is consecutive with no gaps.
+10. The disclaimer line appears immediately before the footnote definitions block.
+11. Tell the user the exact path to the report and offer to extend it.
