@@ -1,0 +1,251 @@
+# Example Home Assistant setup for the dog-care-tracker skill.
+#
+# This file is drop-in: no search-and-replace required, except for one
+# webhook ID. Entity IDs are namespaced as `dog_*` (a literal namespace,
+# not the actual dog's name); the dog's display name lives in a single
+# `input_text.dog_name` helper that the skill reads on demand.
+#
+# To deploy:
+#
+# 1. Pick a webhook ID and replace REPLACE_WITH_WEBHOOK_ID below. Two options:
+#    - Easier: create the dispatcher automation in the HA UI first
+#      (Settings -> Automations -> Create -> Webhook trigger). HA generates
+#      the ID for you; copy that value into REPLACE_WITH_WEBHOOK_ID below
+#      (and into the HA_WEBHOOK_DOG_CARE entry in ~/.hermes/.env) so the
+#      YAML-defined helpers and scripts in this file match.
+#    - Or: pick your own unique string. `uuidgen` works on Linux/macOS.
+#    Either way, the SAME value goes into HA_WEBHOOK_DOG_CARE on the host
+#    running Hermes.
+#
+# 2. Paste each section into the matching Home Assistant config file
+#    (or use a packages/ include), then reload helpers, scripts, and
+#    automations from Settings -> Developer Tools -> YAML.
+#
+# 3. Set the value of `input_text.dog_name` (Settings -> Devices & Services
+#    -> Helpers, or directly via the entity card) to your dog's display name.
+#    The skill reads this on demand for friendly responses.
+#
+# 4. (Optional) Customize the helper labels in the HA UI to include your
+#    dog's name — e.g. rename "Dog Morning Walk Status" to "Buddy Morning
+#    Walk Status". Entity IDs (the `dog_*` slugs) stay the same.
+#
+# Tested on Home Assistant 2024.x and later.
+
+# ---------------------------------------------------------------------------
+# Helper: input_text (single source of truth for the dog's display name)
+# ---------------------------------------------------------------------------
+input_text:
+  dog_name:
+    name: Dog Name
+    initial: Buddy
+    max: 100
+
+# ---------------------------------------------------------------------------
+# Helpers: input_select (status)
+# ---------------------------------------------------------------------------
+input_select:
+  dog_morning_walk_status:
+    name: Dog Morning Walk Status
+    options: [Walked, Due, Overdue]
+    initial: Due
+  dog_midday_walk_status:
+    name: Dog Midday Walk Status
+    options: [Walked, Due, Overdue]
+    initial: Due
+  dog_evening_walk_status:
+    name: Dog Evening Walk Status
+    options: [Walked, Due, Overdue]
+    initial: Due
+  dog_breakfast_status:
+    name: Dog Breakfast Status
+    options: [Fed, Due, Overdue]
+    initial: Due
+  dog_dinner_status:
+    name: Dog Dinner Status
+    options: [Fed, Due, Overdue]
+    initial: Due
+
+# ---------------------------------------------------------------------------
+# Helpers: input_datetime (durations + meal times)
+# ---------------------------------------------------------------------------
+input_datetime:
+  dog_morning_walk_duration:
+    name: Dog Morning Walk Duration
+    has_date: false
+    has_time: true
+  dog_midday_walk_duration:
+    name: Dog Midday Walk Duration
+    has_date: false
+    has_time: true
+  dog_evening_walk_duration:
+    name: Dog Evening Walk Duration
+    has_date: false
+    has_time: true
+  dog_breakfast_time:
+    name: Dog Breakfast Time
+    has_date: false
+    has_time: true
+  dog_dinner_time:
+    name: Dog Dinner Time
+    has_date: false
+    has_time: true
+
+# ---------------------------------------------------------------------------
+# Scripts (write side)
+# ---------------------------------------------------------------------------
+script:
+  dog_mark_walked:
+    alias: Dog - Mark Walked
+    description: Set walk status to Walked and record duration.
+    mode: single
+    fields:
+      period:
+        name: Period
+        description: morning, midday, or evening
+        selector:
+          select:
+            options: [morning, midday, evening]
+      duration_minutes:
+        name: Duration (minutes)
+        description: How long the walk was
+        default: 20
+        selector:
+          number:
+            min: 1
+            max: 180
+            unit_of_measurement: min
+    sequence:
+      - action: input_select.select_option
+        target:
+          entity_id: "input_select.dog_{{ period }}_walk_status"
+        data:
+          option: Walked
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: "input_datetime.dog_{{ period }}_walk_duration"
+        data:
+          time: >-
+            {{ '%02d:%02d:00' | format(
+              (duration_minutes | int) // 60,
+              (duration_minutes | int) % 60
+            ) }}
+
+  dog_mark_fed:
+    alias: Dog - Mark Fed
+    description: Set meal status to Fed and stamp the current time.
+    mode: single
+    fields:
+      meal:
+        name: Meal
+        description: breakfast or dinner
+        selector:
+          select:
+            options: [breakfast, dinner]
+    sequence:
+      - action: input_select.select_option
+        target:
+          entity_id: "input_select.dog_{{ meal }}_status"
+        data:
+          option: Fed
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: "input_datetime.dog_{{ meal }}_time"
+        data:
+          time: "{{ now().strftime('%H:%M:%S') }}"
+
+# ---------------------------------------------------------------------------
+# Automation: webhook dispatcher (write side)
+#
+# Receives POST /api/webhook/REPLACE_WITH_WEBHOOK_ID with body shapes:
+#   {"op":"mark_walked","period":"morning","duration_minutes":25}
+#   {"op":"mark_fed","meal":"breakfast"}
+#
+# Reads (state queries) go directly to the REST states endpoint, not here.
+# ---------------------------------------------------------------------------
+automation:
+  - alias: "Dog Care Tracker - Webhook Dispatcher"
+    id: dog_care_webhook
+    triggers:
+      - trigger: webhook
+        webhook_id: REPLACE_WITH_WEBHOOK_ID
+        allowed_methods: [POST]
+        local_only: false   # set true if Hermes shares the LAN with HA
+    mode: parallel
+    actions:
+      - choose:
+          # ----- mark_walked -----
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.json.op == 'mark_walked' }}"
+            sequence:
+              - action: script.dog_mark_walked
+                data:
+                  period: "{{ trigger.json.period }}"
+                  duration_minutes: "{{ trigger.json.duration_minutes | default(20) | int }}"
+          # ----- mark_fed -----
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.json.op == 'mark_fed' }}"
+            sequence:
+              - action: script.dog_mark_fed
+                data:
+                  meal: "{{ trigger.json.meal }}"
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: wider state machine (NOT required by the skill, but useful)
+#
+# These automations make the status_select helpers self-managing:
+#   * Each window starts as Due at its expected time.
+#   * If the window passes without being marked Walked/Fed, status -> Overdue.
+#   * Daily resets clear durations and times so yesterday's data doesn't leak.
+#
+# Uncomment and edit the times to match your routine.
+# ---------------------------------------------------------------------------
+
+# automation:
+#   # ----- Status: -> Due transitions -----
+#   - alias: "Dog - Breakfast -> Due"
+#     trigger: { platform: time, at: "06:00:00" }
+#     action: { service: input_select.select_option, target: { entity_id: input_select.dog_breakfast_status }, data: { option: Due } }
+#   - alias: "Dog - Morning Walk -> Due"
+#     trigger: { platform: time, at: "06:30:00" }
+#     action: { service: input_select.select_option, target: { entity_id: input_select.dog_morning_walk_status }, data: { option: Due } }
+#   - alias: "Dog - Midday Walk -> Due"
+#     trigger: { platform: time, at: "12:00:00" }
+#     action: { service: input_select.select_option, target: { entity_id: input_select.dog_midday_walk_status }, data: { option: Due } }
+#   - alias: "Dog - Dinner -> Due"
+#     trigger: { platform: time, at: "17:30:00" }
+#     action: { service: input_select.select_option, target: { entity_id: input_select.dog_dinner_status }, data: { option: Due } }
+#   - alias: "Dog - Evening Walk -> Due"
+#     trigger: { platform: time, at: "20:00:00" }
+#     action: { service: input_select.select_option, target: { entity_id: input_select.dog_evening_walk_status }, data: { option: Due } }
+#
+#   # ----- Status: Due -> Overdue transitions (only if not yet Walked/Fed) -----
+#   - alias: "Dog - Breakfast -> Overdue"
+#     trigger: { platform: time, at: "09:30:00" }
+#     condition: { condition: state, entity_id: input_select.dog_breakfast_status, state: Due }
+#     action: { service: input_select.select_option, target: { entity_id: input_select.dog_breakfast_status }, data: { option: Overdue } }
+#   # ... add similar for the other four periods/meals ...
+#
+#   # ----- Daily reset at midnight: clear morning walk duration + breakfast time -----
+#   - alias: "Dog - Midnight Reset"
+#     trigger: { platform: time, at: "00:00:00" }
+#     action:
+#       - service: input_datetime.set_datetime
+#         target:
+#           entity_id:
+#             - input_datetime.dog_morning_walk_duration
+#             - input_datetime.dog_midday_walk_duration
+#             - input_datetime.dog_breakfast_time
+#         data: { time: "00:00:00" }
+#
+#   # ----- Afternoon reset at noon: clear evening walk duration + dinner time -----
+#   - alias: "Dog - Afternoon Reset"
+#     trigger: { platform: time, at: "12:00:00" }
+#     action:
+#       - service: input_datetime.set_datetime
+#         target:
+#           entity_id:
+#             - input_datetime.dog_evening_walk_duration
+#             - input_datetime.dog_dinner_time
+#         data: { time: "00:00:00" }

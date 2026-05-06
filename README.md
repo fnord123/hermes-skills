@@ -27,6 +27,7 @@ Other models welcome — open an [issue](https://github.com/fnord123/hermes-skil
 | [`agentmail-lite`](./agentmail-lite/) | Trimmed [AgentMail](https://agentmail.to/) wrapper — read, send, reply, trash. Drops inbox-lifecycle tools to remove the most common failure modes. |
 | [`stock-investment-analysis`](./stock-investment-analysis/) | Rigorous, evidence-based equity research on a single stock. Produces an institutional-style report with citations. |
 | [`investment-hypothesis-investigation`](./investment-hypothesis-investigation/) | Adversarial multi-angle research on a thematic or macro investment hypothesis. Quantifies consensus, edge, and trade construction. |
+| [`dog-care-tracker`](./dog-care-tracker/) | Record and query a dog's walks and feedings via Home Assistant. Writes go through one webhook; reads are targeted REST GETs. Bundles a complete HA setup template (helpers, scripts, webhook dispatcher) so a new user can stand the whole thing up in 15 minutes. |
 
 ## Installation
 
@@ -36,6 +37,7 @@ Each skill installs independently via `hermes skills install`:
 hermes skills install fnord123/hermes-skills/agentmail-lite
 hermes skills install fnord123/hermes-skills/stock-investment-analysis
 hermes skills install fnord123/hermes-skills/investment-hypothesis-investigation
+hermes skills install fnord123/hermes-skills/dog-care-tracker
 ```
 
 Some skills require additional setup (API keys, MCP server config). See each skill's `SKILL.md` for details.
