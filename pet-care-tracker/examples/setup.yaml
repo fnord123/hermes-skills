@@ -132,7 +132,7 @@ script:
 
   dog_mark_fed:
     alias: Dog - Mark Fed
-    description: Set meal status to Fed and stamp the current time.
+    description: Set meal status to Fed and stamp the time (defaults to current time when at_time is empty).
     mode: single
     fields:
       meal:
@@ -141,6 +141,13 @@ script:
         selector:
           select:
             options: [breakfast, dinner]
+      at_time:
+        name: At time
+        description: Optional HH:MM or HH:MM:SS in HA's local timezone. Empty = stamp the current time.
+        default: ""
+        example: "07:30"
+        selector:
+          text:
     sequence:
       - action: input_select.select_option
         target:
@@ -151,7 +158,13 @@ script:
         target:
           entity_id: "input_datetime.dog_{{ meal }}_time"
         data:
-          time: "{{ now().strftime('%H:%M:%S') }}"
+          time: >-
+            {%- set t = at_time | default('') | trim -%}
+            {%- if t -%}
+              {{ t if (t | length) >= 8 else (t ~ ':00') }}
+            {%- else -%}
+              {{ now().strftime('%H:%M:%S') }}
+            {%- endif -%}
 
 # ---------------------------------------------------------------------------
 # Automation: webhook dispatcher (write side)
@@ -159,6 +172,7 @@ script:
 # Receives POST /api/webhook/REPLACE_WITH_WEBHOOK_ID with body shapes:
 #   {"op":"mark_walked","period":"morning","duration_minutes":25}
 #   {"op":"mark_fed","meal":"breakfast"}
+#   {"op":"mark_fed","meal":"breakfast","at_time":"07:30"}
 #
 # Reads (state queries) go directly to the REST states endpoint, not here.
 # ---------------------------------------------------------------------------
@@ -190,6 +204,7 @@ automation:
               - action: script.dog_mark_fed
                 data:
                   meal: "{{ trigger.json.meal }}"
+                  at_time: "{{ trigger.json.at_time | default('') }}"
 
 # ---------------------------------------------------------------------------
 # OPTIONAL: wider state machine (NOT required by the skill, but useful)
