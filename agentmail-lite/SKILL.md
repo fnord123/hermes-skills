@@ -9,11 +9,12 @@ description: >
   inbox." This skill manages an inbox the user has already created; it does
   not create or delete inboxes.
 version: 0.1.0
+author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
-    tags: [email, communication, agentmail, mcp]
-    category: email
+    tags: [Email, Communication, AgentMail, MCP]
+    homepage: https://agentmail.to
 ---
 
 # AgentMail — agent-owned email management
@@ -22,13 +23,11 @@ Manage an existing AgentMail inbox via MCP: read threads, send/reply/forward, an
 
 **This skill is NOT for reading the user's personal email** (Gmail, Outlook, etc.). For that, use himalaya, Gmail, or similar. AgentMail provides agent-owned inboxes, distinct from the user's personal mail.
 
-## Requirements
+## Prerequisites
 
 - **AgentMail API key** (required) — sign up at https://console.agentmail.to (free tier: 3 inboxes, 3,000 emails/month). Key starts with `am_`.
 - **Node.js 18+** — required by the MCP server (`npx -y agentmail-mcp`).
 - **An existing AgentMail inbox.** Create one once via the [AgentMail console](https://console.agentmail.to), then use this skill to manage it.
-
-## Setup
 
 ### 1. Get an API key
 
@@ -84,7 +83,7 @@ Whenever this skill activates and the agent does not already know which `inbox_i
 3. **If more than one inbox is returned:** show the user the list and ask which one to use. Cache the choice for the rest of the session.
 4. **If zero inboxes are returned:** tell the user no inbox exists for this API key, and direct them to https://console.agentmail.to to create one.
 
-## Common-task recipes
+## Common Operations
 
 **All operations below use the typed `mcp_agentmail_*` tools.** Do not substitute `curl`, `fetch`, `wget`, Python `requests`, or any other HTTP client. The MCP tools are the only sanctioned path; they handle networking, auth, and schema for you.
 
@@ -151,14 +150,11 @@ To trash an entire thread, fetch its messages with `get_thread` and apply `updat
 
 `update_message` accepts arbitrary label strings. AgentMail's documented system label is `trash`; user-defined labels (e.g. `processed`, `archive`, `important`) are arbitrary and case-sensitive. Use `remove_labels` to strip them.
 
-## Anti-patterns
+## Notes
 
 - ❌ **Never make outbound HTTP requests to AgentMail.** No `curl`, `wget`, `fetch`, Python `requests`, JS `fetch`, or any other HTTP client. All AgentMail operations go through the registered `mcp_agentmail_*` tools — those handle auth, pagination, schema, and error mapping for you.
 - ❌ **Never invoke `agentmail-mcp` from a terminal/shell tool.** It is a stdio MCP server, not a CLI. Running it via `terminal` would launch a duplicate process with no JSON-RPC peer; it would hang and produce nothing useful. Use the typed `mcp_agentmail_*` tools instead.
 - ❌ **Don't guess label names.** AgentMail's only documented system label is `trash` (lowercase). For anything else, use a label the user has explicitly mentioned.
-
-## Pitfalls
-
 - **Free tier limited to 3 inboxes and 3,000 emails/month.** Paid plans from $20/mo.
 - **Free-tier emails come from `@agentmail.to`.** Custom domains require a paid plan.
 - **`trash` applied twice = permanent delete.** Server-side semantic — useful for cleanup, dangerous if invoked accidentally.

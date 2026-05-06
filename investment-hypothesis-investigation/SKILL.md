@@ -2,11 +2,11 @@
 name: investment-hypothesis-investigation
 description: "Investigate a high-level investment hypothesis through structured, adversarial research. Use when the user states a thesis or claim they want stress-tested - e.g., the strait of Hormuz staying closed longer than expected, transformer makers undervalued vs hyperscalers, AI capex plateauing in 2027, antitrust breaking up Big Tech. Also activate for: test this thesis, research this hypothesis, is this view priced in, what's the edge here, build a case for or against, or any user statement of a directional investing view they want validated against current evidence and consensus. Produces a single living markdown report with linked endnote citations, saved to ~/.hermes/reports/research/."
 version: 1.0.0
+author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
-    tags: [investment, investing, research, hypothesis, thesis-testing, macro, equity]
-    category: research
+    tags: [Investment, Investing, Research, Hypothesis, Thesis-Testing, Macro, Equity]
     related_skills: [stock-investment-analysis, arxiv]
 ---
 
@@ -273,7 +273,7 @@ When the user requests additions or refinements:
 [^2]: Publisher, Date, https://url
 ```
 
-## Pitfalls
+## Notes
 
 1. **Skipping Phase 2.** Without a quantified consensus, "the evidence supports the hypothesis" is meaningless — the question is whether evidence supports it *more than the market already believes*. Always quantify the baseline before gathering supporting evidence.
 2. **Confirmation cascade.** If your evidence-for section is twice as long as evidence-against, you have not done the work. Force-search for the strongest counter-argument from a credible source.

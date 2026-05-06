@@ -10,11 +10,11 @@ description: >
   or mentions equity research, stock pitch, investment memo, or stock thesis.
   Also activate for "what do you think of [TICKER]" and "should I buy [TICKER]".
 version: 1.0.0
+author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
-    tags: [finance, investing, equity-research, valuation, analysis]
-    category: research
+    tags: [Finance, Investing, Equity-Research, Valuation, Analysis]
 ---
 
 # Stock Investment Analysis
@@ -276,7 +276,7 @@ Use this skeleton verbatim for the structure. Phase 2 above describes what conte
 [New footnote definitions continue numbering from the highest existing `[^N]` — never renumber. Append the new `[^N]: ...` lines to the existing footnote block at the end of the file.]
 ```
 
-## Pitfalls
+## Notes
 
 - **Hallucinated multiples.** If forward P/E or EV/EBITDA cannot be sourced, mark `DATA UNAVAILABLE`. Do not back-calculate from a guessed earnings figure.
 - **Stale prices.** A "current price" pulled from training data is wrong. Always fetch live, and timestamp it.
