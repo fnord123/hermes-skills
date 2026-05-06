@@ -28,6 +28,7 @@ Other models welcome — open an [issue](https://github.com/fnord123/hermes-skil
 | [`stock-investment-analysis`](./stock-investment-analysis/) | Rigorous, evidence-based equity research on a single stock. Produces an institutional-style report with citations. |
 | [`investment-hypothesis-investigation`](./investment-hypothesis-investigation/) | Adversarial multi-angle research on a thematic or macro investment hypothesis. Quantifies consensus, edge, and trade construction. |
 | [`pet-care-tracker`](./pet-care-tracker/) | Record and query a dog's walks and feedings via Home Assistant. Writes go through one webhook; reads are targeted REST GETs. Bundles a complete HA setup template (helpers, scripts, webhook dispatcher) so a new user can stand the whole thing up in 15 minutes. |
+| [`daily-briefing`](./daily-briefing/) | Cron-driven morning briefing pipeline (calendar / weather / news / markets / lottery) that posts to Discord via webhook. Runtime companion skill lets the agent edit the policy files (trusted sources, news topics, watchlist tickers, calendar people) in plain English. Bundles the complete pipeline scripts. |
 
 ## Installation
 
@@ -38,6 +39,7 @@ hermes skills install fnord123/hermes-skills/agentmail-lite
 hermes skills install fnord123/hermes-skills/stock-investment-analysis
 hermes skills install fnord123/hermes-skills/investment-hypothesis-investigation
 hermes skills install fnord123/hermes-skills/pet-care-tracker
+hermes skills install fnord123/hermes-skills/daily-briefing
 ```
 
 Some skills require additional setup (API keys, MCP server config). See each skill's `SKILL.md` for details.
