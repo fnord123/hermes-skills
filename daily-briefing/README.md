@@ -28,11 +28,11 @@ This README is for the human standing the pipeline up. The skill never reads it.
    YYYY-MM-DD.md   ──►  #daily-briefings
 ```
 
-Hermes sees the post in the channel (via `DISCORD_ALLOW_BOTS=all` plus a per-channel prompt instructing it to ingest silently) and Hindsight retains the contents. Result: the agent has automatic context for the day's news / calendar / markets without being involved in producing the briefing itself.
+Hermes sees the post in the channel (via `DISCORD_ALLOW_BOTS=all` plus a per-channel prompt instructing it to ingest silently). The day's content is then in conversation context for any follow-up turns in that channel — and if you have a memory subsystem attached to Hermes (e.g. Hindsight, or whatever Hermes plugin you use), it retains the briefing's facts the same way it retains any other ingested message. Net result: the agent has automatic context for the day's news / calendar / markets without being involved in producing the briefing itself.
 
 Most "today's briefing didn't show up" failures are shell-debuggable from `/var/tmp/daily-briefing*.log` — not a context-window problem inside the agent.
 
-See [`examples/overview.md`](./examples/overview.md) for the full architecture deep-dive (debugging tips, log file locations, Hindsight integration, etc.).
+See [`examples/overview.md`](./examples/overview.md) for the full architecture deep-dive (debugging tips, log file locations, memory-system integration, etc.).
 
 ## Prerequisites
 
@@ -124,7 +124,8 @@ In your Hermes `config.yaml`:
        "<channel-id-of-briefings>": |
          Daily briefings post here every morning. Ingest the content
          silently for context — do NOT reply with a text message.
-         Hindsight will retain the facts as a side effect.
+         If you have a memory subsystem attached, it will retain the
+         facts as a side effect of ingestion.
    ```
 
 Replace `<channel-id-of-briefings>` with the channel ID where the webhook posts.

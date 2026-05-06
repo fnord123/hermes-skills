@@ -23,9 +23,11 @@ Reasons:
 - The Discord webhook delivers as a separate "Daily Briefing" identity.
   Hermes still **sees** the briefing land in `#daily-briefings` (per
   `DISCORD_ALLOW_BOTS=all`) and a per-channel prompt instructs it to
-  absorb the content silently for context. Hindsight retain runs as a
-  normal side-effect of that ingestion. So the agent gets context
-  awareness without any code in this pipeline pushing it.
+  absorb the content silently for context. If a memory subsystem is
+  attached to Hermes, it retains the briefing's facts as a normal
+  side-effect of that ingestion (same path any other message takes).
+  So the agent gets context awareness without any code in this
+  pipeline pushing it.
 
 This means most "the briefing didn't show up today" failures will be
 shell-debuggable from `/var/tmp/daily-briefing*.log`, not a context-
@@ -63,7 +65,9 @@ window problem inside the agent.
                             (Hermes sees the post,
                              channel_prompts says
                              "ingest silently",
-                             Hindsight retains.)
+                             attached memory — if
+                             any — retains via the
+                             normal ingestion path.)
 ```
 
 ## Components
@@ -253,10 +257,13 @@ indirect:
 3. The `channel_prompts` entry for the briefings channel in
    `~/.hermes/config.yaml` instructs Hermes to absorb the content for
    context but not respond.
-4. Hindsight retain runs as the normal side-effect of message
-   ingestion; facts from the briefing land in the user's memory bank.
-5. Same-day follow-ups in the channel work directly from Hermes' session
-   context. Cross-day follow-ups work via Hindsight memory recall.
+4. If a memory subsystem is configured for Hermes (e.g. Hindsight, or
+   whatever Hermes memory plugin you use), it retains the briefing's
+   facts as a normal side-effect of message ingestion — same path as
+   any other ingested content.
+5. Same-day follow-ups in the channel work directly from Hermes'
+   session context. Cross-day follow-ups work via the configured
+   memory subsystem's recall, if any.
 
 There is **no skill** in Hermes that drives generation of the briefing.
 The companion skill at `~/.hermes/skills/productivity/daily-briefing/`
