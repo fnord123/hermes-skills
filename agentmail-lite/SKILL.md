@@ -23,41 +23,6 @@ Manage an existing AgentMail inbox via MCP: read threads, send/reply/forward, an
 
 **This skill is NOT for reading the user's personal email** (Gmail, Outlook, etc.). For that, use himalaya, Gmail, or similar. AgentMail provides agent-owned inboxes, distinct from the user's personal mail.
 
-## Prerequisites
-
-- **AgentMail API key** (required) — sign up at https://console.agentmail.to (free tier: 3 inboxes, 3,000 emails/month). Key starts with `am_`.
-- **Node.js 18+** — required by the MCP server (`npx -y agentmail-mcp`).
-- **An existing AgentMail inbox.** Create one once via the [AgentMail console](https://console.agentmail.to), then use this skill to manage it.
-
-### 1. Get an API key
-
-Go to https://console.agentmail.to, create an account, generate an API key.
-
-### 2. Configure the MCP server
-
-Add this block to `~/.hermes/config.yaml` under `mcp_servers`. The `--tools` allowlist is required. Paste your actual API key (env vars are not expanded from `.env` by Hermes for MCP).
-
-```yaml
-mcp_servers:
-  agentmail:
-    command: "npx"
-    args:
-      - "-y"
-      - "agentmail-mcp"
-      - "--tools"
-      - "list_inboxes,get_inbox,list_threads,get_thread,get_attachment,send_message,reply_to_message,forward_message,update_message"
-    env:
-      AGENTMAIL_API_KEY: "am_your_key_here"
-```
-
-### 3. Restart Hermes
-
-```bash
-hermes gateway restart
-```
-
-After restart, `agent.log` should contain a line like `MCP server 'agentmail' (stdio): registered 9 tool(s): mcp_agentmail_list_inboxes, ...`.
-
 ## Available Tools
 
 All tools are MCP-typed and called via the registered names `mcp_agentmail_<name>`.
@@ -155,26 +120,6 @@ To trash an entire thread, fetch its messages with `get_thread` and apply `updat
 - ❌ **Never make outbound HTTP requests to AgentMail.** No `curl`, `wget`, `fetch`, Python `requests`, JS `fetch`, or any other HTTP client. All AgentMail operations go through the registered `mcp_agentmail_*` tools — those handle auth, pagination, schema, and error mapping for you.
 - ❌ **Never invoke `agentmail-mcp` from a terminal/shell tool.** It is a stdio MCP server, not a CLI. Running it via `terminal` would launch a duplicate process with no JSON-RPC peer; it would hang and produce nothing useful. Use the typed `mcp_agentmail_*` tools instead.
 - ❌ **Don't guess label names.** AgentMail's only documented system label is `trash` (lowercase). For anything else, use a label the user has explicitly mentioned.
-- **Free tier limited to 3 inboxes and 3,000 emails/month.** Paid plans from $20/mo.
-- **Free-tier emails come from `@agentmail.to`.** Custom domains require a paid plan.
 - **`trash` applied twice = permanent delete.** Server-side semantic — useful for cleanup, dangerous if invoked accidentally.
-- **The MCP server registers 4 framework tools** (`list_resources`, `read_resource`, `list_prompts`, `get_prompt`) regardless of `--tools`. They're inert (return empty lists) and safe to ignore.
-- **Real-time inbound email** requires AgentMail webhooks pointed at a public server. For a personal-use polling pattern, rely on `list_threads` called periodically (e.g. via a cron skill).
 - **Pagination on `list_threads`.** Default page size may not show all recent mail. Increase `limit` or paginate if the user expects to see something not in the first response.
-
-## Verification
-
-After setup, verify end-to-end:
-
-```
-hermes -z "list my agentmail inboxes"
-```
-
-You should see your inbox's address. If the agent says it lacks the tool, or you get a `terminal` approval prompt mentioning `agentmail-mcp`, the MCP server is not registering correctly — check the `mcp_servers.agentmail` block in `config.yaml` and `agent.log` for registration errors.
-
-## References
-
-- AgentMail docs: https://docs.agentmail.to/
-- AgentMail console: https://console.agentmail.to
-- AgentMail MCP repo: https://github.com/agentmail-to/agentmail-mcp
-- Pricing: https://www.agentmail.to/pricing
+- **The MCP server registers 4 framework tools** (`list_resources`, `read_resource`, `list_prompts`, `get_prompt`) regardless of `--tools`. They are inert and safe to ignore.
