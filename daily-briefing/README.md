@@ -4,6 +4,26 @@ A morning briefing pipeline that runs once a day under your crontab, gathers cal
 
 This README is for the human standing the pipeline up. The skill never reads it.
 
+## Heads up: this is "as-is" and takes some assembly
+
+This skill bundles a working pipeline but doesn't pretend setup is push-button. You'll need accounts and API keys with three providers (Brave, Twelve Data, Discord), a Google Calendar iCal URL, an NWS gridpoint lookup, a Python venv for `yfinance`, a per-channel prompt edit in your Hermes config, and a cron job. Plan for 30–60 minutes the first time; less if you're already comfortable with all of those moving parts. There's no installer.
+
+### Why the pipeline lives outside the agent
+
+Originally I tried to have the Hermes agent itself produce the briefing — fetch calendar, look up weather, run news searches, compose, post. With **small local models** (Qwen-27B-class on consumer hardware) this never worked reliably:
+
+- The agent would forget steps, skip the dedup logic, produce inconsistent formatting day-to-day.
+- Small models have a strong pull toward generic `terminal` invocations and improvise hallucinated CLI commands when typed tools don't exactly fit.
+- Even when it ran end-to-end, it was slow (multiple LLM calls × per-day cost) and brittle (one bad tool selection wrecked the whole briefing).
+
+What I ended up with — and what this skill ships — is **scripts do the boring deterministic work, the agent only does what scripts can't**:
+
+- **Shell + jq + a few Python helpers** are far more robust and far cheaper than asking an LLM to do them. The whole pipeline runs in under a second total wall-clock once it's warm.
+- **Cron-driven pipelines are easy to debug**: one log per fetcher, plain exit codes, no token budgets, no context-window failure modes.
+- **The agent's job is the human-facing edge of the loop**: managing the JSON config files when the user wants to tweak what's in the briefing ("add NVDA to my watchlist") and answering follow-up questions about the day's posted briefing using normal conversation context. Those are things small models do well — short, single-purpose, deterministic-ish edits and Q&A.
+
+If you're running on a frontier model (Claude / GPT-4 / Gemini), you could likely have the agent generate the whole briefing dynamically. If you're running on small local models like the rest of this repo targets, **bake the pipeline into shell scripts** and let the agent do follow-up — that's what works.
+
 ## Overview
 
 ```
