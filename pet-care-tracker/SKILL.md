@@ -15,8 +15,6 @@ license: MIT
 metadata:
   hermes:
     tags: [Smart-Home, Home-Assistant, Pet, Dog, Tracking]
-prerequisites:
-  commands: [curl, jq]
 ---
 
 # Dog Care Tracker
