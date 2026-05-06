@@ -62,7 +62,7 @@ def log(msg):
     with open(LOG_FILE, 'a') as f:
         f.write(f'[{ts}] CALENDAR {msg}\n')
 
-TZ = ZoneInfo("America/Los_Angeles")
+TZ = ZoneInfo(os.environ.get('BRIEFING_TZ', 'America/New_York'))
 today = datetime.now(tz=TZ).date()
 days = int(os.environ.get('DAYS', '0'))
 date_range = {today + timedelta(d) for d in range(max(1, days))}

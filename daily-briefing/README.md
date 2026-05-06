@@ -80,7 +80,7 @@ Edit `~/daily-briefing/.env` (created in step 2). Required:
 GCAL_ICAL_KEY=https://calendar.google.com/calendar/ical/<your-secret>/basic.ics
 BRAVE_API_KEY=<your Brave key>
 TWELVE_DATA_API_KEY=<your Twelve Data key>
-NWS_GRIDPOINT=PQR/113,104     # see step 4
+NWS_GRIDPOINT=OKX/33,42       # NYC; see step 4 to find yours
 BRIEFING_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
 ```
 
@@ -94,7 +94,7 @@ BRIEFING_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
 curl -s 'https://api.weather.gov/points/<lat>,<lon>' | jq -r .properties.forecastGridData
 ```
 
-Replace `<lat>,<lon>` with your coordinates (e.g. `45.5152,-122.6784` for Portland, OR). The response includes a URL ending with `/gridpoints/<OFFICE>/<X>,<Y>` — that's your `NWS_GRIDPOINT` value. Set it in `.env`.
+Replace `<lat>,<lon>` with your coordinates (e.g. `40.7128,-74.0060` for New York, NY → returns `OKX/33,42`). The response includes a URL ending with `/gridpoints/<OFFICE>/<X>,<Y>` — that's your `NWS_GRIDPOINT` value. Set it in `.env`.
 
 If you're outside the US, swap `fetch-weather.sh` for an open-meteo or openweathermap variant that emits the same one-line `Today: ... high NF low NF, rain N%` format.
 
@@ -139,11 +139,12 @@ crontab -e
 Add (adjust the time and timezone to your liking):
 
 ```
-# Daily briefing at 06:00 PT
-0 13 * * * /home/<your-user>/daily-briefing/morning-briefing.sh
+# Daily briefing at 06:00 ET
+TZ=America/New_York
+0 6 * * * $HOME/daily-briefing/morning-briefing.sh
 ```
 
-Cron's local timezone is the system timezone; the example uses UTC (06:00 PT = 13:00 UTC for most of the year, 14:00 UTC during PST). Adjust accordingly, or use `TZ=America/Los_Angeles` in your crontab if your platform supports it.
+If your platform's cron doesn't honor a `TZ=` line, drop it and translate the time to your system's clock instead (e.g. 06:00 ET → 11:00 UTC most of the year, 10:00 UTC during EDT). Whichever zone the cron *fires* in, the briefing's date formatting and archive filenames are anchored to `BRIEFING_TZ` from `.env` (default `America/New_York`).
 
 ### 8. Optional: jackpot fetching
 
@@ -167,7 +168,7 @@ This fetches everything but skips the Discord post. If the output looks right, y
 
 ## Customization
 
-**Want a different time?** Adjust the cron schedule in step 7, and adjust the `TZ` line in `morning-briefing.sh` if your timezone isn't `America/Los_Angeles`.
+**Want a different time or timezone?** Adjust the cron schedule (and its `TZ=` line) in step 7, and set `BRIEFING_TZ` in `.env` to your IANA zone (e.g. `BRIEFING_TZ=America/Los_Angeles`, `Europe/London`, `Asia/Tokyo`).
 
 **Want different sections?** The composer in `morning-briefing.sh` is straightforward bash — add or remove sections by editing the BRIEFING string. Each new section just needs a fetcher script that emits markdown.
 

@@ -35,7 +35,7 @@ done
 
 GRIDPOINT="${NWS_GRIDPOINT:-}"
 if [[ -z "$GRIDPOINT" ]]; then
-  echo "ERROR: NWS_GRIDPOINT not set in .env (e.g. NWS_GRIDPOINT=PQR/113,104)" >&2
+  echo "ERROR: NWS_GRIDPOINT not set in .env (e.g. NWS_GRIDPOINT=OKX/33,42 for NYC)" >&2
   exit 1
 fi
 

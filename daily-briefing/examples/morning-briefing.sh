@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # morning-briefing.sh — Compile and post the daily morning briefing.
 #
-# Called by user cron at 6:00 AM Pacific daily.
+# Called once a day from user cron, typically early morning local time.
 # Fetches calendar, weather, news, and jackpots; composes the briefing;
 # posts to Discord via webhook; archives a copy under archive/.
+#
+# Timezone for date formatting + the cron schedule's wall-clock anchor
+# defaults to America/New_York; override by setting BRIEFING_TZ in
+# .env (e.g. BRIEFING_TZ=America/Los_Angeles).
 #
 # Usage:
 #   morning-briefing.sh             # normal run: fetch, compose, archive, post
@@ -96,6 +100,9 @@ if [[ -f "$ENV_FILE" ]]; then
     set -a; source "$ENV_FILE"; set +a
 fi
 
+# Timezone for date formatting in the briefing. Override via .env.
+BRIEFING_TZ="${BRIEFING_TZ:-America/New_York}"
+
 mkdir -p "$ARCHIVE_DIR"
 
 log "=== START ==="
@@ -131,8 +138,8 @@ TICKERS=$(bash "$SCRIPT_DIR/fetch-tickers.sh" 2>>"$LOG_FILE") \
 log "tickers lines=$(echo "$TICKERS" | wc -l)"
 
 # ── Step 6: Compose briefing ──────────────────────────────────────────────────
-TODAY=$(TZ="America/Los_Angeles" date "+%A, %B %-d, %Y")
-ARCHIVE_DATE=$(TZ="America/Los_Angeles" date "+%Y-%m-%d")
+TODAY=$(TZ="$BRIEFING_TZ" date "+%A, %B %-d, %Y")
+ARCHIVE_DATE=$(TZ="$BRIEFING_TZ" date "+%Y-%m-%d")
 
 _cal=$(printf '%s' "$CALENDAR" | sed 's/^- /· /')
 _news=$(printf '%s' "$NEWS" | sed 's/^- /· /')

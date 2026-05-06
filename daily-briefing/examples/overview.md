@@ -36,7 +36,7 @@ window problem inside the agent.
 ## High-level flow
 
 ```
-                ┌──── user cron (06:00 PT, daily) ────┐
+                ┌──── user cron (once a day, AM) ─────┐
                 │                                     │
                 ▼                                     │
        morning-briefing.sh                            │
@@ -110,8 +110,8 @@ events in the briefing format.
   modified instance shows.
 - **Multi-day all-day events** are formatted as `Day N of Total (all
   day)` on each occurrence day.
-- **Timezone** anchored to `America/Los_Angeles` regardless of the iCal
-  feed's TZID.
+- **Timezone** anchored to `$BRIEFING_TZ` (default `America/New_York`)
+  regardless of the iCal feed's TZID.
 - **Person attribution**: `ORGANIZER` email is looked up in
   `calendar-people.json` to produce the `[Name]` prefix. Falls back to
   the file's `default` if no match.
@@ -236,15 +236,15 @@ Intended schedule: **once a day, around the time you want the briefing
 to land**. Example user-crontab entry:
 
 ```
-TZ=America/Los_Angeles
+TZ=America/New_York
 0 6 * * *  $HOME/daily-briefing/morning-briefing.sh
 ```
 
 Without the `TZ=` line, cron uses the system timezone. The
-`morning-briefing.sh` script anchors all date math to the timezone set
-inside it (default `America/Los_Angeles`) regardless of when cron
-fires, so adjust both the cron schedule *and* the `TZ=` line at the top
-of `morning-briefing.sh` together if you want a different timezone.
+`morning-briefing.sh` script anchors all date math to `$BRIEFING_TZ`
+(default `America/New_York`, set in `.env`) regardless of when cron
+fires, so adjust the cron schedule's `TZ=` line *and* the `BRIEFING_TZ`
+in `.env` together if you want a different timezone.
 
 ## How this relates to Hermes
 
