@@ -9,7 +9,7 @@ description: >
   Assistant webhook; reads are targeted REST GETs on the states endpoint.
   Designed to be small-LLM-friendly: one curl recipe per operation, minimal
   arg construction, no schema-heavy tool dispatch.
-version: 1.1.0
+version: 1.1.1
 author: dputzolu@gmail.com
 license: MIT
 metadata:
@@ -91,28 +91,37 @@ curl -fsS -X POST -H "Content-Type: application/json" \
 
 ### Mark a feeding
 
+**Always include all three fields in the JSON body**: `op`, `meal`, and `at_time`. Don't drop `at_time` — when the user didn't say a specific time, send it as the empty string `""` and HA will stamp the current time.
+
+When the user mentioned a specific time:
+
 ```bash
 curl -fsS -X POST -H "Content-Type: application/json" \
-  -d '{"op":"mark_fed","meal":"<meal>","at_time":"<HH:MM>"}' \
+  -d '{"op":"mark_fed","meal":"breakfast","at_time":"07:30"}' \
   "$HA_URL/api/webhook/$HA_WEBHOOK_DOG_CARE"
 ```
 
-`<meal>` is one of `breakfast`, `dinner`.
+When the user did NOT mention a specific time (use empty string for `at_time`):
 
-`at_time` is **optional**. Pass it as `HH:MM` (24-hour, HA's local timezone) when the user mentions a specific feeding time. Omit the field entirely when the user doesn't say a time, and the HA-side script will stamp the current time.
+```bash
+curl -fsS -X POST -H "Content-Type: application/json" \
+  -d '{"op":"mark_fed","meal":"breakfast","at_time":""}' \
+  "$HA_URL/api/webhook/$HA_WEBHOOK_DOG_CARE"
+```
 
-Time-extraction table (12-hour and natural language → 24-hour `HH:MM`):
+`meal` is one of `breakfast`, `dinner`.
+
+`at_time` is either `HH:MM` 24-hour in HA's local timezone, or the empty string `""`. Conversion table:
 
 | User says | `at_time` |
 |---|---|
-| "at 7:30am", "at 7:30 in the morning" | `07:30` |
-| "around 6:15pm", "at 6:15 in the evening" | `18:15` |
-| "noon" | `12:00` |
-| "midnight" | `00:00` |
-| "this morning" (no specific clock time) | omit `at_time` field |
-| "just now", "a few minutes ago" | omit `at_time` field |
-
-When omitting `at_time`, drop the field from the JSON entirely — don't send `"at_time":""` or `"at_time":null`.
+| "at 7:30am", "at 7:30 in the morning" | `"07:30"` |
+| "around 6:15pm", "at 6:15 in the evening" | `"18:15"` |
+| "noon" | `"12:00"` |
+| "midnight" | `"00:00"` |
+| "this morning" (no specific clock time) | `""` |
+| "just now", "a few minutes ago" | `""` |
+| (no time mentioned at all) | `""` |
 
 ### Query walk status
 
