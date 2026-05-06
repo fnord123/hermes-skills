@@ -1,4 +1,4 @@
-# Example Home Assistant setup for the dog-care-tracker skill.
+# Example Home Assistant setup for the pet-care-tracker skill.
 #
 # This file is drop-in: no search-and-replace required, except for one
 # webhook ID. Entity IDs are namespaced as `dog_*` (a literal namespace,

@@ -1,5 +1,5 @@
 ---
-name: dog-care-tracker
+name: pet-care-tracker
 description: >
   Record and query a dog's walks and feedings via Home Assistant. Activate when
   the user reports a walk or feeding in past tense ("I walked Buddy this morning

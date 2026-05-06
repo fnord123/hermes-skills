@@ -1,6 +1,6 @@
-# dog-care-tracker — setup
+# pet-care-tracker — setup
 
-One-time setup for the [dog-care-tracker](./SKILL.md) Hermes skill. The agent never reads this file; it's purely for the human standing the skill up.
+One-time setup for the [pet-care-tracker](./SKILL.md) Hermes skill. The agent never reads this file; it's purely for the human standing the skill up.
 
 ## Prerequisites
 
