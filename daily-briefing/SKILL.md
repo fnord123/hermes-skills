@@ -147,16 +147,54 @@ of being treated as a foreign exchange suffix.
 
 | User intent | Operation |
 |---|---|
-| "Add `<ticker>` to my watchlist" / "track `<ticker>`" | Append `{"ticker": "<ticker>"}` to the array if not already present. |
-| "Stop tracking `<ticker>`" / "remove `<ticker>` from my watchlist" | Drop the matching entry (case-insensitive ticker match; preserve original case if you keep). |
-| "What tickers am I watching" / "show my watchlist" | Read and list each entry's `ticker`. |
+| "Add `<ticker>` to my watchlist" / "track `<ticker>`" | **First `web_search` to resolve the ticker → company name** (see "Verify ticker ↔ company" below). Then append `{"ticker": "<ticker>"}` to the array if not already present. |
+| "Stop tracking `<ticker>`" / "remove `<ticker>` from my watchlist" | Drop the matching entry (case-insensitive ticker match; preserve original case if you keep). No lookup needed. |
+| "What tickers am I watching" / "show my watchlist" | Read and list each entry's `ticker`. No lookup needed. |
 | "Move `<ticker>` to the top" | Reorder to index 0. (Order in the file is the order in the briefing table.) |
-| "Replace `<old>` with `<new>`" | Find and replace one entry in place. |
+| "Replace `<old>` with `<new>`" | Same lookup rule as Add — `web_search` for `<new>` before writing. |
 
-When adding an international ticker the user names by company rather
-than symbol (e.g. "add Schneider Electric"), use general knowledge to
-resolve to the Yahoo symbol (`SU.PA`). If the resolution is ambiguous
-across exchanges, ask the user which exchange before writing.
+#### Verify ticker ↔ company
+
+**Always `web_search` to ground the ticker ↔ company mapping before
+writing the file or naming the company in your response.** This applies
+in both directions:
+
+- User gives a **ticker** (e.g. "Add GEV"): web_search "GEV stock
+  ticker" → confirm GE Vernova → write tickers.json with `GEV` →
+  respond `Added GEV (GE Vernova) to your watchlist.`
+- User gives a **company name** (e.g. "Add GE Vernova" / "Add Schneider
+  Electric"): web_search "GE Vernova stock ticker" → confirm `GEV`
+  (or `SU.PA`) → write tickers.json → respond
+  `Added GEV (GE Vernova) to your watchlist.`
+
+The lookup is mandatory even for tickers you think you know. Your
+training data may not match current ticker reality, and confidently-
+asserted-but-wrong company names are the canonical failure mode here.
+Canonical confusion sources:
+
+- **GE family:** `GE` (General Electric, post-spinoff parent),
+  `GEV` (GE Vernova, energy spin), `GEHC` (GE Healthcare, separate
+  spin). All three trade independently — none inherits the others'
+  symbol.
+- **Class shares:** `GOOG` vs `GOOGL`, `BRK-A` vs `BRK-B` — different
+  voting/economic rights, both real tickers.
+- **Multi-exchange listings:** `SU.PA` (Schneider Electric, Euronext
+  Paris primary) vs `SBGSF` (US OTC ADR). If the user names the
+  company without specifying exchange, ask which they want before
+  writing.
+
+**On user correction, web_search before re-writing.** If the user
+says "you got that wrong, I meant X," do a web_search to confirm
+X's actual ticker before changing tickers.json. Don't pile a second
+wrong assertion on the first.
+
+#### Confirmation format for ticker changes
+
+After adding or replacing, respond with the format `Added <TICKER>
+(<Company Name>) to your watchlist.` — both the symbol and the
+verified company name. After removing, ticker-only is fine
+(`Removed GEV from your watchlist.`) since the company isn't in
+the file.
 
 ### Calendar organizer mapping (`calendar-people.json`)
 
