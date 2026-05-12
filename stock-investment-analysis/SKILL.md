@@ -15,6 +15,7 @@ license: MIT
 metadata:
   hermes:
     tags: [Finance, Investing, Equity-Research, Valuation, Analysis]
+    related_skills: [investment-hypothesis-investigation, pre-ipo-investment-analysis]
 ---
 
 # Stock Investment Analysis
@@ -86,7 +87,7 @@ Produce the report in this exact order. Use the section headers verbatim.
 
 **11. Base case and verdict.** Probability-weighted expected return over 24 to 36 months. One of: **Strong Buy / Buy / Hold / Avoid / Short Candidate**. Confidence level: **Low / Medium / High** with one sentence explaining what would move you to higher confidence. Position sizing guidance in qualitative terms (full position, half position, watchlist, pass).
 
-**12. What I do not know.** The three most important unknowns. For each, state how you would resolve it (specific filing section, data point, expert call, or test).
+**12. Open Questions.** The three most important unknowns. For each, state how you would resolve it (specific filing section, data point, expert call, or test).
 
 ### Phase 3 — Append footnote definitions
 
@@ -121,7 +122,7 @@ Always save the report under `~/.hermes/reports/company/`. Create that directory
 
 After saving, report the absolute path of the file to the user.
 
-### Output rules
+## Output Rules
 
 - No marketing language, no hype, no hedging adjectives like "robust" or "strong" without a number behind them.
 - No phrases like "as an AI" or "I cannot give financial advice." End the body (before the footnote definitions) with a single one-line disclaimer: *Not investment advice. Verify all figures independently before acting.*
@@ -258,7 +259,7 @@ Use this skeleton verbatim for the structure. Phase 2 above describes what conte
 
 ---
 
-### 12. What I do not know
+### 12. Open Questions
 
 1. [Unknown #1] — would resolve via [specific filing section / data point / expert call / test]
 2. [Unknown #2] — would resolve via [...]

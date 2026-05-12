@@ -7,7 +7,7 @@ license: MIT
 metadata:
   hermes:
     tags: [Investment, Investing, Research, Hypothesis, Thesis-Testing, Macro, Equity]
-    related_skills: [stock-investment-analysis, arxiv]
+    related_skills: [stock-investment-analysis, pre-ipo-investment-analysis, arxiv]
 ---
 
 # Investment Hypothesis Investigation
@@ -73,7 +73,7 @@ Output: a structured report (Sections 1–11 of the template below) saved to `~/
 
 ## Procedure
 
-### Phase 1: Frame the hypothesis
+### Phase 1 — Frame the hypothesis
 
 Before any web search, restate the user's hypothesis in precise, falsifiable terms. Produce in this order:
 
@@ -85,7 +85,7 @@ Before any web search, restate the user's hypothesis in precise, falsifiable ter
 
 If any of the above is ambiguous from the user's input, ask **one** clarifying question before proceeding. Do not ask more than one.
 
-### Phase 2: Establish the consensus baseline
+### Phase 2 — Establish the consensus baseline
 
 This is the step LLMs most often skip. You cannot evaluate "longer than expected" without knowing the current expectation, and you cannot evaluate "undervalued" without knowing the current valuation.
 
@@ -97,7 +97,7 @@ For the hypothesis as stated, identify and quantify:
 
 Cite each consensus data point with a footnote.
 
-### Phase 3: Adversarial multi-angle research
+### Phase 3 — Adversarial multi-angle research
 
 Run at least 5–10 searches covering the playbook for this hypothesis type. **Critically: at least 30% of searches must be adversarial** — actively seeking the strongest counter-evidence and disconfirming data. If your supporting evidence is three pages of bullet points and your counter-evidence is two sentences, search again with disconfirming queries.
 
@@ -109,7 +109,7 @@ For each angle, capture:
 
 Prefer primary sources: filings, transcripts, government data (EIA, BLS, IMF, central banks), peer-reviewed research, regulatory filings, court documents. Demote: anonymous forum posts, X/Twitter threads without primary linkage, paywalled articles you can only see the headline of.
 
-### Phase 4: Probability assessment
+### Phase 4 — Probability assessment
 
 Synthesize evidence into a calibrated estimate. Produce:
 
@@ -121,7 +121,7 @@ Synthesize evidence into a calibrated estimate. Produce:
 - **Edge** — difference between our estimate and market-implied. State whether positive, negative, or null. A null-edge result is a valid and important finding — say so plainly.
 - **Confidence** — Low / Medium / High, with a one-sentence reason. State explicitly what new information would move you to higher confidence.
 
-### Phase 5: Trade construction
+### Phase 5 — Trade construction
 
 Only valuable if Phase 4 found positive edge. Otherwise, this section says "no trade — hypothesis appears fairly priced" and explains why.
 
@@ -134,7 +134,7 @@ If there is edge, structure trades into four categories:
 
 For each named instrument: provide ticker, current price (with as-of date), market cap or notional size, why it expresses the view, and the specific risk that breaks the trade even if the hypothesis is correct.
 
-### Phase 6: Indicators and exits
+### Phase 6 — Indicators and exits
 
 Concrete, time-bound, observable:
 
@@ -143,7 +143,7 @@ Concrete, time-bound, observable:
 - **Exit triggers** — specific conditions that close the position. Vague sentiment shifts are not exit triggers; numeric thresholds with timeframes are.
 - **Risk matrix** — table of `Risk | Probability (H/M/L) | Impact (H/M/L) | Mitigation`.
 
-### Phase 7: Save the report
+### Phase 7 — Save the report
 
 Write the full report to `~/.hermes/reports/research/`. The directory may not exist — create it.
 
@@ -155,7 +155,7 @@ Filename convention: `YYYY-MM-DD_<slug>.md` where `<slug>` is the hypothesis low
 
 Use the template below verbatim for structure. After writing, confirm the file path back to the user and offer to extend any section.
 
-### Phase 8: Iterative augmentation (when the user asks to extend)
+### Phase 8 — Iterative augmentation (when the user asks to extend)
 
 When the user requests additions or refinements:
 
@@ -165,6 +165,14 @@ When the user requests additions or refinements:
 4. Update cross-references: a new evidence item means revisiting Phases 4, 5, and 6. Don't leave the probability estimate inconsistent with newly added evidence.
 5. Append new footnotes with the next available number; never renumber existing ones (the user may have linked to them).
 6. Confirm what changed and which downstream sections were updated.
+
+## Output Rules
+
+- No marketing language, no hype, no hedging adjectives like "likely" or "significant" without a number behind them. Replace qualitative judgments with calibrated probabilities or stated ranges.
+- No phrases like "as an AI" or "I cannot give financial advice." End the body (before the footnote definitions) with the one-line disclaimer: *Not investment advice. Verify all figures independently before acting.*
+- If a tool call fails or data is unavailable for a required field, write `DATA UNAVAILABLE` and explain what you tried. Do not guess.
+- Prefer primary sources (filings, government data, peer-reviewed research, court documents) over secondary commentary. Target ≥75% of footnotes pointing to primary sources.
+- Maximum length: roughly 3,000 words for the report body. Density over volume. The footnote definitions do not count toward the word limit.
 
 ## Report Template
 

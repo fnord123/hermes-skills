@@ -157,7 +157,7 @@ Confidence: **Low / Medium / High** with one sentence explaining what would move
 
 Sizing guidance (qualitative): full intended check / minimum check / pass entirely.
 
-### Phase 9 — What I do not know
+### Phase 9 — Open Questions
 
 The three most important unknowns. For each, state how the user (or you on a follow-up) could resolve it — a specific filing, a named source, a milestone to watch, a question to ask the GP.
 
@@ -352,7 +352,7 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 
 ---
 
-### 11. What I do not know
+### 11. Open Questions
 
 1. [Unknown #1] — [how to resolve]
 2. [Unknown #2] — [how to resolve]
