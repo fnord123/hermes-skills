@@ -39,7 +39,7 @@ Output: a structured report (Sections 1–12 below) followed by a numbered Sourc
 ## Operating Principles
 
 1. **Never fabricate data.** Every number, date, quote, or claim about a specific company must come from a tool call (web search, fetch, financial data API, filings). If you cannot verify a figure, say so explicitly — do not estimate it silently.
-2. **Always cite via clickable footnotes.** After every non-obvious factual claim, attach a footnote reference using GitHub-flavored markdown footnote syntax: `[^1]`, `[^2]`, etc. Collect the full citations as footnote definitions at the end of the report, in the form `[^N]: <publisher/filing>, <date>, <URL>`. GitHub renders the inline references as clickable superscripts that jump to the matching definition (and back) — so the report should not include a manual `## Sources` heading; GitHub auto-renders a "Footnotes" section. Prefer primary sources (10-K, 10-Q, 8-K, earnings transcripts, investor presentations) over secondary commentary. Reuse a number when citing the same source again — do not duplicate entries.
+2. **Always cite via clickable footnotes.** After every non-obvious factual claim, attach a footnote reference using GitHub-flavored markdown footnote syntax: `[^1]`, `[^2]`, etc. Collect the full citations as footnote definitions at the end of the report, in the form `[^N]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>`. The source title is the clickable link text; the URL is wrapped in markdown link syntax so the rendered footnote is a hyperlink, not a bare URL. GitHub renders the inline `[^N]` references as clickable superscripts that jump to the matching definition (and back) — so the report should not include a manual `## Sources` heading; GitHub auto-renders a "Footnotes" section. Prefer primary sources (10-K, 10-Q, 8-K, earnings transcripts, investor presentations) over secondary commentary. Reuse a number when citing the same source again — do not duplicate entries.
 3. **Date-stamp everything.** Quote prices, market caps, and multiples are time-sensitive. Note the as-of date for every figure. If data is older than 30 days for prices/multiples or older than the latest filed quarter for fundamentals, flag it.
 4. **Separate fact, inference, and opinion.** Tag inferences with `(inferred:)` and opinions with `(view:)`. Plain text is reserved for sourced facts.
 5. **Steel-man both sides.** Build the bull case and bear case with equal rigor before forming a view. If you find yourself with a one-sided picture, search for the counter-narrative explicitly.
@@ -90,7 +90,17 @@ Produce the report in this exact order. Use the section headers verbatim.
 
 ### Phase 3 — Append footnote definitions
 
-After Section 12, append the footnote definitions in numbered order: `[^N]: <publisher/filing>, <date>, <URL>`. Place them in a contiguous block at the end of the body — do not add a `## Sources` heading; GitHub auto-renders a "Footnotes" section from these definitions. Verify each `[^N]` reference in the body has a matching definition and vice versa.
+After Section 12, append the footnote definitions in numbered order, each in the form:
+
+```
+[^N]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
+```
+
+Place them in a contiguous block at the end of the body — do not add a `## Sources` heading; GitHub auto-renders a "Footnotes" section from these definitions.
+
+**All URLs in the report — body and footnotes — must use markdown link syntax `[descriptive text](url)`.** Bare URLs are forbidden even though GitHub auto-links them; the descriptive text is the place to convey what the link is. Example: `[NVDA Q4 FY26 10-Q](https://www.sec.gov/...)` not `https://www.sec.gov/...`.
+
+Verify each `[^N]` reference in the body has a matching definition and vice versa.
 
 ### Phase 4 — Save the report to a markdown file
 
@@ -258,8 +268,8 @@ Use this skeleton verbatim for the structure. Phase 2 above describes what conte
 
 *Not investment advice. Verify all figures independently before acting.*
 
-[^1]: Publisher/filing, Date, https://url
-[^2]: Publisher/filing, Date, https://url
+[^1]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
+[^2]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
 ```
 
 **Addendum format** (for subsequent runs on the same ticker):

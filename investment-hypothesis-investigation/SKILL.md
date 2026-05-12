@@ -56,7 +56,8 @@ Output: a structured report (Sections 1–11 of the template below) saved to `~/
 **Footnote format (GitHub-flavored markdown):**
 
 - In body: `[^N]` after the claim — e.g. `Henry Hub futures imply $4.20/MMBtu through 2027 [^3].`
-- Definition at the end of the report: `[^N]: <publisher/filing>, <date>, <URL>`
+- Definition at the end of the report: `[^N]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>` — title is the clickable link text; URL is wrapped in markdown link syntax so the rendered footnote shows a hyperlink, not a bare URL.
+- **All URLs (body and footnotes) must use markdown link syntax `[descriptive text](url)`.** Bare URLs are forbidden even though GitHub auto-links them. Example: `[Henry Hub futures strip](https://www.eia.gov/...)` not `https://www.eia.gov/...`.
 - Do **not** add a manual `## Sources` heading — GitHub auto-renders a "Footnotes" section from the definitions, with bidirectional click-jumps.
 - Reuse a number when citing the same source again; do not duplicate definitions.
 
@@ -269,8 +270,8 @@ When the user requests additions or refinements:
 
 *Not investment advice. Verify all figures independently before acting.*
 
-[^1]: Publisher, Date, https://url
-[^2]: Publisher, Date, https://url
+[^1]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
+[^2]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
 ```
 
 ## Notes
