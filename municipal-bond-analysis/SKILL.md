@@ -62,7 +62,7 @@ User input format:
 
 Output: a structured markdown report saved to `~/.hermes/reports/muni/{CUSIP}.md` (or `{ISSUER-SLUG}-{MATURITY-YEAR}.md` for new issues without a CUSIP yet), with GitHub-flavored footnote citations.
 
-**Tax-bracket configuration.** Read `federal_marginal_rate`, `state_marginal_rate`, `state_code`, and `amt_exposed` from the skill config (declared in frontmatter, stored under `skills.config.municipal-bond-analysis.*` in `~/.hermes/config.yaml`). If any required value is missing or clearly stale (e.g., the user mentions a bracket change), ask for it once at the start of the analysis, update the config, and proceed.
+**Tax-bracket inputs.** The user's federal marginal rate, state marginal rate, state of residence, and AMT exposure status are needed to compute TEY correctly. These values are declared as skill-level frontmatter so Hermes can inject them into your context automatically. If the values are absent or appear stale relative to the user's prompt, ask the user once at the start of the analysis and use the corrected values for the run.
 
 ## Operating Principles
 
@@ -84,7 +84,7 @@ Identify the bond:
 - If issuer + maturity + coupon is provided (typical for new issues that haven't priced yet), proceed without a CUSIP and use the issuer-slug-plus-maturity-year filename fallback.
 - If an OS PDF path or URL is provided, parse it; CUSIP usually appears on the cover or in the schedule of maturities.
 
-Read the four config values: `federal_marginal_rate`, `state_marginal_rate`, `state_code`, `amt_exposed`. If any is at its default placeholder or clearly inconsistent with the user's context, ask once for a correction before proceeding.
+Use the four tax-bracket values from your injected context: the federal marginal rate, the state marginal rate, the two-letter state code, and the AMT exposure flag. If any value is at a placeholder default or clearly inconsistent with the user's prompt, ask once for a correction before proceeding.
 
 Determine in-state vs out-of-state: compare `state_code` to the issuer's state. In-state munis get the combined federal+state exemption; out-of-state get federal only (plus any reciprocal-state arrangements — rare but exist).
 
