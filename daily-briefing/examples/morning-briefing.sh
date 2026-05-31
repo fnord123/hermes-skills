@@ -172,7 +172,18 @@ ARCHIVE_FILE="${ARCHIVE_DIR}/daily-briefing-${ARCHIVE_DATE}.md"
 printf '%s\n' "$BRIEFING" > "$ARCHIVE_FILE"
 log "archived ${ARCHIVE_FILE}"
 
-# ── Step 9: Post to Discord webhook ───────────────────────────────────────────
+# ── Step 9: Post to Discord (stub in channel, full briefing in thread) ───────
+# Three-step flow when BRIEFING_BOT_TOKEN is set:
+#   1. Post a one-line stub to the channel (?wait=true to get message_id back).
+#   2. Create a date-named public thread anchored to the stub via the bot.
+#   3. Post the full briefing into the thread via webhook ?thread_id=<id>.
+# Public (not private) threads — private threads require a per-day member-add
+# whose "X added Y to the thread" system message kicks Hermes into an
+# empty-response retry loop in this channel.
+# The bot needs CREATE_PUBLIC_THREADS on the parent channel.
+#
+# Without BRIEFING_BOT_TOKEN we can't create threads, so we fall back to
+# posting the full briefing straight to the channel.
 log "STEP post"
 if [[ -z "${BRIEFING_WEBHOOK_URL:-}" ]]; then
     log "ERROR BRIEFING_WEBHOOK_URL not set; skipping post"
@@ -187,20 +198,86 @@ if (( ${#BRIEFING} > 1900 )); then
     BRIEFING="${BRIEFING:0:1900}"
 fi
 
-PAYLOAD=$(jq -n --arg content "$BRIEFING" '{content: $content, username: "Daily Briefing"}')
-HTTP_CODE=$(curl -sS -m 15 \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -o /dev/null \
-    -w "%{http_code}" \
-    -d "$PAYLOAD" \
-    "$BRIEFING_WEBHOOK_URL" 2>>"$LOG_FILE" || echo "000")
+RESPONSE_FILE=$(mktemp)
+trap 'rm -f "$RESPONSE_FILE"' EXIT
 
-if [[ "$HTTP_CODE" =~ ^2 ]]; then
-    log "posted http=${HTTP_CODE}"
+if [[ -n "${BRIEFING_BOT_TOKEN:-}" ]]; then
+    STUB_CONTENT="**Daily Briefing — ${TODAY}**"
+    STUB_PAYLOAD=$(jq -n --arg content "$STUB_CONTENT" \
+        '{content: $content, username: "Daily Briefing"}')
+    HTTP_CODE=$(curl -sS -m 15 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -o "$RESPONSE_FILE" \
+        -w "%{http_code}" \
+        -d "$STUB_PAYLOAD" \
+        "${BRIEFING_WEBHOOK_URL}?wait=true" 2>>"$LOG_FILE" || echo "000")
+    if [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+        log "ERROR stub post failed http=${HTTP_CODE}"
+        exit 1
+    fi
+    log "stub posted http=${HTTP_CODE}"
+
+    MESSAGE_ID=$(jq -r '.id // empty' "$RESPONSE_FILE" 2>>"$LOG_FILE")
+    CHANNEL_ID=$(jq -r '.channel_id // empty' "$RESPONSE_FILE" 2>>"$LOG_FILE")
+    if [[ -z "$MESSAGE_ID" || -z "$CHANNEL_ID" ]]; then
+        log "ERROR couldn't extract message_id/channel_id from stub response"
+        exit 1
+    fi
+
+    THREAD_PAYLOAD=$(jq -n --arg name "$ARCHIVE_DATE" \
+        '{name: $name, auto_archive_duration: 1440}')
+    THREAD_HTTP=$(curl -sS -m 10 \
+        -X POST \
+        -H "Authorization: Bot $BRIEFING_BOT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -o "$RESPONSE_FILE" \
+        -w "%{http_code}" \
+        -d "$THREAD_PAYLOAD" \
+        "https://discord.com/api/v10/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}/threads" \
+        2>>"$LOG_FILE" || echo "000")
+    if [[ ! "$THREAD_HTTP" =~ ^2 ]]; then
+        log "ERROR thread creation failed http=${THREAD_HTTP}"
+        exit 1
+    fi
+    THREAD_ID=$(jq -r '.id // empty' "$RESPONSE_FILE" 2>>"$LOG_FILE")
+    if [[ -z "$THREAD_ID" ]]; then
+        log "ERROR thread response missing id"
+        exit 1
+    fi
+    log "thread created '${ARCHIVE_DATE}' id=${THREAD_ID}"
+
+    BRIEFING_PAYLOAD=$(jq -n --arg content "$BRIEFING" \
+        '{content: $content, username: "Daily Briefing"}')
+    HTTP_CODE=$(curl -sS -m 15 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -o /dev/null \
+        -w "%{http_code}" \
+        -d "$BRIEFING_PAYLOAD" \
+        "${BRIEFING_WEBHOOK_URL}?wait=true&thread_id=${THREAD_ID}" 2>>"$LOG_FILE" || echo "000")
+    if [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+        log "ERROR briefing post to thread failed http=${HTTP_CODE}"
+        exit 1
+    fi
+    log "briefing posted to thread http=${HTTP_CODE}"
 else
-    log "ERROR webhook post failed http=${HTTP_CODE}"
-    exit 1
+    log "WARN BRIEFING_BOT_TOKEN not set; posting full briefing to channel without thread"
+    PAYLOAD=$(jq -n --arg content "$BRIEFING" \
+        '{content: $content, username: "Daily Briefing"}')
+    HTTP_CODE=$(curl -sS -m 15 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -o /dev/null \
+        -w "%{http_code}" \
+        -d "$PAYLOAD" \
+        "$BRIEFING_WEBHOOK_URL" 2>>"$LOG_FILE" || echo "000")
+    if [[ "$HTTP_CODE" =~ ^2 ]]; then
+        log "posted http=${HTTP_CODE}"
+    else
+        log "ERROR webhook post failed http=${HTTP_CODE}"
+        exit 1
+    fi
 fi
 
 log "=== END ==="
