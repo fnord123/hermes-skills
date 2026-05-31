@@ -59,38 +59,28 @@ fetch_jackpots() {
     "$AGENT_BROWSER" close >>"$LOG_FILE" 2>&1 || true
 
     SNAP_FILE="$snap_file" python3 <<'PYEOF' 2>/dev/null || echo "unavailable"
-import os
+import os, re
 with open(os.environ['SNAP_FILE']) as f:
-    lines = f.read().splitlines()
+    text = f.read()
+# lotteryvalley.com renders each game as a link whose accessible name
+# includes "CURRENT JACKPOT $XXXM". Match that pattern; first hit per
+# game wins.
+pat = re.compile(r'link "(Powerball|Mega Millions)\b[^"]*?CURRENT JACKPOT \$([0-9.]+)\s*M')
 games = {}
-current_game = None
-next_is_jackpot = False
-for line in lines:
-    s = line.strip()
-    for game in ('Powerball', 'Mega Millions'):
-        if ('StaticText "' + game + '"') in s:
-            current_game = game
-            next_is_jackpot = False
-            break
-    if 'StaticText "Current Jackpot"' in s:
-        next_is_jackpot = True
-        continue
-    if next_is_jackpot and 'StaticText "$' in s:
-        if current_game:
-            # snapshot text is like '"$195M"' — strip non-digits
-            v = s.split('"')[1]
-            n = int(''.join(c for c in v if c.isdigit()) or '0')
-            if n > 0:
-                games[current_game] = n
-        next_is_jackpot = False
+for m in pat.finditer(text):
+    name, val = m.group(1), float(m.group(2))
+    if name not in games and val > 0:
+        games[name] = val
 if len(games) != 2:
     print("unavailable")
     raise SystemExit
+def fmt(v):
+    return f"${v:g}M"  # 180.0 -> $180M, 28.17 -> $28.17M
 mm, pb = games['Mega Millions'], games['Powerball']
 if mm >= pb:
-    print(f"Mega Millions ${mm}M | Powerball ${pb}M")
+    print(f"Mega Millions {fmt(mm)} | Powerball {fmt(pb)}")
 else:
-    print(f"Powerball ${pb}M | Mega Millions ${mm}M")
+    print(f"Powerball {fmt(pb)} | Mega Millions {fmt(mm)}")
 PYEOF
     rm -f "$snap_file"
 }
