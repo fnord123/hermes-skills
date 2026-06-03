@@ -41,6 +41,44 @@ AGENT_BROWSER="${HOME}/.npm-global/bin/agent-browser"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] BRIEFING $*" | tee -a "$LOG_FILE"; }
 
+# Ask Hermes for brief, memory-informed suggestions over today's calendar.
+# Runs `hermes -z` (one-shot: prompt in, final text out) as a full agent
+# session, so the agent's persistent memory is auto-loaded and it can recall
+# anything relevant about these events. The agent is also invited to retain
+# durable facts from the calendar into its memory, so events feed the
+# long-term memory system. Best-effort: bounded by a timeout and never blocks
+# the briefing. Prints '· ' bullets, or nothing.
+fetch_suggestions() {
+    [[ -x "$HERMES_BIN" ]] || { echo ""; return; }
+    local out
+    out=$(timeout 120 "$HERMES_BIN" -z "Today is ${TODAY}. Here are today's calendar entries and the weather:
+
+CALENDAR:
+${CALENDAR}
+
+WEATHER: ${WEATHER_TODAY}
+
+Review these. Drawing on anything you remember about me and these events,
+give a few brief, practical suggestions (prep to do, conflicts, things to
+bring, timing given the weather, follow-ups worth scheduling). If any entry
+reflects a durable fact worth remembering about me or the people in my life
+(not one-off scheduling noise), retain it to your memory. Then output only
+the suggestions, one per line, each prefixed with '· '. If you have nothing
+genuinely useful to add, output exactly the single word NONE." \
+        2>>"$LOG_FILE") || { echo ""; return; }
+    # The model sometimes runs bullets together on one line; force one per
+    # line so Discord renders a list rather than a wall of text. '· ' is our
+    # designated bullet marker, so splitting on it is safe.
+    out=$(printf '%s' "$out" | sed 's/ *· /\n· /g')
+    # Keep ONLY bullet lines. `hermes -z` is a full agent session whose final
+    # message is not always the clean list we asked for — it can emit a
+    # preamble, a NONE sentinel, or meta/tool-use commentary. Dropping every
+    # non-'· ' line means such noise never reaches Discord; if nothing valid
+    # remains, the caller omits the Suggestions section entirely.
+    out=$(printf '%s' "$out" | grep '^· ' || true)
+    printf '%s' "$out"
+}
+
 # Fetch jackpots via agent-browser (vercel-labs/agent-browser). The lottery
 # pages are JS-rendered SPAs that don't expose values to plain curl, so we
 # drive a headless Chrome to take an accessibility-tree snapshot and parse
@@ -93,6 +131,11 @@ fi
 # Timezone for date formatting in the briefing. Override via .env.
 BRIEFING_TZ="${BRIEFING_TZ:-America/New_York}"
 
+# Hermes one-shot binary, used to add AI suggestions over the calendar.
+# cron runs with a minimal PATH, so resolve an absolute path; override via .env
+# (blank → this default; set to a non-existent path to disable suggestions).
+HERMES_BIN="${HERMES_BIN:-${HOME}/.local/bin/hermes}"
+
 mkdir -p "$ARCHIVE_DIR"
 
 log "=== START ==="
@@ -131,6 +174,12 @@ log "tickers lines=$(echo "$TICKERS" | wc -l)"
 TODAY=$(TZ="$BRIEFING_TZ" date "+%A, %B %-d, %Y")
 ARCHIVE_DATE=$(TZ="$BRIEFING_TZ" date "+%Y-%m-%d")
 
+# ── Step 5b: AI suggestions over the calendar ─────────────────────────────────
+# Needs $TODAY for the prompt, so it runs after the date is computed.
+log "STEP suggestions"
+SUGGESTIONS=$(fetch_suggestions)
+log "suggestions chars=${#SUGGESTIONS}"
+
 _cal=$(printf '%s' "$CALENDAR" | sed 's/^- /· /')
 _news=$(printf '%s' "$NEWS" | sed 's/^- /· /')
 
@@ -147,6 +196,13 @@ if [[ -n "$TICKERS" ]]; then
     BRIEFING="${BRIEFING}
 
 ${TICKERS}"
+fi
+
+if [[ -n "$SUGGESTIONS" ]]; then
+    BRIEFING="${BRIEFING}
+
+__Suggestions__
+${SUGGESTIONS}"
 fi
 
 if [[ -n "$NEWS" ]]; then
