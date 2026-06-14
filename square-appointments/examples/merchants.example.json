@@ -1,0 +1,9 @@
+{
+  "sugarmama": {
+    "name": "The Sugar Mama",
+    "booking_url": "https://book.squareup.com/appointments/2ba42e62-6e9f-45a9-90c5-f71cacb75f69/location/RGWB2F9T7HFB8/services",
+    "default_service_id": "NASUF2RAB6R4VUENNHZR6BC3",
+    "sender_match": ["messaging.squareup.com"],
+    "subject_match": ["Sugar Mama"]
+  }
+}

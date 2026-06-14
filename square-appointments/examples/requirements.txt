@@ -1,0 +1,2 @@
+playwright>=1.40
+playwright-stealth>=2.0
