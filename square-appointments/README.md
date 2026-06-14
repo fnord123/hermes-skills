@@ -136,6 +136,15 @@ You should see your upcoming bookings at that merchant.
   inherently fragile — Square can redesign their flow without notice.
   If a script starts failing with selector errors, that's the cause;
   inspect the page and update the selectors in the script.
+- **Find-slot can't always scrape time slots.** Square's date picker
+  currently keeps its week-advance controls (`prior-week-button`,
+  `next-week-button`) CSS-hidden in production. The script reaches the
+  availability page and can click dates within the default visible window
+  (this week + a few days ahead), but can't advance further from headless.
+  When that happens, `square-find-slot.py` returns
+  `status="no_collision_use_url"` and surfaces the booking URL so the user
+  can pick a slot in their own browser. Collision detection (the
+  "do I already have one?" half) is unaffected and works fully.
 - **ToS gray zone.** Automating one's own buyer interactions on Square is
   in a gray zone with Square's site ToS. Personal-use automation against
   your own confirmation emails and the publicly-accessible buyer flows is

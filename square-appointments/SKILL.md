@@ -94,9 +94,19 @@ square-list.py --merchant sugarmama
 ### "Find me a slot at sugarmama around the 20th."
 ```
 square-find-slot.py --merchant sugarmama --around 2026-06-20
-→ if status="already_have": tell user about the existing one; offer to move it
-→ if slots returned: present them; ask user which to take
 ```
+Three response shapes; relay each to the user differently:
+
+- **`status="already_have"`**: user already has an appointment within
+  ±7 days of the target. Tell them when it is. Offer to move it
+  (square-move.py) rather than book a new one.
+- **`status="ok"`** with a `slots` array: present the listed time options
+  and ask the user which to take.
+- **`status="no_collision_use_url"`**: there's no existing appointment in
+  the window, but the agent can't scrape Square's date picker reliably
+  (Square's UI hides week-advance controls behind CSS). Give the user the
+  `booking_url` and ask them to pick a slot in their browser. Do NOT
+  pretend you booked something — you didn't.
 
 ### "Cancel my sugarmama appointment on the 18th at 2pm."
 ```
