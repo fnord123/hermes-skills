@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""schedule-next.py — list the next upcoming event(s).
+"""calendar-next.py — list the next upcoming event(s).
 
 Read-only. Stdlib-only.
 
@@ -9,9 +9,9 @@ Use this for:
   - "What's my next meeting today?"
 
 Usage:
-  python3 schedule-next.py                        # next 3 events within 48h
-  python3 schedule-next.py --within 24 --limit 5  # next 5 events within 24h
-  python3 schedule-next.py --within 168           # next event(s) in the next week
+  python3 calendar-next.py                        # next 3 events within 48h
+  python3 calendar-next.py --within 24 --limit 5  # next 5 events within 24h
+  python3 calendar-next.py --within 168           # next event(s) in the next week
 
 "Next" is measured from the current wall-clock time in the configured
 timezone (SCHEDULE_TZ or BRIEFING_TZ). All-day events are considered to

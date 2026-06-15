@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""schedule-find.py — find events matching a keyword over a lookback/lookahead window.
+"""calendar-find.py — find events matching a keyword over a lookback/lookahead window.
 
 Read-only. Stdlib-only. Case-insensitive substring search across title,
 location, organizer, and description fields.
@@ -10,8 +10,8 @@ Use this for:
   - "Find anything about 'flight' on my calendar."
 
 Usage:
-  python3 schedule-find.py --query <text>
-  python3 schedule-find.py --query <text> --days-ahead 60 --days-back 7
+  python3 calendar-find.py --query <text>
+  python3 calendar-find.py --query <text> --days-ahead 60 --days-back 7
 
 Defaults: --days-back 7 (lookback), --days-ahead 30 (lookahead). The
 small lookback is useful because the agent often asks about events that

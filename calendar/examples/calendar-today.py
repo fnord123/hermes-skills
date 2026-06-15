@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""schedule-today.py — list events on today's calendar.
+"""calendar-today.py — list events on today's calendar.
 
 Read-only. Sources data from the user's Google Calendar iCal URL
 (GCAL_ICAL_KEY in .env). Stdlib-only.
 
 Usage:
-  python3 schedule-today.py
+  python3 calendar-today.py
 
 Output: JSON `{date, timezone, events: [Event, ...]}`. Events are sorted by
 start time. Each Event has the same shape as `ical_lib.Event.to_dict()`.
@@ -13,7 +13,7 @@ start time. Each Event has the same shape as `ical_lib.Event.to_dict()`.
 Used to answer questions like:
   - "What's on my calendar today?"
   - "Do I have anything this morning?"
-  - "What's my next meeting?"  (use schedule-next.py for that one — this
+  - "What's my next meeting?"  (use calendar-next.py for that one — this
     script returns the whole day, not just the next item)
 """
 from __future__ import annotations

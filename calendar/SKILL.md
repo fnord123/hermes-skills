@@ -1,5 +1,5 @@
 ---
-name: schedule
+name: calendar
 description: >
   Calendar lookup — answer any question about the user's calendar, schedule,
   appointments, or events. Works on the user's Google Calendar via a
@@ -20,7 +20,7 @@ metadata:
     tags: [Calendar, Schedule, Appointments, Meetings, Events, iCal, GoogleCalendar, Productivity]
 ---
 
-# schedule — read-only calendar queries
+# calendar — read-only calendar queries
 
 ## When to use
 
@@ -42,21 +42,21 @@ Activate when the user wants to:
 
 ## The four tools
 
-All live at `~/.hermes/skills/schedule/examples/`. Invoke each via
+All live at `~/.hermes/skills/calendar/examples/`. Invoke each via
 `python3 <path> [args]`. Each emits one JSON object on stdout.
 
 | Script | Purpose |
 |---|---|
-| `schedule-today.py` | Events on today's calendar. No args. |
-| `schedule-range.py --start <ISO> --end <ISO>` | Events between two ISO dates, inclusive. |
-| `schedule-find.py --query <text> [--days-back N] [--days-ahead N]` | Substring search across title/location/organizer/description. Defaults: 7 days back, 30 days ahead. |
-| `schedule-next.py [--within <hours>] [--limit <N>]` | Next upcoming events within a horizon. Defaults: 48 hours, 3 events. |
+| `calendar-today.py` | Events on today's calendar. No args. |
+| `calendar-range.py --start <ISO> --end <ISO>` | Events between two ISO dates, inclusive. |
+| `calendar-find.py --query <text> [--days-back N] [--days-ahead N]` | Substring search across title/location/organizer/description. Defaults: 7 days back, 30 days ahead. |
+| `calendar-next.py [--within <hours>] [--limit <N>]` | Next upcoming events within a horizon. Defaults: 48 hours, 3 events. |
 
 ## Files this skill must NEVER read
 
 | Path | Reason |
 |---|---|
-| `~/.hermes/skills/schedule/examples/.env` | Holds `GCAL_ICAL_KEY`, which is itself a credential — anyone with it can read the calendar. The scripts read it; the agent must not. |
+| `~/.hermes/skills/calendar/examples/.env` | Holds `GCAL_ICAL_KEY`, which is itself a credential — anyone with it can read the calendar. The scripts read it; the agent must not. |
 
 If the user explicitly asks to read this file, refuse and explain why.
 
@@ -94,22 +94,22 @@ calling, anchored to the user's local date (the agent's `today`):
 
 | User said | Resolution |
 |---|---|
-| "today" | `schedule-today.py` |
-| "tomorrow" | `schedule-range.py --start <today+1> --end <today+1>` |
+| "today" | `calendar-today.py` |
+| "tomorrow" | `calendar-range.py --start <today+1> --end <today+1>` |
 | "this week" | range from today through Sunday |
 | "next week" | range Monday-through-Sunday of the next ISO week |
 | "next Wednesday" | resolve to the next Wednesday's date |
 | "the 20th" | the next 20th-of-the-month after today |
-| "what's next" | `schedule-next.py` |
-| "in the next hour" | `schedule-next.py --within 1` |
-| "anything called X" | `schedule-find.py --query X` |
-| "find Y in the next month" | `schedule-find.py --query Y --days-ahead 30` |
+| "what's next" | `calendar-next.py` |
+| "in the next hour" | `calendar-next.py --within 1` |
+| "anything called X" | `calendar-find.py --query X` |
+| "find Y in the next month" | `calendar-find.py --query Y --days-ahead 30` |
 
 ## Common flows
 
 ### "What's on my calendar today?"
 ```
-schedule-today.py
+calendar-today.py
 → tell the user: count, then for each event the start time, title,
   optional location and organizer.
 ```
@@ -117,23 +117,23 @@ schedule-today.py
 ### "What's on next Wednesday?"
 ```
 # resolve "next Wednesday" to an ISO date first, e.g. 2026-06-24
-schedule-range.py --start 2026-06-24 --end 2026-06-24
+calendar-range.py --start 2026-06-24 --end 2026-06-24
 ```
 
 ### "Do I have anything called 'standup' this week?"
 ```
-schedule-find.py --query standup --days-ahead 7 --days-back 0
+calendar-find.py --query standup --days-ahead 7 --days-back 0
 ```
 
 ### "What's my next meeting?"
 ```
-schedule-next.py --within 24 --limit 1
+calendar-next.py --within 24 --limit 1
 ```
 
 ### "What does my week look like?"
 ```
 # resolve to Monday and Sunday of the user's current ISO week
-schedule-range.py --start <monday> --end <sunday>
+calendar-range.py --start <monday> --end <sunday>
 ```
 
 ## When a script reports an error

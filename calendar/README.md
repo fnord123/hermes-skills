@@ -1,4 +1,4 @@
-# schedule
+# calendar
 
 Read-only calendar queries for the Hermes agent. Wraps the user's Google
 Calendar (or any iCal-compatible feed) behind four small CLI scripts that
@@ -103,7 +103,7 @@ This skill is intended to live in
 install into Hermes via:
 
 ```bash
-hermes skills install <repo URL pointing at schedule/>
+hermes skills install <repo URL pointing at calendar/>
 ```
 
 The scripts and library are stdlib-only — no `pip install` step required.
@@ -111,7 +111,7 @@ The scripts and library are stdlib-only — no `pip install` step required.
 ### 2. Configure the iCal feed
 
 ```bash
-cd ~/.hermes/skills/schedule/examples
+cd ~/.hermes/skills/calendar/examples
 cp .env.example .env
 $EDITOR .env
 ```
@@ -156,7 +156,7 @@ file daily-briefing uses):
 ### 5. Test it
 
 ```bash
-python3 schedule-today.py | python3 -m json.tool
+python3 calendar-today.py | python3 -m json.tool
 ```
 
 You should see today's events as structured JSON. If you get `"error":
@@ -164,42 +164,42 @@ You should see today's events as structured JSON. If you get `"error":
 
 ## The four scripts
 
-### `schedule-today.py`
+### `calendar-today.py`
 No args. Returns today's events in the configured timezone.
 
 ```bash
-python3 schedule-today.py
+python3 calendar-today.py
 ```
 
-### `schedule-range.py --start <ISO> --end <ISO>`
+### `calendar-range.py --start <ISO> --end <ISO>`
 List events in an inclusive date range. ISO dates only — no
 natural-language phrases. The agent resolves "tomorrow" / "next week" to
 ISO before calling.
 
 ```bash
-python3 schedule-range.py --start 2026-06-15 --end 2026-06-21
+python3 calendar-range.py --start 2026-06-15 --end 2026-06-21
 ```
 
 Returns one entry per day in the window (empty `events` array for empty
 days), so the agent can see structure even where there's nothing scheduled.
 
-### `schedule-find.py --query <text> [--days-back N] [--days-ahead N]`
+### `calendar-find.py --query <text> [--days-back N] [--days-ahead N]`
 Case-insensitive substring search across title, location, organizer, and
 description. Default window is 7 days back through 30 days ahead.
 
 ```bash
-python3 schedule-find.py --query dentist
-python3 schedule-find.py --query "standup" --days-ahead 7 --days-back 0
+python3 calendar-find.py --query dentist
+python3 calendar-find.py --query "standup" --days-ahead 7 --days-back 0
 ```
 
-### `schedule-next.py [--within <hours>] [--limit <N>]`
+### `calendar-next.py [--within <hours>] [--limit <N>]`
 Returns the next upcoming events within a time horizon. Defaults to 48
 hours and 3 events.
 
 ```bash
-python3 schedule-next.py
-python3 schedule-next.py --within 2 --limit 1   # next event in next 2h
-python3 schedule-next.py --within 168           # next event in next week
+python3 calendar-next.py
+python3 calendar-next.py --within 2 --limit 1   # next event in next 2h
+python3 calendar-next.py --within 168           # next event in next week
 ```
 
 All-day events count as "upcoming" until the day ends and "in progress"
@@ -238,17 +238,17 @@ JSON. Example response style:
 ## Files
 
 ```
-schedule/
+calendar/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
 └── examples/
     ├── .env.example
     ├── .gitignore
     ├── ical_lib.py                # shared iCal parser (stdlib-only)
-    ├── schedule-today.py
-    ├── schedule-range.py
-    ├── schedule-find.py
-    └── schedule-next.py
+    ├── calendar-today.py
+    ├── calendar-range.py
+    ├── calendar-find.py
+    └── calendar-next.py
 ```
 
 ## License

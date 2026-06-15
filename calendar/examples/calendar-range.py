@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""schedule-range.py — list events in a date range.
+"""calendar-range.py — list events in a date range.
 
 Read-only. Stdlib-only. Use this for:
   - "What does my week look like?"
