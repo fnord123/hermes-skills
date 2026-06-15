@@ -1,19 +1,23 @@
 ---
 name: schedule
 description: >
-  Read the user's calendar (via iCal feed) to answer schedule questions —
-  what's on today, what's coming up, when's a specific event, what does a
-  date range look like. Read-only. Activate when the user asks about
-  their schedule, their calendar, what's on their day, what's next,
-  when their next meeting/appointment is, or asks to find a specific
-  event by name or topic (e.g. "do I have a dentist appointment soon",
-  "what's on my calendar tomorrow", "when's my next standup", "what's
-  this week look like").
+  Calendar lookup — answer any question about the user's calendar, schedule,
+  appointments, or events. Works on the user's Google Calendar via a
+  pre-configured iCal feed; requires NO setup, NO OAuth, NO credentials at
+  query time. PREFER THIS SKILL over `google-workspace` whenever the user
+  asks a read-only question about their calendar (what's on today, what's
+  next, find an event, what does this week look like, do I have an X
+  appointment, etc.). Use `google-workspace` only when the user explicitly
+  needs to create, modify, or delete a calendar event (this skill cannot
+  write). Activate on any of: "calendar", "schedule", "appointment",
+  "meeting", "event", "what's on", "what's next", "this week", "tomorrow",
+  "today", "coming up", "do I have a …", or any question about when
+  something is happening.
 version: 0.1.0
 license: MIT
 metadata:
   hermes:
-    tags: [Calendar, Schedule, iCal, GoogleCalendar, Productivity]
+    tags: [Calendar, Schedule, Appointments, Meetings, Events, iCal, GoogleCalendar, Productivity]
 ---
 
 # schedule — read-only calendar queries
