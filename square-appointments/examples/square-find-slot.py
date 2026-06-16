@@ -269,6 +269,45 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
             break
         obs["selected_date"] = selected_date.isoformat() if selected_date else None
 
+        # Anchor: the Sunday at or before today. Square's week-view rows
+        # always start on Sunday, so we can resolve a `date-N` testid to a
+        # calendar date by counting week advances from this anchor — even
+        # across month transitions where the visible header is ambiguous.
+        anchor_sunday = today - timedelta(days=(today.weekday() + 1) % 7)
+
+        def _resolve_date_testid(day_n: int, advances: int) -> "date | None":
+            """Given `date-<day_n>` and how many weeks we've advanced from
+            initial, return the actual calendar date. Checks the past /
+            present / future weeks of the current view in turn (Square's
+            picker shows three weeks at a time)."""
+            present_start = anchor_sunday + timedelta(weeks=advances)
+            for week_offset in (0, 1, -1):
+                week_start = present_start + timedelta(weeks=week_offset)
+                for day_offset in range(7):
+                    d = week_start + timedelta(days=day_offset)
+                    if d.day == day_n:
+                        return d
+            return None
+
+        def _advance_week_via_js() -> bool:
+            """Square's `next-week-button` is `display:none` in headless but
+            its click handler still works. We dispatch it via JS, which
+            advances the calendar AND triggers Square to fetch availability
+            data for the now-visible new future-week."""
+            try:
+                result = page.evaluate("""() => {
+                    const btn = document.querySelector('[data-testid="next-week-button"]');
+                    if (!btn) return 'not_found';
+                    btn.click();
+                    return 'clicked';
+                }""")
+                if result == "clicked":
+                    page.wait_for_timeout(3000)
+                    return True
+            except Exception:
+                pass
+            return False
+
         # Helper: read time-slot labels currently rendered on the page.
         def _read_slot_labels() -> list[str]:
             out: list[str] = []
@@ -337,37 +376,55 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
         obs["slot_count_on_selected"] = len(first_labels)
         _emit_if_in_window(selected_date, first_labels)
 
-        # Walk additional visible future dates and collect their slots too.
-        # Clicking a date with availability changes the selection; Square
-        # silently ignores clicks on no-availability dates. We use that to
-        # distinguish: if the selection didn't change after a click, the
-        # date has no slots, so we skip it.
-        if len(obs["slots"]) < target_emit:
-            vis = _visible_month(page)
+        # Walk visible dates and advance weeks until we have enough slots OR
+        # we run past the user's acceptance window. Key insight: the
+        # `next-week-button` is CSS-hidden but its JS click handler still
+        # fires — and Square only loads availability for the current visible
+        # weeks, so without advancing we'd miss every slot beyond today's
+        # week. The `disabled` attribute on each `date-N` cell tells us
+        # whether availability data has arrived for it; pre-availability
+        # cells are stuck `disabled=''` until a week-advance triggers the
+        # fetch.
+        max_week_advances = 4
+        advances = 0
+        obs["candidate_dates_tried"] = []
+        already_clicked_dates: set[str] = set()
+
+        while len(obs["slots"]) < target_emit and advances <= max_week_advances:
+            # Build the list of clickable candidate dates currently visible.
+            # We restrict to non-disabled cells in the present-week and
+            # future-week rows (skipping past-week which is always disabled).
             candidates: list[tuple["date", str]] = []
-            if vis:
-                for el in page.locator('[data-testid^="date-"]').all():
-                    tid = el.get_attribute("data-testid") or ""
-                    m_tid = re.match(r"date-(\d+)(?:-selected)?$", tid)
-                    if not m_tid:
-                        continue
-                    try:
-                        d_candidate = date(vis[0], vis[1], int(m_tid.group(1)))
-                    except ValueError:
-                        continue
-                    if d_candidate < today:
-                        continue
-                    if d_candidate > latest_acceptable:
-                        continue
-                    candidates.append((d_candidate, tid))
-            # Visit each candidate date in ascending order, skipping the one
-            # already covered by the next-available landing.
+            for el in page.locator('[data-testid^="date-"]').all():
+                tid = el.get_attribute("data-testid") or ""
+                m_tid = re.match(r"date-(\d+)(?:-selected)?$", tid)
+                if not m_tid:
+                    continue
+                # disabled='' means "not clickable / no availability"; None
+                # means "selectable" — exactly the signal we need.
+                if el.get_attribute("disabled") is not None:
+                    continue
+                d_candidate = _resolve_date_testid(int(m_tid.group(1)), advances)
+                if d_candidate is None:
+                    continue
+                if d_candidate < today or d_candidate > latest_acceptable:
+                    continue
+                key = d_candidate.isoformat()
+                if key in already_clicked_dates:
+                    continue
+                candidates.append((d_candidate, tid))
+
             candidates.sort(key=lambda x: x[0])
-            obs["candidate_dates_tried"] = []
+
             for d_candidate, tid in candidates:
                 if len(obs["slots"]) >= target_emit:
                     break
+                key = d_candidate.isoformat()
+                # If this date is already the selection, just read slots —
+                # no click needed (and a redundant click could de-select).
                 if d_candidate == selected_date:
+                    already_clicked_dates.add(key)
+                    _emit_if_in_window(d_candidate, _read_slot_labels())
                     continue
                 try:
                     page.locator(
@@ -376,14 +433,32 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
                     page.wait_for_timeout(2200)
                 except Exception:
                     continue
+                already_clicked_dates.add(key)
                 new_sel = _read_selected_date()
                 obs["candidate_dates_tried"].append({
-                    "date": d_candidate.isoformat(),
+                    "date": key,
                     "selected_after_click": new_sel.isoformat() if new_sel else None,
+                    "week_advance": advances,
                 })
                 if new_sel != d_candidate:
+                    # Click was silently ignored — date had no slots after
+                    # all. Move on.
                     continue
-                _emit_if_in_window(new_sel, _read_slot_labels())
+                selected_date = new_sel
+                _emit_if_in_window(d_candidate, _read_slot_labels())
+
+            if len(obs["slots"]) >= target_emit:
+                break
+            # If the user's acceptance window extends past what's currently
+            # visible, advance a week and try again. Otherwise stop.
+            present_end = (anchor_sunday + timedelta(weeks=advances)
+                           + timedelta(days=13))  # present-week + future-week
+            if latest_acceptable <= present_end:
+                break
+            if not _advance_week_via_js():
+                break
+            advances += 1
+        obs["week_advances_used"] = advances
 
         if probe:
             try:
