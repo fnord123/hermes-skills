@@ -269,42 +269,121 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
             break
         obs["selected_date"] = selected_date.isoformat() if selected_date else None
 
-        # Read all time-slot testids on the current view.
-        slot_labels: list[str] = []
-        seen: set[str] = set()
-        for n in page.locator('[data-testid="time-slot"]').all():
-            try:
-                txt = (n.text_content() or "").strip()
-            except Exception:
-                continue
-            m = _TIME_SLOT_RE.search(txt)
-            if not m:
-                continue
-            label = f"{m.group(1)} {m.group(2).upper()}"
-            if label in seen:
-                continue
-            seen.add(label)
-            slot_labels.append(label)
-            if len(slot_labels) >= 5:
-                break
-        obs["slot_count_on_selected"] = len(slot_labels)
+        # Helper: read time-slot labels currently rendered on the page.
+        def _read_slot_labels() -> list[str]:
+            out: list[str] = []
+            seen_local: set[str] = set()
+            for n in page.locator('[data-testid="time-slot"]').all():
+                try:
+                    txt = (n.text_content() or "").strip()
+                except Exception:
+                    continue
+                m = _TIME_SLOT_RE.search(txt)
+                if not m:
+                    continue
+                lab = f"{m.group(1)} {m.group(2).upper()}"
+                if lab in seen_local:
+                    continue
+                seen_local.add(lab)
+                out.append(lab)
+            return out
 
-        # Emit slots if landing date is within window_days of target.
-        if selected_date and slot_labels:
-            earliest = target_date - timedelta(days=window_days)
-            latest = target_date + timedelta(days=window_days)
-            if earliest <= selected_date <= latest:
-                for label in slot_labels:
-                    obs["slots"].append({
-                        "slot_handle": json.dumps({
-                            "service_url": url,
-                            "date": selected_date.isoformat(),
-                            "time": label,
-                        }, sort_keys=True, separators=(",", ":")),
-                        "start_time": f"{selected_date.isoformat()} {label}",
-                        "label": label,
-                        "date": selected_date.isoformat(),
-                    })
+        # Helper: read the currently-selected date in the picker.
+        def _read_selected_date() -> "date | None":
+            for sel_loc_inner in page.locator('[data-testid$="-selected"]').all():
+                tid_inner = sel_loc_inner.get_attribute("data-testid") or ""
+                m_inner = re.match(r"date-(\d+)-selected", tid_inner)
+                if not m_inner:
+                    continue
+                vis_inner = _visible_month(page)
+                if not vis_inner:
+                    continue
+                try:
+                    return date(vis_inner[0], vis_inner[1], int(m_inner.group(1)))
+                except ValueError:
+                    return None
+            return None
+
+        # First date's slots: read what 'Go to next available' landed on.
+        emitted: set[tuple[str, str]] = set()
+        target_emit = 5
+        earliest_acceptable = target_date - timedelta(days=window_days)
+        latest_acceptable = target_date + timedelta(days=window_days)
+
+        def _emit_if_in_window(d: "date | None", labels: list[str]) -> None:
+            if not d or not labels:
+                return
+            if not (earliest_acceptable <= d <= latest_acceptable):
+                return
+            for lab in labels:
+                key = (d.isoformat(), lab)
+                if key in emitted:
+                    continue
+                emitted.add(key)
+                obs["slots"].append({
+                    "slot_handle": json.dumps({
+                        "service_url": url,
+                        "date": d.isoformat(),
+                        "time": lab,
+                    }, sort_keys=True, separators=(",", ":")),
+                    "start_time": f"{d.isoformat()} {lab}",
+                    "label": lab,
+                    "date": d.isoformat(),
+                })
+                if len(obs["slots"]) >= target_emit:
+                    return
+
+        first_labels = _read_slot_labels()
+        obs["slot_count_on_selected"] = len(first_labels)
+        _emit_if_in_window(selected_date, first_labels)
+
+        # Walk additional visible future dates and collect their slots too.
+        # Clicking a date with availability changes the selection; Square
+        # silently ignores clicks on no-availability dates. We use that to
+        # distinguish: if the selection didn't change after a click, the
+        # date has no slots, so we skip it.
+        if len(obs["slots"]) < target_emit:
+            vis = _visible_month(page)
+            candidates: list[tuple["date", str]] = []
+            if vis:
+                for el in page.locator('[data-testid^="date-"]').all():
+                    tid = el.get_attribute("data-testid") or ""
+                    m_tid = re.match(r"date-(\d+)(?:-selected)?$", tid)
+                    if not m_tid:
+                        continue
+                    try:
+                        d_candidate = date(vis[0], vis[1], int(m_tid.group(1)))
+                    except ValueError:
+                        continue
+                    if d_candidate < today:
+                        continue
+                    if d_candidate > latest_acceptable:
+                        continue
+                    candidates.append((d_candidate, tid))
+            # Visit each candidate date in ascending order, skipping the one
+            # already covered by the next-available landing.
+            candidates.sort(key=lambda x: x[0])
+            obs["candidate_dates_tried"] = []
+            for d_candidate, tid in candidates:
+                if len(obs["slots"]) >= target_emit:
+                    break
+                if d_candidate == selected_date:
+                    continue
+                try:
+                    page.locator(
+                        f'market-button[data-testid="{tid}"], [data-testid="{tid}"]'
+                    ).first.click(timeout=3000)
+                    page.wait_for_timeout(2200)
+                except Exception:
+                    continue
+                new_sel = _read_selected_date()
+                obs["candidate_dates_tried"].append({
+                    "date": d_candidate.isoformat(),
+                    "selected_after_click": new_sel.isoformat() if new_sel else None,
+                })
+                if new_sel != d_candidate:
+                    continue
+                _emit_if_in_window(new_sel, _read_slot_labels())
 
         if probe:
             try:
