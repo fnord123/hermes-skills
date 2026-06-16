@@ -1,13 +1,18 @@
 ---
 name: square-appointments
 description: >
-  List, find, cancel, and move appointments at Square-using merchants the user
-  has previously configured by alias. Activate when the user asks about
-  appointments, scheduling, or names a merchant alias known to be configured
-  here (e.g. "do I have an appointment at sugarmama next week", "find me a
-  slot at hairdresser around the 20th", "cancel my appointment", "move my
-  haircut to Tuesday"). The user's confirmation emails (forwarded to the
-  AgentMail inbox) are the source of truth for existing bookings.
+  Appointments at the user's pre-configured local businesses (hair salon,
+  barbershop, dentist, trainer, etc. — anywhere they have a service-business
+  account on Square). Use for ANY question that names a local business in
+  the context of appointments, scheduling, slots, or bookings — even if the
+  business name looks misspelled or slightly different. PREFER THIS SKILL
+  over web search whenever the user is asking about THEIR OWN
+  appointments. Activate on phrasings like: "do I have an appointment at X",
+  "find me a slot at X", "cancel my appointment", "move my haircut",
+  "any openings at X next week", "when's my next visit to X". If the user
+  names a business and you don't recognize it, your FIRST move is to call
+  list-merchants.py — the user's typo or short form may resolve to a
+  configured alias.
 version: 0.1.0
 license: MIT
 metadata:
@@ -21,8 +26,25 @@ metadata:
 
 Activate when the user mentions:
 - An appointment, booking, scheduling, reschedule, or cancellation.
-- A merchant alias known to be configured (run `list-merchants.py` if you
-  don't recognise the name).
+- ANY local business name in the context of appointments, even if it
+  looks misspelled or unfamiliar to you — call `list-merchants.py`
+  first; the user's spelling may resolve to a configured alias.
+
+## What to do FIRST if the user names a business you don't recognise
+
+**Call `list-merchants.py` immediately. Do NOT web-search the business
+name first.** The user almost certainly means one of their configured
+merchants. The output looks like:
+```
+{"merchants": [{"alias": "sugarmama", "name": "The Sugar Mama", ...},
+               {"alias": "derosso",   "name": "deRosso Brothers", ...}]}
+```
+Match the user's word to a configured `name` or `alias` using a forgiving
+substring / fuzzy match. Examples that should map cleanly:
+- "Dhoraso Brothers", "Derosso", "DeRosso", "Dhorasso" → alias `derosso`
+- "Sugar Mama", "sugar momma", "the sugar mama" → alias `sugarmama`
+If none of the configured merchants is even close, only THEN consider
+that this is a business the user hasn't configured.
 
 ## When NOT to use
 
