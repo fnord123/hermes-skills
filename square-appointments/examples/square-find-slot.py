@@ -23,7 +23,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -201,14 +201,25 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
 
         obs["url_after_clicks"] = page.url
 
-        # ── Date-picker navigation ─────────────────────────────────────────
-        # Square's availability page renders a week-view picker. data-testids:
-        #   weekview-date-picker, prior-week-button, next-week-button,
-        #   past-week, present-week, future-week,
-        #   date-<day-of-month>  (e.g. date-15)
-        # Today's cell is `date-<day>-selected`. Each visible week spans 7
-        # day cells. We advance the week until the target date is selectable,
-        # then click it.
+        # ── Availability + slot extraction ────────────────────────────────
+        # Square's availability page renders a 3-week strip with one date
+        # auto-selected and time slots for that date below. Important
+        # behaviours we discovered empirically:
+        #   • Clicking `date-N` only takes effect if that date has availability.
+        #     Dates without slots silently ignore the click and the selection
+        #     reverts to whatever was selected before.
+        #   • The "Go to next available" link is a reliable entry point: it
+        #     jumps the selection to the soonest date that actually has slots
+        #     within the visible window.
+        #   • Time slots render as elements with `data-testid="time-slot"`
+        #     whose text is the start time, e.g. "9:30 AM".
+        #   • The currently-selected date carries `data-testid="date-<n>-selected"`.
+        #   • The visible month is parseable from the `availability-page`
+        #     element's text header (e.g. "Jun 2026").
+        # The strategy below: click "Go to next available", read what landed,
+        # and emit those slots if the landing date is within window_days of
+        # the user's target. If it's beyond window, fall through to the URL
+        # fallback so the user can drive a wider browser session themselves.
         try:
             page.locator('[data-testid="availability-page"]').first.wait_for(timeout=8000)
         except Exception as e:
@@ -218,7 +229,8 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
 
         today = datetime.now().date()
         target_date = target_dt.date()
-        clicked_date = False
+        window_days = 14  # acceptance window around target for "around X" semantics
+
         if probe:
             obs["available_date_testids"] = [
                 d.get_attribute("data-testid")
@@ -226,82 +238,73 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
                 if d.get_attribute("data-testid")
             ]
 
-        # Cap iterations so we never hang if the picker doesn't advance.
-        max_week_advances = 20
-        for _ in range(max_week_advances):
-            target_tid = f"date-{target_date.day}"
-            target_loc = page.locator(f'[data-testid="{target_tid}"], [data-testid="{target_tid}-selected"]').first
-            # The week-view shows 3 weeks at a time. We check whether the
-            # target day-of-month is visible; if multiple months share the
-            # same day-of-month visible, we cross-check using the week-row
-            # labels which include short month names.
-            if target_loc.count() and _date_in_current_view(page, target_date):
-                try:
-                    target_loc.click(timeout=4000)
-                    obs["click_log"].append({"label": "target_date",
-                                             "selector": target_tid,
-                                             "url_after": page.url})
-                    clicked_date = True
-                    page.wait_for_timeout(2500)
-                    break
-                except Exception as e:
-                    obs["click_log"].append({"label": "target_date",
-                                             "error": str(e).splitlines()[0][:160]})
-                    break
-            # Not yet visible: jump a week forward (or backward if target is
-            # in the past, which shouldn't happen given parse_around but is
-            # safe to handle).
-            direction = "next-week-button" if target_date >= today else "prior-week-button"
+        # Click "Go to next available" to advance to the soonest date with slots.
+        # If it's not present (the default-selected date already has slots),
+        # the click silently fails and we proceed with the current selection.
+        try:
+            gtn = page.locator('text="Go to next available"').first
+            if gtn.count():
+                gtn.click(timeout=4000)
+                page.wait_for_timeout(4000)
+                obs["click_log"].append({"label": "go_to_next_available",
+                                         "url_after": page.url})
+        except Exception as e:
+            obs["click_log"].append({"label": "go_to_next_available",
+                                     "error": str(e).splitlines()[0][:160]})
+
+        # Read currently-selected date (day-of-month) and visible month.
+        selected_date = None
+        for sel_loc in page.locator('[data-testid$="-selected"]').all():
+            tid = sel_loc.get_attribute("data-testid") or ""
+            m_day = re.match(r"date-(\d+)-selected", tid)
+            if not m_day:
+                continue
+            vis = _visible_month(page)
+            if not vis:
+                continue
             try:
-                page.locator(f'[data-testid="{direction}"]').first.click(timeout=4000)
-                page.wait_for_timeout(800)
-            except Exception:
-                break
+                selected_date = date(vis[0], vis[1], int(m_day.group(1)))
+            except ValueError:
+                continue
+            break
+        obs["selected_date"] = selected_date.isoformat() if selected_date else None
 
-        if not clicked_date:
-            obs["error_date_not_reachable"] = (
-                f"could not reach {target_date.isoformat()} from today "
-                f"({today.isoformat()}) in {max_week_advances} week advances"
-            )
-
-        # ── Time slots ─────────────────────────────────────────────────────
-        # After selecting a date the page lists available start times. They
-        # render as <market-button>s with text like "2:00 PM". We collect
-        # every distinct HH:MM AM/PM seen, dedupe in order, and return up to 5
-        # that are >= the target time (the agent picks "around the 20th" so
-        # we don't try to micro-optimise which slot of the day).
-        slot_buttons = page.locator(
-            'market-button:has-text("AM"), market-button:has-text("PM")'
-        ).all()
+        # Read all time-slot testids on the current view.
+        slot_labels: list[str] = []
         seen: set[str] = set()
-        for btn in slot_buttons:
+        for n in page.locator('[data-testid="time-slot"]').all():
             try:
-                txt = (btn.text_content() or "").strip()
+                txt = (n.text_content() or "").strip()
             except Exception:
                 continue
             m = _TIME_SLOT_RE.search(txt)
             if not m:
                 continue
-            time_label = f"{m.group(1)} {m.group(2).upper()}"
-            if time_label in seen:
+            label = f"{m.group(1)} {m.group(2).upper()}"
+            if label in seen:
                 continue
-            seen.add(time_label)
-            # slot_handle encodes everything cancel-step would need to
-            # *re-find* this slot deterministically: target date + time +
-            # service URL. For now we keep it as a small JSON blob the
-            # caller passes through opaquely.
-            slot_handle = json.dumps({
-                "service_url": url,
-                "date": target_date.isoformat(),
-                "time": time_label,
-            }, sort_keys=True, separators=(",", ":"))
-            obs["slots"].append({
-                "slot_handle": slot_handle,
-                "start_time": f"{target_date.isoformat()} {time_label}",
-                "label": time_label,
-            })
-            if len(obs["slots"]) >= 5:
+            seen.add(label)
+            slot_labels.append(label)
+            if len(slot_labels) >= 5:
                 break
+        obs["slot_count_on_selected"] = len(slot_labels)
+
+        # Emit slots if landing date is within window_days of target.
+        if selected_date and slot_labels:
+            earliest = target_date - timedelta(days=window_days)
+            latest = target_date + timedelta(days=window_days)
+            if earliest <= selected_date <= latest:
+                for label in slot_labels:
+                    obs["slots"].append({
+                        "slot_handle": json.dumps({
+                            "service_url": url,
+                            "date": selected_date.isoformat(),
+                            "time": label,
+                        }, sort_keys=True, separators=(",", ":")),
+                        "start_time": f"{selected_date.isoformat()} {label}",
+                        "label": label,
+                        "date": selected_date.isoformat(),
+                    })
 
         if probe:
             try:
@@ -311,6 +314,152 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
 
         browser.close()
     return obs
+
+
+def discover_merchant_config(alias: str) -> tuple[str, str, str]:
+    """Derive a merchant's booking_url + default_service_id from their most
+    recent confirmation email when those fields aren't set in merchants.json.
+
+    Returns (booking_url, default_service_id, service_name) on success;
+    raises SystemExit with a descriptive message otherwise.
+
+    Strategy:
+      1. Re-use square-list.py with a wide --days-back to find ANY past
+         booking for this merchant.
+      2. Take the most recent booking_handle (the Square manage URL).
+      3. Navigate to it. Square redirects to a confirmation page whose URL
+         encodes merchant_id and location_id; that's enough to compose
+         the public booking URL.
+      4. Scrape the displayed service name from the confirmation page,
+         then click on a matching service tile from /services and read the
+         resulting `/services/<id>` segment.
+
+    This costs roughly one extra browser session relative to the normal
+    flow and saves the user from a manual merchants.json setup step. It is
+    only triggered when at least one of booking_url / default_service_id
+    is missing.
+    """
+    sl = SCRIPT_DIR / "square-list.py"
+    try:
+        res = subprocess.run(
+            [sys.executable, str(sl), "--merchant", alias, "--days-back", "730"],
+            capture_output=True, text=True, timeout=90,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"auto-discover: square-list timed out looking up '{alias}'")
+    if res.returncode != 0:
+        raise SystemExit(f"auto-discover: square-list failed: {(res.stderr or res.stdout)[:200]}")
+    try:
+        bookings = json.loads(res.stdout).get("bookings", [])
+    except json.JSONDecodeError:
+        raise SystemExit("auto-discover: square-list returned non-JSON output")
+    if not bookings:
+        raise SystemExit(
+            f"auto-discover: no past or upcoming bookings found for merchant '{alias}'. "
+            f"Either configure booking_url and default_service_id in merchants.json, "
+            f"or book at least once at this merchant so a confirmation email exists."
+        )
+
+    bookings.sort(key=lambda b: b.get("start_time_iso") or "", reverse=True)
+    handle = bookings[0].get("booking_handle")
+    if not handle:
+        raise SystemExit("auto-discover: latest booking had no manage URL to follow")
+
+    with Stealth().use_sync(sync_playwright()) as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        )
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="en-US",
+        )
+        page = ctx.new_page()
+        try:
+            page.goto(handle, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            browser.close()
+            raise SystemExit(f"auto-discover: couldn't open manage URL: {str(e).splitlines()[0][:200]}")
+        page.wait_for_timeout(4000)
+        final = page.url
+        m_url = re.search(
+            r"book\.squareup\.com/appointments/([^/]+)/location/([^/]+)/",
+            final,
+        )
+        if not m_url:
+            browser.close()
+            raise SystemExit(
+                f"auto-discover: redirect URL not in expected shape: {final[:200]}"
+            )
+        merchant_id, location_id = m_url.group(1), m_url.group(2)
+        booking_url = (
+            f"https://book.squareup.com/appointments/"
+            f"{merchant_id}/location/{location_id}/services"
+        )
+
+        # Read service name from the confirmation page body. Heuristic:
+        # the service name shows just above the "Location" header, sandwiched
+        # between an action-button label ("Book next appointment"), a staff
+        # line ("with <name>"), and possibly staff initials. We walk
+        # backwards from "Location" and skip known UI noise until we find
+        # what looks like a service name.
+        _SKIP_LINES = {
+            "Paid", "Thank you for your payment.",
+            "Book next appointment", "Cancel", "Reschedule",
+            "Cancellation policy", "Appointment passed", "Upcoming",
+        }
+        service_name: str | None = None
+        try:
+            body_text = page.locator("body").inner_text()
+            lines = [l.strip() for l in body_text.splitlines() if l.strip()]
+            if "Location" in lines:
+                loc_idx = lines.index("Location")
+                for back in range(1, 10):
+                    if loc_idx - back < 0:
+                        break
+                    candidate = lines[loc_idx - back]
+                    if (
+                        candidate
+                        and len(candidate) > 2  # skip staff initials like "lu"
+                        and not candidate.startswith("$")
+                        and not candidate.startswith("with ")
+                        and candidate not in _SKIP_LINES
+                        and "Cancellation" not in candidate
+                        and "policy" not in candidate.lower()
+                    ):
+                        service_name = candidate
+                        break
+        except Exception:
+            pass
+
+        # Navigate to the /services catalog and try to find a tile whose
+        # visible text contains the service name. We use a substring match
+        # rather than equality because Square shows e.g. "Buzz cut (all one
+        # length)" and the user-facing displayed name can differ slightly.
+        service_id: str | None = None
+        try:
+            page.goto(booking_url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(4000)
+            if service_name:
+                page.get_by_text(service_name).first.click(timeout=5000)
+                page.wait_for_timeout(3000)
+                m_sid = re.search(r"/services/([^/?#]+)", page.url)
+                if m_sid:
+                    service_id = m_sid.group(1)
+        except Exception:
+            pass
+        browser.close()
+
+    if not service_id:
+        raise SystemExit(
+            f"auto-discover: found merchant_id={merchant_id} location_id={location_id} "
+            f"but couldn't infer default_service_id from the past booking's service "
+            f"name ({service_name!r}). Set default_service_id manually in merchants.json."
+        )
+
+    return booking_url, service_id, service_name or ""
 
 
 _MONTH_NUM = {
@@ -398,46 +547,75 @@ def main() -> int:
 
     booking_url = (cfg.get("booking_url") or "").strip()
     service_id = (cfg.get("default_service_id") or "").strip()
+    discovered_note: str | None = None
     if not booking_url or not service_id:
-        print(json.dumps({
-            "status": "error",
-            "reason": f"merchant '{args.merchant}' needs booking_url and default_service_id configured in merchants.json",
-        }, indent=2))
-        return 2
+        # Auto-discover from the most recent confirmation email rather than
+        # forcing the user to fill out merchants.json by hand. Costs one
+        # extra browser session; ignored when both fields are already set.
+        try:
+            d_url, d_sid, d_svc = discover_merchant_config(args.merchant)
+            if not booking_url:
+                booking_url = d_url
+            if not service_id:
+                service_id = d_sid
+            discovered_note = (
+                f"Auto-discovered merchant config from past booking "
+                f"(service: {d_svc!r}). Consider copying booking_url and "
+                f"default_service_id into merchants.json to skip this step "
+                f"on future calls."
+            )
+        except SystemExit as e:
+            print(json.dumps({
+                "status": "error",
+                "reason": str(e),
+                "merchant_alias": args.merchant,
+            }, indent=2))
+            return 2
 
     url = _service_url(booking_url, service_id)
     obs = scrape_service_page(url, target, probe=args.probe)
+    if discovered_note:
+        obs["discovered_note"] = discovered_note
 
     if args.probe:
         print(json.dumps({"status": "probe", "observations": obs}, indent=2))
         return 0
 
     if obs.get("slots"):
-        print(json.dumps({
+        out = {
             "status": "ok",
             "target_date": target.date().isoformat(),
             "slots": obs["slots"],
-        }, indent=2))
+        }
+        if discovered_note:
+            out["discovered_note"] = discovered_note
+        print(json.dumps(out, indent=2))
         return 0
 
-    # No collision AND no slot scrape: degrade gracefully and return the
-    # booking URL so the user can finish the booking themselves. This is
-    # honest about Square's date-picker fragility — the controls Square
-    # exposes (`next-week-button`, etc.) are CSS-hidden in current pages,
-    # and there isn't an obvious public alternative for the agent to drive.
-    print(json.dumps({
-        "status": "no_collision_use_url",
+    # No collision AND no slots scraped within window — surface the URL so
+    # the user can drive a wider browser session themselves. The most common
+    # cause is that the next available date is beyond ±14 days of the
+    # target; less commonly the calendar didn't render anything Square
+    # considered selectable.
+    out = {
+        "status": "no_slots_in_window_use_url",
         "target_date": target.date().isoformat(),
         "merchant_alias": args.merchant,
         "merchant_name": merchants[args.merchant].get("name"),
         "booking_url": url,
+        "next_available_date": obs.get("selected_date"),
         "message": (
-            "No existing appointment in the ±{}-day window. The agent can't "
-            "scrape time slots automatically (Square's calendar advances are "
-            "hidden behind CSS), so open the booking URL in a browser to pick "
-            "a time."
-        ).format(args.window_days),
-    }, indent=2))
+            "No appointment in the ±{}-day collision window, and the "
+            "merchant's next available date {} isn't within ±14 days of "
+            "the target. Open the booking URL in a browser to pick a time."
+        ).format(
+            args.window_days,
+            f"({obs.get('selected_date')})" if obs.get("selected_date") else "(unknown)",
+        ),
+    }
+    if discovered_note:
+        out["discovered_note"] = discovered_note
+    print(json.dumps(out, indent=2))
     return 0
 
 

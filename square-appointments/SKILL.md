@@ -119,11 +119,17 @@ Three response shapes; relay each to the user differently:
   (square-move.py) rather than book a new one.
 - **`status="ok"`** with a `slots` array: present the listed time options
   and ask the user which to take.
-- **`status="no_collision_use_url"`**: there's no existing appointment in
-  the window, but the agent can't scrape Square's date picker reliably
-  (Square's UI hides week-advance controls behind CSS). Give the user the
-  `booking_url` and ask them to pick a slot in their browser. Do NOT
+- **`status="no_slots_in_window_use_url"`**: no existing appointment AND
+  the merchant's next available date is more than ±14 days from the user's
+  target. The response includes `booking_url` (open in browser) and
+  `next_available_date` (what we DID find — useful to tell the user e.g.
+  "they have nothing in your window, soonest is 2026-08-04"). Do NOT
   pretend you booked something — you didn't.
+- **`discovered_note`** (any status): may appear if the merchant's
+  `booking_url` / `default_service_id` weren't pre-configured. The script
+  derived them automatically from the user's most recent confirmation
+  email. The note is informational; you don't need to surface it unless
+  the user asks why this was slow.
 
 ### "Cancel my sugarmama appointment on the 18th at 2pm."
 ```
