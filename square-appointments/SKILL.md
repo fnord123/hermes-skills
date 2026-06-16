@@ -40,11 +40,29 @@ merchants. The output looks like:
                {"alias": "derosso",   "name": "deRosso Brothers", ...}]}
 ```
 Match the user's word to a configured `name` or `alias` using a forgiving
-substring / fuzzy match. Examples that should map cleanly:
-- "Dhoraso Brothers", "Derosso", "DeRosso", "Dhorasso" → alias `derosso`
-- "Sugar Mama", "sugar momma", "the sugar mama" → alias `sugarmama`
-If none of the configured merchants is even close, only THEN consider
-that this is a business the user hasn't configured.
+match. Consider ALL of these forms — don't only look for substring matches:
+
+- **Typos and minor spelling variants**: "DeRosso", "Derosso", "deRosso",
+  "Dhorasso" → all map to alias `derosso`.
+- **Phonetic / sound-alike homonyms** (THIS IS LOAD-BEARING — the local
+  qwen model has been observed missing these): say each candidate alias
+  out loud and ask "does this sound like what the user said, even if it's
+  spelled very differently?" For instance, "Dhoraso Brothers" sounds like
+  "deRosso Brothers" — same number of syllables, similar consonants and
+  vowels — so it maps to alias `derosso`.
+- **Short forms and partial names**: "sugar momma", "the sugar mama",
+  "Sugar Mama's" → alias `sugarmama`. "DR" or "deR" by themselves are
+  too ambiguous; ask the user to clarify.
+- **Different word order**: "brothers DeRosso" → alias `derosso`.
+
+Be aggressive about claiming a match. If the user's word is even
+plausibly a configured merchant — by spelling OR by sound — proceed with
+that alias and tell the user what you matched it to ("I'm reading that
+as deRosso Brothers — is that right?"). The cost of guessing wrong is a
+single clarifying question; the cost of going to web search and giving up
+is a much worse user experience. Only conclude "this isn't a configured
+merchant" after considering both spelling and phonetic similarity for
+every configured alias.
 
 ## When NOT to use
 
