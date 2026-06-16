@@ -41,7 +41,7 @@ lines or plain text) the agent can relay to the user directly.
 | Script | Purpose | Mutating? |
 |---|---|---|
 | `list-merchants.py` | Show the configured merchant aliases. | No |
-| `square-list.py --merchant <alias>` | List the user's upcoming appointments at one merchant, parsed from their AgentMail confirmation emails. | No |
+| `square-list.py --merchant <alias> [--days-back <N>] [--days-ahead <N>]` | List the user's appointments at one merchant, parsed from their AgentMail confirmation emails. Defaults to upcoming only (60 days ahead, 0 back). Pass `--days-back 90` (or higher) when the user asks about *past* appointments. | No |
 | `square-find-slot.py --merchant <alias> --around <date-or-relative>` | Check for collision with existing booking; if none, return up to 5 available slots near the target date. | No |
 | `square-cancel.py --merchant <alias> --booking-handle <h> --confirm-time <ISO>` | Cancel a specific existing booking. | Yes |
 | `square-move.py --merchant <alias> --booking-handle <h> --new-slot <slot-handle> --confirm-time <ISO>` | Move an existing booking to a new slot (atomic). | Yes |
@@ -90,6 +90,23 @@ square-list.py --merchant sugarmama
 → filter / inspect results for matches in the next 7 days
 → relay to user
 ```
+
+### "Have I ever had an appointment at sugarmama?" / "When was my last visit to derosso?"
+The default `square-list.py` invocation returns only upcoming bookings.
+For ANY question about past or historical appointments, pass `--days-back`:
+```
+square-list.py --merchant derosso --days-back 180        # last 6 months
+square-list.py --merchant sugarmama --days-back 365      # last year
+```
+For a question phrased as "upcoming OR past" (covers both), pass both
+`--days-back` and the implicit default `--days-ahead`:
+```
+square-list.py --merchant derosso --days-back 180 --days-ahead 60
+```
+If the script returns `bookings: []` with `--days-back 0`, that does NOT
+mean the user has never had an appointment there — only that they have no
+*upcoming* ones. Always re-run with `--days-back` before telling the user
+they've never visited.
 
 ### "Find me a slot at sugarmama around the 20th."
 ```

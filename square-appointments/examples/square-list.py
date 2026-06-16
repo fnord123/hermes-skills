@@ -271,9 +271,11 @@ def _try_parse_iso(date_phrase: str, time_phrase: str) -> str | None:
     return None
 
 
-def _is_upcoming(start_iso: str | None, horizon_days: int) -> bool:
-    """If we successfully parsed an ISO time, gate on it being in the future
-    and within horizon. If not, default to including (the agent can decide)."""
+def _in_window(start_iso: str | None, days_back: int, days_ahead: int) -> bool:
+    """Gate an event's start time to [now - days_back, now + days_ahead].
+    If we couldn't parse the time, default to including it — the agent can
+    decide what to do with an undated booking rather than us silently
+    dropping it."""
     if not start_iso:
         return True
     try:
@@ -281,14 +283,20 @@ def _is_upcoming(start_iso: str | None, horizon_days: int) -> bool:
     except ValueError:
         return True
     now = datetime.now()
-    return now <= dt <= now + timedelta(days=horizon_days)
+    return (now - timedelta(days=days_back)) <= dt <= (now + timedelta(days=days_ahead))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--merchant", required=True, help="Merchant alias from merchants.json.")
-    ap.add_argument("--horizon-days", type=int, default=60, help="Include parsed appts up to N days ahead. Default 60.")
-    ap.add_argument("--lookback-days", type=int, default=180, help="How far back to search the inbox for confirmation emails. Default 180.")
+    ap.add_argument("--days-ahead", "--horizon-days", dest="days_ahead", type=int, default=60,
+                    help="Include parsed appts up to N days ahead. Default 60.")
+    ap.add_argument("--days-back", dest="days_back", type=int, default=0,
+                    help="Also include past bookings up to N days back. Default 0 (upcoming only). "
+                         "Pass a positive value (e.g. 180) when the user asks about past appointments.")
+    ap.add_argument("--lookback-days", type=int, default=180,
+                    help="How far back to search the inbox for confirmation emails. Default 180. "
+                         "Distinct from --days-back: this is the email-search window, that is the output-filter window.")
     ap.add_argument("--probe", action="store_true", help="Dump matched-thread headers + raw email text for tuning. Does not parse or filter.")
     args = ap.parse_args()
 
@@ -356,7 +364,7 @@ def main() -> int:
         if not parsed["booking_handle"]:
             skipped.append({"thread_id": tid, "reason": "no manage URL found"})
             continue
-        if not _is_upcoming(parsed["start_time_iso"], args.horizon_days):
+        if not _in_window(parsed["start_time_iso"], args.days_back, args.days_ahead):
             continue
         bookings.append({
             "merchant_alias": args.merchant,
