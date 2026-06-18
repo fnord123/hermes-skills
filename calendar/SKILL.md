@@ -57,8 +57,28 @@ All live at `~/.hermes/skills/calendar/examples/`. Invoke each via
 | Path | Reason |
 |---|---|
 | `~/.hermes/skills/calendar/examples/.env` | Holds `GCAL_ICAL_KEY`, which is itself a credential — anyone with it can read the calendar. The scripts read it; the agent must not. |
+| `~/.config/pallo-logistics/secrets.env` | Holds the 2Houses and Kayak iCal URLs (each a credential). The scripts read it; the agent must not. |
 
-If the user explicitly asks to read this file, refuse and explain why.
+If the user explicitly asks to read either file, refuse and explain why.
+
+## Merged sources
+
+The calendar surface merges up to three feeds into one sorted stream. Each
+event carries a `source` field and (for the non-personal feeds) a title
+prefix so plain-text search reaches across all of them:
+
+| `source` | Title prefix | What it is |
+|---|---|---|
+| `personal` | *(none)* | The user's own Google Calendar. |
+| `2houses` | `[Gina] ` | Co-parenting / shared-custody schedule (2Houses). Use these to answer "where is Gina / Sky on date X" — events read "Gina with David" (at the user's house) or "Gina with Christine" (at her mother's). |
+| `kayak` | `[Trip] ` | The user's travel itinerary (Kayak Trips). Each trip has an all-day umbrella event named "<Place> Trip" spanning its dates, plus timed flight / hotel sub-events. |
+
+The `2houses` and `kayak` feeds appear only when configured; with just
+`GCAL_ICAL_KEY` set, the surface is the personal calendar alone.
+
+Every tool's output also includes a `feed_errors` array. It is normally
+empty; if one feed failed to fetch, the others still return and the failure
+is listed there. Mention it only if it explains a gap the user noticed.
 
 ## Event shape
 
@@ -73,7 +93,8 @@ Every tool returns events as objects of the shape:
   "location": "1234 Main St",
   "organizer": "Alex",
   "description": null,
-  "day_label": null
+  "day_label": null,
+  "source": "personal"
 }
 ```
 
@@ -86,6 +107,7 @@ Field notes:
 - `organizer` is resolved through `calendar-people.json` if configured;
   null otherwise.
 - `description` is the long-form event notes when present, often null.
+- `source` is `personal`, `2houses`, or `kayak` (see Merged sources above).
 
 ## Resolving the user's words to query parameters
 
@@ -138,9 +160,9 @@ calendar-range.py --start <monday> --end <sunday>
 
 ## When a script reports an error
 
-- `"error": "GCAL_ICAL_KEY is not set..."` → the skill isn't configured.
-  Tell the user to follow setup in `README.md`. Don't try to fetch
-  calendars yourself.
+- `"error": "No calendar feeds configured..."` → the skill isn't
+  configured. Tell the user to follow setup in `README.md`. Don't try to
+  fetch calendars yourself.
 - `"iCal fetch HTTP <n>"` or `"iCal fetch network error"` → calendar
   source is unavailable; report the symptom, do not retry endlessly.
 

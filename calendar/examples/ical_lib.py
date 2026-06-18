@@ -68,6 +68,7 @@ class Event:
     organizer: str | None
     description: str | None
     day_label: str | None          # e.g. "Day 2 of 3" for multi-day all-day events
+    source: str = "personal"       # which feed this came from: personal / 2houses / kayak
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -94,6 +95,76 @@ def fetch_and_parse(
     """
     text = _fetch(ical_url, timeout_seconds)
     return parse(text, tz, min_date=min_date, max_date=max_date, people_file=people_file)
+
+
+def fetch_and_parse_multi(
+    feeds: list[tuple[str, str, str]],
+    tz: ZoneInfo,
+    *,
+    min_date: date,
+    max_date: date,
+    people_file: str | Path | None = None,
+    timeout_seconds: int = 30,
+) -> tuple[list[Event], list[dict]]:
+    """Fetch + merge several iCal feeds into one sorted event stream.
+
+    `feeds` is a list of `(source_label, url, title_prefix)` tuples. Each
+    parsed event is tagged with `source_label` and has `title_prefix`
+    prepended to its title (e.g. "[Gina] ", "[Trip] ") so plain-text search
+    works across the merged surface.
+
+    Resilient by design: if one feed fails to fetch/parse, the others still
+    return. Returns `(events, errors)` where `errors` is a list of
+    `{"source": ..., "error": ...}` for any feed that failed.
+    """
+    merged: list[Event] = []
+    errors: list[dict] = []
+    for source_label, url, title_prefix in feeds:
+        try:
+            text = _fetch(url, timeout_seconds)
+            evs = parse(text, tz, min_date=min_date, max_date=max_date,
+                        people_file=people_file)
+        except SystemExit as e:
+            errors.append({"source": source_label, "error": str(e)})
+            continue
+        except Exception as e:  # noqa: BLE001 — one bad feed must not sink the rest
+            errors.append({"source": source_label, "error": f"{type(e).__name__}: {e}"})
+            continue
+        for e in evs:
+            e.source = source_label
+            if title_prefix:
+                e.title = f"{title_prefix}{e.title}"
+        merged.extend(evs)
+    merged.sort(key=lambda e: (e.start, e.title))
+    return merged, errors
+
+
+PALLO_SECRETS_FILE = Path.home() / ".config" / "pallo-logistics" / "secrets.env"
+
+
+def resolve_feeds(env: dict[str, str]) -> list[tuple[str, str, str]]:
+    """Build the merged-calendar feed list from configured sources.
+
+    - GCAL_ICAL_KEY (calendar skill .env) → personal feed, no title prefix.
+    - TWOHOUSES_ICAL_URL (pallo-logistics secrets.env) → "[Gina] " prefix.
+    - KAYAK_TRIPS_ICAL_URL (pallo-logistics secrets.env) → "[Trip] " prefix.
+
+    Unfilled `<PLACEHOLDER>` values are ignored, so the calendar still works
+    with only the personal feed configured (backward compatible).
+    """
+    feeds: list[tuple[str, str, str]] = []
+    gcal = env_value(env, "GCAL_ICAL_KEY")
+    if gcal and not gcal.startswith("<"):
+        feeds.append(("personal", gcal, ""))
+
+    pallo_env = load_env(PALLO_SECRETS_FILE)
+    two_houses = env_value(pallo_env, "TWOHOUSES_ICAL_URL")
+    if two_houses and not two_houses.startswith("<"):
+        feeds.append(("2houses", two_houses, "[Gina] "))
+    kayak = env_value(pallo_env, "KAYAK_TRIPS_ICAL_URL")
+    if kayak and not kayak.startswith("<"):
+        feeds.append(("kayak", kayak, "[Trip] "))
+    return feeds
 
 
 def parse(

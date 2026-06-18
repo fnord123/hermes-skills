@@ -47,16 +47,16 @@ def main() -> int:
         return 2
 
     env = ical_lib.load_env(SCRIPT_DIR / ".env")
-    url = ical_lib.env_value(env, "GCAL_ICAL_KEY")
-    if not url:
-        ical_lib.emit_json({"error": "GCAL_ICAL_KEY is not set in .env or environment."})
+    feeds = ical_lib.resolve_feeds(env)
+    if not feeds:
+        ical_lib.emit_json({"error": "No calendar feeds configured (set GCAL_ICAL_KEY in .env)."})
         return 2
 
     tz = ical_lib.resolve_tz(env)
     people_file = ical_lib.env_value(env, "CALENDAR_PEOPLE_JSON") or None
 
-    events = ical_lib.fetch_and_parse(
-        url, tz, min_date=start, max_date=end, people_file=people_file
+    events, feed_errors = ical_lib.fetch_and_parse_multi(
+        feeds, tz, min_date=start, max_date=end, people_file=people_file
     )
 
     by_day: dict[str, list[dict]] = defaultdict(list)
@@ -77,6 +77,7 @@ def main() -> int:
         "timezone": str(tz),
         "total_events": sum(len(day["events"]) for day in days),
         "days": days,
+        "feed_errors": feed_errors,
     })
     return 0
 

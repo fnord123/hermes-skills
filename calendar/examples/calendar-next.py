@@ -56,9 +56,9 @@ def main() -> int:
     args = ap.parse_args()
 
     env = ical_lib.load_env(SCRIPT_DIR / ".env")
-    url = ical_lib.env_value(env, "GCAL_ICAL_KEY")
-    if not url:
-        ical_lib.emit_json({"error": "GCAL_ICAL_KEY is not set in .env or environment."})
+    feeds = ical_lib.resolve_feeds(env)
+    if not feeds:
+        ical_lib.emit_json({"error": "No calendar feeds configured (set GCAL_ICAL_KEY in .env)."})
         return 2
 
     tz = ical_lib.resolve_tz(env)
@@ -69,8 +69,8 @@ def main() -> int:
     # catch all-day events on the horizon day, and we filter by wall-clock
     # time afterwards.
     people_file = ical_lib.env_value(env, "CALENDAR_PEOPLE_JSON") or None
-    events = ical_lib.fetch_and_parse(
-        url, tz,
+    events, feed_errors = ical_lib.fetch_and_parse_multi(
+        feeds, tz,
         min_date=now.date(),
         max_date=horizon.date(),
         people_file=people_file,
@@ -93,6 +93,7 @@ def main() -> int:
         "timezone": str(tz),
         "count": len(upcoming),
         "events": upcoming,
+        "feed_errors": feed_errors,
     })
     return 0
 
