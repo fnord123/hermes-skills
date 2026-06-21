@@ -39,24 +39,34 @@ small JSON the agent relays to the user. Scope: **Pallo only, Laurel Acres
 | `pallo-trip-status.py [--trip-name <name>] [--trip-start/--trip-end] [--horizon-days N]` | Is a trip's boarding set up? No trip identifier = sweep ALL upcoming trips. | No |
 | `gina-where.py --date <ISO> [--who Gina\|Sky]` | Where is Gina (residency) on a date, from the merged 2Houses feed. | No |
 | `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--dry-run] [--simple-slate]` | Make the boarding reservation + activity slate, then send the plan's Gina messages. | **Yes — real, paid** |
+| `pallo-cancel.py --stay-id <id> --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--dry-run]` | Cancel a stay (located by its dates; re-verifies the displayed dates before cancelling). | **Yes** |
+| `pallo-modify-stay.py --stay-id <id> --new-drop-date <ISO> --new-pickup-date <ISO> [--simple-slate] [--dry-run]` | Change a stay's dates/activities. The portal has no in-place edit, so this books the new stay, then cancels the old. | **Yes** |
+| `pallo-trip-prep.py --trip-name <name> [--commit --confirm-drop-date <ISO> --confirm-pickup-date <ISO>]` | One-call trip prep: readiness → plan → (with `--commit`) book + notify Gina. No `--commit` = read-only preview. | **Yes (with `--commit`)** |
 | `gina-notify.py --topic <t> --body <b> [--handoff-date <ISO>] [--trip-name <n>] [--dry-run]` | Post a Model-X coordination message to the shared Discord channel (mentions Gina + the user). Normally fired automatically by a booking; direct call is an escape hatch. | **Yes — sends a message** |
 | `gina-pending.py [--resolve <id>]` | List outstanding Gina-coordination asks; `--resolve` clears one. | Read / small write |
 | `gingr-login.py [--show-head]` | Capture / refresh the saved portal session. Run only when a script reports `session_expired` or `not_logged_in`. | No (writes session file) |
 
 ## Safety — read-only by default
 
-Read-only scripts are safe any time. The two mutating booking actions
-(`pallo-book-trip.py` without `--dry-run`, `gina-notify.py` without `--dry-run`)
-require an **explicit "yes" from the user in the same turn**. Before booking:
-echo the dates + activity slate + estimated price back, get the clean yes, THEN
-call without `--dry-run`.
+Read-only scripts are safe any time. Every mutating action — `pallo-book-trip.py`,
+`pallo-cancel.py`, `pallo-modify-stay.py`, `pallo-trip-prep.py --commit`, and
+`gina-notify.py` — requires an **explicit "yes" from the user in the same turn**
+when run for real (without `--dry-run` / without `--commit`). First echo what will
+change (dates, activity slate, estimated price, or which stay gets cancelled), get
+the clean yes, THEN run the real action.
 
-`pallo-book-trip.py` takes `--confirm-drop-date` and `--confirm-pickup-date`
-invariants — pass the exact dates the user agreed to. The script refuses
-(`confirm_mismatch`) if they disagree with the plan, and refuses (`conflict`)
-if Pallo already has an overlapping reservation. Use `--dry-run` to fill the
-whole request and stop at the Review screen (captures the estimated total + a
-screenshot) without submitting — do this to show the user the price first.
+Every mutating booking/cancel script takes `--confirm-drop-date` /
+`--confirm-pickup-date` (or `--stay-id` + confirms) — pass the exact dates the
+user agreed to. They refuse (`confirm_mismatch`) on a mismatch; `pallo-book-trip.py`
+also refuses (`conflict`) if Pallo already has an overlapping reservation.
+
+Always preview first:
+- `pallo-book-trip.py --dry-run` fills the whole request and stops at the Review
+  screen (estimated total + screenshot) without submitting.
+- `pallo-cancel.py --dry-run` opens the booking and verifies its dates without
+  cancelling.
+- `pallo-trip-prep.py` (no `--commit`) returns the plan-of-plans (window + slate +
+  the Gina messages it would send).
 
 ## Opaque handles
 
@@ -110,4 +120,7 @@ a loop.
 - **"Is boarding arranged for all my trips?"** → `pallo-trip-status.py` (no args, sweep), then offer to book each gap one at a time.
 - **"What's the plan for Pallo for Paris?"** → `pallo-trip-plan.py --trip-name Paris`; relay the window + slate + any Gina messages.
 - **"Yes, book it."** → after the user confirms the dates/price you showed (from a `--dry-run`): `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO>`. Relay the confirmation and whether the Gina messages went out.
+- **"Set everything up for my Paris trip."** → `pallo-trip-prep.py --trip-name Paris` (preview); show the window + slate + Gina messages; on "yes": `pallo-trip-prep.py --trip-name Paris --commit --confirm-drop-date <ISO> --confirm-pickup-date <ISO>`.
+- **"Cancel Pallo's July stay."** → `pallo-stays.py` to get the `stay_id`; confirm which one with the user; `pallo-cancel.py --stay-id <id> --confirm-drop-date <ISO> --confirm-pickup-date <ISO> --dry-run`; on "yes" re-run without `--dry-run`.
+- **"Move Pallo's stay to the 22nd"** / **"give him the simple activity slate"** → `pallo-stays.py` for the `stay_id`; `pallo-modify-stay.py --stay-id <id> --new-drop-date <ISO> --new-pickup-date <ISO> [--simple-slate] --dry-run`; on "yes" re-run without `--dry-run`. (For an activity-only change, pass the SAME dates.) It books the new stay then cancels the old; if it returns `modified_old_not_cancelled`, tell the user to cancel the old stay manually.
 - **"Where's Gina on the 21st?"** → `gina-where.py --date 2026-07-21`.

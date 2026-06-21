@@ -30,6 +30,8 @@ It does **not**:
 | Trip dates | The merged `calendar` skill — Kayak Trips iCal feed preferred (machine-curated), personal calendar as fallback. |
 | Gina residency | The same merged calendar — 2Houses feed, `[Gina] Gina with David/Christine` events. |
 | Book a stay | Playwright drives the Gingr **New Booking Request** wizard (Dates → Services → Notes → Review → Submit Request) with the saved `storage_state`. |
+| Cancel a stay | Playwright opens the booking's detail page, re-verifies the displayed dates, and clicks **CANCEL BOOKING**. |
+| Change a stay | The portal has **no in-place edit/reschedule** for customers — only cancel. So a modify is **book the new stay, then cancel the old** (in that order, so a mid-way failure never leaves Pallo with no booking). |
 | Coordinate the X | Discord webhook to a shared channel both you and Gina are in, mentioning both. |
 
 ### The Gingr portal is a React-Native-Web SPA
@@ -121,14 +123,19 @@ submitting.
 | `pallo-trip-plan.py` | Build window + slate + proposed Gina messages. `--trip-name` or `--trip-start/--trip-end`. Emits `plan_json`. |
 | `pallo-trip-status.py` | Readiness. Single-trip with an identifier; all-trips sweep with none. |
 | `pallo-book-trip.py` | **Mutating.** Drives the booking wizard. `--plan` or `--drop-date/--pickup-date`; `--confirm-*`; `--drop-time`/`--pickup-time` (default 08:00 AM / 09:00 AM); `--dry-run`; `--simple-slate`; `--allow-overlap`; `--no-gina`. |
+| `pallo-cancel.py` | **Mutating.** Cancel a stay by `--stay-id` + `--confirm-*`. `--dry-run` verifies without cancelling. |
+| `pallo-modify-stay.py` | **Mutating.** `--stay-id` (old) + `--new-drop-date`/`--new-pickup-date` (+ `--simple-slate`, times). Books new then cancels old. `--dry-run` previews both. |
+| `pallo-trip-prep.py` | **Mutating with `--commit`.** `--trip-name` (or `--trip-start/--trip-end`); no `--commit` = preview; `--commit` + `--confirm-*` books + notifies Gina. |
 | `gina-where.py` | Residency on a date (`user_home`/`gina_mom`/`traveling_with_user`/`unknown`). |
 | `gina-notify.py` | **Mutating.** Posts to the shared Discord channel. `--dry-run` formats without sending. |
 | `gina-pending.py` | Read/clear the coordination ledger. Call it first when a Gina reply arrives. |
 | `triplib.py` / `coord_lib.py` | Shared helpers (trip/residency resolution; Discord config + ledger). Imported, not run. |
 
-### `pallo-book-trip.py` statuses
-`dry_run_ok` · `booked` · `booked_with_notification_warnings` · `conflict` ·
-`confirm_mismatch` · `session_expired` · `not_logged_in` · `error`.
+### Mutating-script statuses
+- `pallo-book-trip.py`: `dry_run_ok` · `booked` · `booked_with_notification_warnings` · `conflict` · `confirm_mismatch` · `session_expired` · `not_logged_in` · `error`.
+- `pallo-cancel.py`: `dry_run_ok` · `cancelled` · `already_canceled` · `not_found` · `confirm_mismatch` · `not_cancellable` · `uncertain` · `session_expired` · `error`.
+- `pallo-modify-stay.py`: `dry_run_ok` · `modified` · `modified_old_not_cancelled` · `book_failed` · `error`.
+- `pallo-trip-prep.py`: `all_set` · `planned` · `booked` · `ambiguous_trip` · `no_trip_found` · `confirm_mismatch` · plus any `pallo-book-trip.py` status under `book`.
 
 ## Operational notes & caveats
 
@@ -142,6 +149,18 @@ submitting.
   terms-checkbox detection — is validated end-to-end via `--dry-run`. The final
   *submit click itself* is intentionally not exercised in development (it creates
   a real, paid reservation). Always `--dry-run` first and show the user the price.
+- **The real cancel confirmation is inferred.** `pallo-cancel.py --dry-run` (open
+  + verify the booking) is validated; the live **CANCEL BOOKING** click and the
+  confirm-dialog button it then presses were *not* exercised in development (that
+  would cancel a real reservation). The script clicks a dialog control matching
+  `yes`/`confirm` and then re-reads the status, returning `uncertain` if the
+  booking doesn't read as `Canceled`. Validate it the first time you cancel a
+  stay you genuinely intend to, and trust the post-cancel status check.
+- **Modify is cancel + re-book.** `pallo-modify-stay.py` books the new stay
+  (with `--allow-overlap`, since the new dates usually overlap the old) and only
+  then cancels the old. If the cancel doesn't confirm it returns
+  `modified_old_not_cancelled` so you can remove the old stay manually — it never
+  cancels the old stay before the new one exists.
 - **Activity times are nominal.** The facility schedules activities within the
   day; the morning/midday/afternoon slots (07:30 / 11:30 / 03:30) are requests,
   and the two Play Yards use different times only so Gingr counts them as two
@@ -175,6 +194,9 @@ pallo-logistics/
     ├── pallo-trip-plan.py         # CUJ-1 plan
     ├── pallo-trip-status.py       # CUJ-7/8 readiness + sweep
     ├── pallo-book-trip.py         # CUJ-2 book (mutating)
+    ├── pallo-cancel.py            # CUJ-4 cancel (mutating)
+    ├── pallo-modify-stay.py       # CUJ-4 modify = book new + cancel old (mutating)
+    ├── pallo-trip-prep.py         # CUJ-6 composite (mutating with --commit)
     ├── gina-where.py              # CUJ-5 residency
     ├── gina-notify.py             # Gina coordination send (mutating)
     ├── gina-pending.py            # coordination ledger
@@ -182,5 +204,6 @@ pallo-logistics/
     └── coord_lib.py               # Discord config + ledger (shared)
 ```
 
-Not yet built (PRD CUJ-4 / CUJ-6): `pallo-cancel.py`, `pallo-modify-stay.py`,
-`pallo-trip-prep.py`. Cancel/modify currently means doing it in the portal UI.
+All PRD CUJs (1–8) are now covered. The only step exercised solely by
+inference (not against a live mutation) is the cancel-confirmation dialog — see
+*Caveats*.
