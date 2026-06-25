@@ -5,9 +5,12 @@ description: >
   barbershop, dentist, trainer, etc. — anywhere they have a service-business
   account on Square). Use for ANY question that names a local business in
   the context of appointments, scheduling, slots, or bookings — even if the
-  business name looks misspelled or slightly different. PREFER THIS SKILL
-  over web search whenever the user is asking about THEIR OWN
-  appointments. Activate on phrasings like: "do I have an appointment at X",
+  business name looks misspelled or slightly different. You MUST use this
+  skill for ANY appointment task about the user's OWN businesses — look up,
+  find a slot, book, move, or cancel. It is the ONLY correct tool: run its
+  scripts and relay their output. Do NOT web-search, open a browser, or call
+  any external calendar/booking API for the user's own appointments — those
+  paths are wrong here and will fail. Activate on phrasings like: "do I have an appointment at X",
   "find me a slot at X", "cancel my appointment", "move my haircut",
   "any openings at X next week", "when's my next visit to X". If the user
   names a business and you don't recognize it, your FIRST move is to call

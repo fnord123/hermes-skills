@@ -23,7 +23,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +132,86 @@ def _service_url(booking_url: str, service_id: str) -> str:
 
 
 _TIME_SLOT_RE = re.compile(r"\b(\d{1,2}:\d{2})\s*([AP]M)\b", re.IGNORECASE)
+# The availability detail panel renders the selected date as a full string,
+# e.g. "Wednesday, Aug 5, 2026" — the one drift-proof source of truth for
+# which date is actually selected (the week-strip counter can desync).
+_FULL_DATE_RE = re.compile(
+    r"([A-Z][a-z]+),\s*([A-Z][a-z]{2})\s+(\d{1,2}),\s*(\d{4})")
+
+
+def _slots_via_availability_api(
+    page, post_data: str, api_url: str, target_date, window_days: int, today,
+    origin: str, obs: dict | None = None,
+) -> "list[tuple[date, str]] | None":
+    """Replay Square's buyer/availability API for the target window and return
+    [(date, 'H:MM AM/PM'), ...]. Returns None if the template can't be parsed
+    or the call fails, so the caller can fall back to DOM scraping.
+
+    The API takes an explicit ``start_at_range`` (≈32-day max) and returns each
+    bookable slot's ``start`` as a Unix timestamp — exact, and immune to all the
+    week-strip rendering quirks. We reuse the captured request body verbatim
+    (it already carries the right service_variation_id, location, team filter,
+    and tz offset) and only rewrite the date range.
+    """
+    try:
+        body = json.loads(post_data)
+        rng = body["search_availability_request"]["query"]["filter"]["start_at_range"]
+    except Exception:
+        return None
+    m = re.search(r"([+-]\d{2}:\d{2})$", str(rng.get("start_at", "")))
+    offset = m.group(1) if m else "+00:00"
+    earliest = max(today, target_date - timedelta(days=window_days))
+    latest = target_date + timedelta(days=window_days)
+    if (latest - earliest).days > 31:  # respect the API's range cap
+        latest = earliest + timedelta(days=31)
+    rng["start_at"] = f"{earliest.isoformat()}T00:00:00.000{offset}"
+    rng["end_at"] = f"{latest.isoformat()}T23:59:59.999{offset}"
+    try:
+        resp = page.request.post(
+            api_url, data=json.dumps(body),
+            headers={
+                "content-type": "application/json",
+                "accept": "application/json",
+                # REQUIRED: the endpoint 422s without an Origin matching the
+                # booking site. The browser adds it automatically (it's a
+                # forbidden header), so a naive replay omits it.
+                "origin": origin,
+                "referer": origin + "/",
+            },
+        )
+        if obs is not None:
+            obs["api_replay_status"] = resp.status
+        if not resp.ok:
+            return None
+        data = resp.json()
+    except Exception as e:
+        if obs is not None:
+            obs["api_replay_error"] = str(e).splitlines()[0][:200]
+        return None
+    sign = 1 if offset[0] == "+" else -1
+    tz = timezone(sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6])))
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[date, str]] = []
+    for a in data.get("availability") or []:
+        if a.get("available") is False:
+            continue
+        ts = a.get("start")
+        if ts is None:
+            continue
+        try:
+            dt = datetime.fromtimestamp(int(ts), tz)
+        except Exception:
+            continue
+        d = dt.date()
+        if not (earliest <= d <= latest):
+            continue
+        label = dt.strftime("%-I:%M %p")
+        key = (d.isoformat(), label)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((d, label))
+    return out
 
 
 def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
@@ -159,6 +239,32 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
             timezone_id="America/Los_Angeles",
         )
         page = ctx.new_page()
+
+        # Capture the booking widget's own availability API call. Square's
+        # buyer/availability endpoint takes an explicit date range and returns
+        # bookable slots as Unix timestamps — replaying it for the target
+        # window is exact and reliable, vs. scraping the flaky week-strip DOM.
+        avail_template: dict = {}
+
+        def _capture_avail(resp):
+            try:
+                if "buyer/availability" not in resp.url:
+                    return
+                if avail_template.get("post_data"):
+                    return
+                pd = resp.request.post_data
+                if pd:
+                    avail_template["url"] = resp.url
+                    avail_template["post_data"] = pd
+                    try:
+                        avail_template["headers"] = dict(resp.request.headers)
+                    except Exception:
+                        avail_template["headers"] = {}
+            except Exception:
+                pass
+
+        page.on("response", _capture_avail)
+
         try:
             r = page.goto(url, wait_until="domcontentloaded", timeout=45000)
             obs["http_status"] = r.status if r else None
@@ -231,6 +337,53 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
         target_date = target_dt.date()
         window_days = 14  # acceptance window around target for "around X" semantics
 
+        # ── Fast, reliable path: replay the availability API for the window ──
+        # The page fires buyer/availability on load; wait briefly for the
+        # captured template, then query the target window directly.
+        waited = 0
+        while not avail_template.get("post_data") and waited < 8000:
+            page.wait_for_timeout(500)
+            waited += 500
+        if avail_template.get("post_data"):
+            api_origin = re.match(r"https?://[^/]+", url)
+            api_slots = _slots_via_availability_api(
+                page, avail_template["post_data"], avail_template["url"],
+                target_date, window_days, today,
+                api_origin.group(0) if api_origin else "https://book.squareup.com",
+                obs,
+            )
+            if api_slots is not None:
+                obs["source"] = "availability_api"
+
+                def _mins(lbl: str) -> int:
+                    mm = _TIME_SLOT_RE.search(lbl)
+                    if not mm:
+                        return 0
+                    hh, mi = mm.group(1).split(":")
+                    hh = int(hh) % 12
+                    if mm.group(2).upper() == "PM":
+                        hh += 12
+                    return hh * 60 + int(mi)
+
+                api_slots.sort(key=lambda s: (
+                    abs((s[0] - target_date).days), s[0].toordinal(), _mins(s[1]),
+                ))
+                for d, lab in api_slots[:5]:
+                    obs["slots"].append({
+                        "slot_handle": json.dumps({
+                            "service_url": url, "date": d.isoformat(), "time": lab,
+                        }, sort_keys=True, separators=(",", ":")),
+                        "start_time": f"{d.isoformat()} {lab}",
+                        "label": lab,
+                        "date": d.isoformat(),
+                    })
+                if not probe:
+                    browser.close()
+                    return obs
+                obs["api_slot_count"] = len(api_slots)
+        # If the API path didn't yield (template missing / call failed), fall
+        # through to the legacy DOM week-walk below as a best-effort fallback.
+
         if probe:
             obs["available_date_testids"] = [
                 d.get_attribute("data-testid")
@@ -289,21 +442,87 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
                         return d
             return None
 
+        def _strip_ids() -> str:
+            """Ordered fingerprint of the visible date cells (day-of-month
+            testids, selection suffix stripped). Changes iff the strip
+            physically moves — the reliable signal that an advance landed."""
+            ids: list[str] = []
+            for el in page.locator('[data-testid^="date-"]').all():
+                tid = el.get_attribute("data-testid") or ""
+                if re.match(r"date-\d+(?:-selected)?$", tid):
+                    ids.append(re.sub(r"-selected$", "", tid))
+            return "|".join(ids)
+
+        def _wait_strip_settle(timeout_ms: int = 6000) -> None:
+            """Square enables date cells lazily as availability fetches land,
+            so a fixed sleep races the data. Poll the full (testid+disabled)
+            fingerprint until it stops changing for two consecutive reads."""
+            prev = None
+            waited = 0
+            while waited < timeout_ms:
+                cur = []
+                for el in page.locator('[data-testid^="date-"]').all():
+                    tid = el.get_attribute("data-testid") or ""
+                    if not re.match(r"date-\d+(?:-selected)?$", tid):
+                        continue
+                    dis = "1" if el.get_attribute("disabled") is not None else "0"
+                    cur.append(f"{tid}:{dis}")
+                cur_s = "|".join(cur)
+                if cur_s and cur_s == prev:
+                    return
+                prev = cur_s
+                page.wait_for_timeout(700)
+                waited += 700
+
         def _advance_week_via_js() -> bool:
-            """Square's `next-week-button` is `display:none` in headless but
-            its click handler still works. We dispatch it via JS, which
-            advances the calendar AND triggers Square to fetch availability
-            data for the now-visible new future-week."""
+            """Advance the strip one week and CONFIRM it moved. Square's
+            `next-week-button` is `display:none` in headless but its click
+            handler still fires via JS. The click is unreliable (it can no-op
+            while still "succeeding"), so we fingerprint the strip, click, and
+            poll for the fingerprint to change — retrying a few times — then
+            wait for the new week's availability to settle. Returns True only
+            on a confirmed advance."""
+            before = _strip_ids()
+            for attempt in range(5):
+                try:
+                    # Exactly ONE click per attempt. A multi-event dispatch
+                    # fires the handler more than once and the strip jumps two
+                    # weeks, overshooting the target week. If the button is
+                    # `disabled` we've hit the merchant's booking horizon — no
+                    # point clicking. Verify-and-retry handles the no-op case.
+                    result = page.evaluate("""() => {
+                        const btn = document.querySelector('[data-testid="next-week-button"]');
+                        if (!btn) return 'not_found';
+                        if (btn.disabled) return 'disabled';
+                        btn.click();
+                        return 'clicked';
+                    }""")
+                except Exception:
+                    return False
+                if result == "disabled":
+                    return False
+                if result != "clicked":
+                    return False
+                waited = 0
+                while waited < 7000:
+                    page.wait_for_timeout(500)
+                    waited += 500
+                    if _strip_ids() != before:
+                        _wait_strip_settle()
+                        return True
+                # Strip didn't move this attempt; pause and try the click again.
+                page.wait_for_timeout(800)
+            # All attempts failed — capture why, once, for diagnosis.
             try:
-                result = page.evaluate("""() => {
-                    const btn = document.querySelector('[data-testid="next-week-button"]');
-                    if (!btn) return 'not_found';
-                    btn.click();
-                    return 'clicked';
-                }""")
-                if result == "clicked":
-                    page.wait_for_timeout(3000)
-                    return True
+                obs.setdefault("advance_failures", []).append(page.evaluate("""() => {
+                    const out = {};
+                    const nw = document.querySelector('[data-testid="next-week-button"]');
+                    out.next_week = nw ? {disabled: nw.disabled, aria_disabled: nw.getAttribute('aria-disabled'), html: nw.outerHTML.slice(0,200)} : null;
+                    out.nav_testids = Array.from(document.querySelectorAll('[data-testid*="month"], [data-testid*="next"], [data-testid*="nav"], [data-testid*="arrow"]')).map(e => e.getAttribute('data-testid'));
+                    const page_el = document.querySelector('[data-testid="availability-page"]');
+                    out.header = page_el ? (page_el.textContent || '').slice(0,60) : null;
+                    return out;
+                }"""))
             except Exception:
                 pass
             return False
@@ -344,127 +563,236 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
             return None
 
         # First date's slots: read what 'Go to next available' landed on.
-        emitted: set[tuple[str, str]] = set()
         target_emit = 5
         earliest_acceptable = target_date - timedelta(days=window_days)
         latest_acceptable = target_date + timedelta(days=window_days)
 
-        def _emit_if_in_window(d: "date | None", labels: list[str]) -> None:
+        # Accumulate every in-window (date, label) we observe. The final result
+        # is sorted by proximity to the target, so an "around Aug 5" query
+        # returns Aug 5 and its nearest neighbours first — not the earliest
+        # edge of the ±window band (the old emit-and-stop behaviour returned
+        # slots up to two weeks before the date the user actually asked about).
+        window_slots: list[dict] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        scanned_through: "date | None" = None
+
+        def _collect(d: "date | None", labels: list[str]) -> None:
+            nonlocal scanned_through
+            if d is not None and (scanned_through is None or d > scanned_through):
+                scanned_through = d
             if not d or not labels:
                 return
             if not (earliest_acceptable <= d <= latest_acceptable):
                 return
             for lab in labels:
                 key = (d.isoformat(), lab)
-                if key in emitted:
+                if key in seen_pairs:
                     continue
-                emitted.add(key)
-                obs["slots"].append({
-                    "slot_handle": json.dumps({
-                        "service_url": url,
-                        "date": d.isoformat(),
-                        "time": lab,
-                    }, sort_keys=True, separators=(",", ":")),
-                    "start_time": f"{d.isoformat()} {lab}",
-                    "label": lab,
-                    "date": d.isoformat(),
-                })
-                if len(obs["slots"]) >= target_emit:
-                    return
+                seen_pairs.add(key)
+                window_slots.append({"date": d, "label": lab})
 
         first_labels = _read_slot_labels()
         obs["slot_count_on_selected"] = len(first_labels)
-        _emit_if_in_window(selected_date, first_labels)
+        _collect(selected_date, first_labels)
 
-        # Walk visible dates and advance weeks until we have enough slots OR
-        # we run past the user's acceptance window. Key insight: the
-        # `next-week-button` is CSS-hidden but its JS click handler still
-        # fires — and Square only loads availability for the current visible
-        # weeks, so without advancing we'd miss every slot beyond today's
-        # week. The `disabled` attribute on each `date-N` cell tells us
-        # whether availability data has arrived for it; pre-availability
-        # cells are stuck `disabled=''` until a week-advance triggers the
-        # fetch.
-        max_week_advances = 4
-        advances = 0
+        # Walk the week-strip forward until slots near the target are found.
+        #
+        # We DO NOT trust a week counter to know where the strip is: the
+        # CSS-hidden `next-week-button`, clicked via JS, advances the strip by
+        # an inconsistent number of weeks (observed drift of a full week over
+        # a long walk). Resolving `date-N` cells from such a counter mislabels
+        # every visible date once it desyncs, so real, selectable slots get
+        # filtered out and the search falls through to the use-url branch even
+        # though the target date is open.
+        #
+        # Instead we drive everything off the page's own ground truth:
+        #   • `_visible_month()` — the header month actually rendered, used to
+        #     decide when the strip has reached the acceptance window's months
+        #     (and when it has walked past them).
+        #   • `_read_selected_full_date()` — the detail panel's full date
+        #     string, the authoritative identity of a clicked cell.
+        # Only non-disabled cells are clicked (disabled = no availability, so a
+        # click is silently ignored); a non-disabled cell always selects, so
+        # the post-click full-date read identifies exactly what we landed on.
         obs["candidate_dates_tried"] = []
-        already_clicked_dates: set[str] = set()
+        clicked_dates: set[str] = set()
+        early_ord = earliest_acceptable.year * 12 + earliest_acceptable.month
+        late_ord = latest_acceptable.year * 12 + latest_acceptable.month
 
-        while len(obs["slots"]) < target_emit and advances <= max_week_advances:
-            # Build the list of clickable candidate dates currently visible.
-            # We restrict to non-disabled cells in the present-week and
-            # future-week rows (skipping past-week which is always disabled).
-            candidates: list[tuple["date", str]] = []
+        def _js_click_testid(tid: str) -> str:
+            """Click a date cell via JS dispatch. Like the next-week button,
+            these cells no-op under Playwright's normal .click() in headless,
+            so we fire their handler directly."""
+            try:
+                return page.evaluate(
+                    """(t) => {
+                        const el = document.querySelector('[data-testid="' + t + '"]');
+                        if (!el) return 'not_found';
+                        el.click();
+                        return 'clicked';
+                    }""",
+                    tid,
+                )
+            except Exception as e:
+                return f"error:{str(e).splitlines()[0][:80]}"
+
+        def _visible_strip_dates() -> list[tuple["date", str]]:
+            """Reconstruct the real date of every visible strip cell. The strip
+            is ~21 contiguous days; the header gives the leftmost month and we
+            roll the month forward each time the day-of-month resets.
+
+            `disabled` is deliberately IGNORED. Once any date is selected Square
+            marks the rest of the strip disabled, yet those cells stay clickable
+            and real — gating on `disabled` made the walk skip every week after
+            the first selection, which is exactly why far-future targets failed.
+            """
+            vis = _visible_month(page)
+            if vis is None:
+                return []
+            cells: list[tuple[int, str]] = []
             for el in page.locator('[data-testid^="date-"]').all():
                 tid = el.get_attribute("data-testid") or ""
-                m_tid = re.match(r"date-(\d+)(?:-selected)?$", tid)
-                if not m_tid:
-                    continue
-                # disabled='' means "not clickable / no availability"; None
-                # means "selectable" — exactly the signal we need.
-                if el.get_attribute("disabled") is not None:
-                    continue
-                d_candidate = _resolve_date_testid(int(m_tid.group(1)), advances)
-                if d_candidate is None:
-                    continue
-                if d_candidate < today or d_candidate > latest_acceptable:
-                    continue
-                key = d_candidate.isoformat()
-                if key in already_clicked_dates:
-                    continue
-                candidates.append((d_candidate, tid))
-
-            candidates.sort(key=lambda x: x[0])
-
-            for d_candidate, tid in candidates:
-                if len(obs["slots"]) >= target_emit:
-                    break
-                key = d_candidate.isoformat()
-                # If this date is already the selection, just read slots —
-                # no click needed (and a redundant click could de-select).
-                if d_candidate == selected_date:
-                    already_clicked_dates.add(key)
-                    _emit_if_in_window(d_candidate, _read_slot_labels())
-                    continue
+                m = re.match(r"date-(\d+)(?:-selected)?$", tid)
+                if m:
+                    cells.append((int(m.group(1)), re.sub(r"-selected$", "", tid)))
+            out: list[tuple["date", str]] = []
+            y, mo = vis
+            prev = None
+            for day_n, tid in cells:
+                if prev is not None and day_n < prev:
+                    mo += 1
+                    if mo > 12:
+                        mo, y = 1, y + 1
+                prev = day_n
                 try:
-                    page.locator(
-                        f'market-button[data-testid="{tid}"], [data-testid="{tid}"]'
-                    ).first.click(timeout=3000)
-                    page.wait_for_timeout(2200)
-                except Exception:
+                    out.append((date(y, mo, day_n), tid))
+                except ValueError:
                     continue
-                already_clicked_dates.add(key)
-                new_sel = _read_selected_date()
-                obs["candidate_dates_tried"].append({
-                    "date": key,
-                    "selected_after_click": new_sel.isoformat() if new_sel else None,
-                    "week_advance": advances,
-                })
-                if new_sel != d_candidate:
-                    # Click was silently ignored — date had no slots after
-                    # all. Move on.
-                    continue
-                selected_date = new_sel
-                _emit_if_in_window(d_candidate, _read_slot_labels())
+            return out
 
-            if len(obs["slots"]) >= target_emit:
-                break
-            # If the user's acceptance window extends past what's currently
-            # visible, advance a week and try again. Otherwise stop.
-            present_end = (anchor_sunday + timedelta(weeks=advances)
-                           + timedelta(days=13))  # present-week + future-week
-            if latest_acceptable <= present_end:
-                break
+        def _scan_visible() -> None:
+            # Click every visible cell whose reconstructed date is in-window and
+            # not yet seen; trust the detail-panel date for what we landed on.
+            for d, tid in _visible_strip_dates():
+                # Soft cap so a dense week can't make us click forever; plenty
+                # to pick the nearest target_emit from afterwards.
+                if len(window_slots) >= target_emit * 6:
+                    return
+                if not (earliest_acceptable <= d <= latest_acceptable):
+                    continue
+                if d.isoformat() in clicked_dates:
+                    continue
+                res = _js_click_testid(tid)
+                if res != "clicked":
+                    obs["candidate_dates_tried"].append({"testid": tid, "click": res})
+                    continue
+                clicked_dates.add(d.isoformat())
+                page.wait_for_timeout(1500)
+                real = _read_selected_full_date(page) or d
+                labels = _read_slot_labels()
+                obs["candidate_dates_tried"].append({
+                    "testid": tid, "expected": d.isoformat(),
+                    "resolved": real.isoformat(), "n_slots": len(labels),
+                })
+                _collect(real, labels)
+
+        def _strip_dates_cached() -> list["date"]:
+            return [d for d, _ in _visible_strip_dates()]
+
+        def _strip_overlaps_window() -> bool:
+            return any(
+                earliest_acceptable <= d <= latest_acceptable
+                for d in _strip_dates_cached()
+            )
+
+        def _strip_past_window() -> bool:
+            ds = _strip_dates_cached()
+            return bool(ds) and min(ds) > latest_acceptable
+
+        # Stop once we've actually read slots a few days past the target: that
+        # guarantees the target and its near neighbours on both sides are in
+        # hand, so the proximity sort below can pick the closest ones.
+        enough_after = target_date + timedelta(days=3)
+
+        def _have_enough() -> bool:
+            return (
+                scanned_through is not None
+                and scanned_through >= enough_after
+                and len(window_slots) >= target_emit
+            )
+
+        # Backstop cap; the loop's own window gate stops it as soon as the strip
+        # walks past the window (or the next-week button hits the merchant's
+        # booking horizon and disables).
+        max_week_advances = 20
+        advances = 0
+        while not _have_enough() and advances <= max_week_advances:
+            if _strip_past_window():
+                break  # walked entirely past the window
+            if _strip_overlaps_window():
+                _scan_visible()
+                if _have_enough():
+                    break
             if not _advance_week_via_js():
-                break
+                # The page intermittently swallows an advance; give it one
+                # full second-chance pass before abandoning the walk.
+                if not _advance_week_via_js():
+                    break
             advances += 1
         obs["week_advances_used"] = advances
+
+        # Proximity sort: nearest-to-target date first, earliest time as the
+        # within-day tiebreak. Then materialise the closest target_emit slots.
+        def _minutes(label: str) -> int:
+            m = _TIME_SLOT_RE.search(label)
+            if not m:
+                return 0
+            hh, mm = m.group(1).split(":")
+            hh = int(hh) % 12
+            if m.group(2).upper() == "PM":
+                hh += 12
+            return hh * 60 + int(mm)
+
+        window_slots.sort(key=lambda s: (
+            abs((s["date"] - target_date).days), s["date"].toordinal(), _minutes(s["label"]),
+        ))
+        for s in window_slots[:target_emit]:
+            d, lab = s["date"], s["label"]
+            obs["slots"].append({
+                "slot_handle": json.dumps({
+                    "service_url": url, "date": d.isoformat(), "time": lab,
+                }, sort_keys=True, separators=(",", ":")),
+                "start_time": f"{d.isoformat()} {lab}",
+                "label": lab,
+                "date": d.isoformat(),
+            })
 
         if probe:
             try:
                 obs["body_text_head"] = page.locator("body").inner_text()[:2500]
             except Exception:
                 obs["body_text_head"] = ""
+            # End-state strip diagnostics: did the calendar actually advance,
+            # and are the now-visible far-future cells selectable or stuck
+            # disabled (= availability never fetched)?
+            try:
+                vm = _visible_month(page)
+                obs["final_visible_month"] = f"{vm[0]}-{vm[1]:02d}" if vm else None
+            except Exception:
+                obs["final_visible_month"] = None
+            try:
+                final_cells = []
+                for el in page.locator('[data-testid^="date-"]').all():
+                    tid = el.get_attribute("data-testid") or ""
+                    if not re.match(r"date-\d+(?:-selected)?$", tid):
+                        continue
+                    final_cells.append({
+                        "testid": tid,
+                        "disabled": el.get_attribute("disabled") is not None,
+                    })
+                obs["final_date_cells"] = final_cells
+            except Exception as e:
+                obs["final_date_cells_error"] = str(e).splitlines()[0][:160]
 
         browser.close()
     return obs
@@ -634,6 +962,29 @@ def _visible_month(page) -> tuple[int, int] | None:
         return None
     mon = _MONTH_NUM.get(m.group(1))
     return (int(m.group(2)), mon) if mon else None
+
+
+def _read_selected_full_date(page) -> "date | None":
+    """Parse the detail panel's full date (e.g. 'Wednesday, Aug 5, 2026') into
+    a ``date``. This is the ground truth for the currently-selected day and is
+    immune to week-strip / counter drift. Falls back from the availability-page
+    element to the whole body."""
+    text = ""
+    for sel in ('[data-testid="availability-page"]', "body"):
+        try:
+            text = page.locator(sel).first.text_content() or ""
+        except Exception:
+            text = ""
+        if text:
+            m = _FULL_DATE_RE.search(text)
+            if m:
+                mon = _MONTH_NUM.get(m.group(2))
+                if mon:
+                    try:
+                        return date(int(m.group(4)), mon, int(m.group(3)))
+                    except ValueError:
+                        return None
+    return None
 
 
 def _date_in_current_view(page, target_date) -> bool:
