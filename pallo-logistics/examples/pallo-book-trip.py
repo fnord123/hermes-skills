@@ -126,20 +126,39 @@ def expected_activity_counts(drop_date: date, pick_date: date, simple: bool) -> 
 
 # ── portal navigation helpers (React-Native-Web SPA: locate by content) ──────
 
+def _dbg(page, tag: str, note: str = ""):
+    """Diagnostic capture, active only when PALLO_DEBUG is set. Writes a
+    screenshot + a line to artifacts/once_debug.log so we can see what the
+    per-day date picker actually does (e.g. whether it reached the target
+    month). No-op in normal runs."""
+    if not os.environ.get("PALLO_DEBUG"):
+        return
+    try:
+        d = Path.home() / "pallo-boarding" / "artifacts"
+        d.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(d / f"dbg_{tag}.png"), full_page=True)
+        with open(d / "once_debug.log", "a") as f:
+            f.write(f"{tag}: {note}\n")
+    except Exception:
+        pass
+
+
 def _month_label(page):
     return page.evaluate(r"""() => {const m=[...document.querySelectorAll('div')]
         .find(d=>/^[A-Z][a-z]+ 20\d\d$/.test((d.innerText||'').trim()));
         return m?m.innerText.trim():null;}""")
 
 
-def _click_next_month(page):
-    # Find the "Month YYYY" header and click the icon-div immediately to its
+def _click_next_month(page) -> bool:
+    # Find the "Month YYYY" header and press the icon-div immediately to its
     # right (the next-month chevron). Anchoring to the label keeps this correct
     # for the main wizard calendar AND the date-range popup in an activity panel.
-    page.evaluate(r"""() => {
+    # The chevron is an RNW pressable that IGNORES a bare .click(), so dispatch a
+    # full pointer sequence (this was the cause of intermittent month-nav fails).
+    return bool(page.evaluate(r"""() => {
         const all=[...document.querySelectorAll('div')];
         const m=all.find(d=>/^[A-Z][a-z]+ 20\d\d$/.test((d.innerText||'').trim()));
-        if(!m) return;
+        if(!m) return false;
         const mr=m.getBoundingClientRect();
         let best=null;
         for(const el of all){
@@ -149,17 +168,33 @@ def _click_next_month(page):
             if(r.width>=60 || Math.abs(r.y-mr.y)>40 || r.x<=mr.x) continue;
             if(!best || r.x>best.x){best={el, x:r.x};}   // rightmost = next chevron
         }
-        if(best) best.el.click();
-    }""")
+        if(!best) return false;
+        best.el.click();   // bare click advances this picker; pointer-dispatch did not
+        return true;
+    }"""))
 
 
-def _goto_month(page, target: date, max_steps: int = 24):
+def _goto_month(page, target: date, max_steps: int = 30) -> bool:
+    """Advance the date picker to `target`'s month. The popup chevron click only
+    lands intermittently, so verify the month label after each press and keep
+    re-pressing; only give up after many consecutive no-advance presses. Returns
+    whether the target month was reached (caller must NOT click a day if False)."""
     want = f"{_MONTHS[target.month-1]} {target.year}"
+    last = None
+    stuck = 0
     for _ in range(max_steps):
-        if _month_label(page) == want:
+        cur = _month_label(page)
+        if cur == want:
             return True
+        if cur is not None and cur == last:
+            stuck += 1
+            if stuck >= 10:
+                return False
+        else:
+            stuck = 0
+        last = cur
         _click_next_month(page)
-        page.wait_for_timeout(900)
+        page.wait_for_timeout(700)
     return _month_label(page) == want
 
 
@@ -539,13 +574,31 @@ def _add_activity_once(page, row_label: str, target: date, time_slot: str):
     if not _press_text(page, "Once"):
         raise RuntimeError(f"could not select 'Once' frequency for {row_label}")
     page.wait_for_timeout(900)
-    _open_date_field(page)
-    page.wait_for_timeout(1000)
-    _goto_month(page, target)
+    # Open the date picker and navigate to the target month. The popup opens on
+    # an inconsistent month (sometimes today's, sometimes the booking's), and a
+    # single chevron press can miss, so retry the open+navigate a few times and
+    # REFUSE to click a day unless we're on the right month — a wrong-month day
+    # is silently dropped by the portal and undercounts the slate.
+    reached = False
+    for nav_try in range(3):
+        _open_date_field(page)
+        page.wait_for_timeout(900)
+        _dbg(page, f"once_{target.isoformat()}_try{nav_try}_open",
+             f"picker opened on month={_month_label(page)!r}")
+        reached = _goto_month(page, target)
+        _dbg(page, f"once_{target.isoformat()}_try{nav_try}_goto",
+             f"reached={reached} month_now={_month_label(page)!r}")
+        if reached:
+            break
+    if not reached:
+        raise RuntimeError(
+            f"could not navigate the activity date picker to {target} "
+            f"(stuck on {_month_label(page)!r})")
     _click_day(page, target.day)
     page.wait_for_timeout(500)
     _click_day(page, target.day)   # start == end -> single day
     page.wait_for_timeout(700)
+    _dbg(page, f"once_{target.isoformat()}_after_day", "after day selection")
     _open_activity_time(page)
     page.wait_for_timeout(900)
     if not _press_text(page, time_slot):
@@ -745,14 +798,29 @@ def main() -> int:
                 _click_bottom_nav(page, "SERVICES")
                 page.wait_for_timeout(4000)
 
-                # Services step — bulk frequency ops (1 Nature Walk + 1 Play Yard/day)
+                # Services step — bulk frequency ops (1 Nature Walk + 1 Play Yard/day).
+                # These give the GUARANTEED slate; they must succeed.
                 for row, freq, slot in BULK_OPS:
                     _add_activity(page, row, freq, slot)
-                # second Play Yard per full day via individual 'Once' adds
+                # Second Play Yard per full day via individual 'Once' adds. This is
+                # BEST-EFFORT: the activity popup's date picker has flaky month
+                # navigation, so a given day may not land. Never let one day error
+                # the whole booking — skip it, keep going, and report the shortfall
+                # (the slate_warning below reflects what actually booked).
+                second_py_added, second_py_skipped = 0, []
                 if not args.simple_slate:
                     d = drop_date + timedelta(days=1)
                     while d < pick_date:
-                        _add_activity_once(page, "Activity | Play Yard", d, SECOND_PLAY_YARD_TIME)
+                        try:
+                            _add_activity_once(page, "Activity | Play Yard", d, SECOND_PLAY_YARD_TIME)
+                            second_py_added += 1
+                        except Exception:  # noqa: BLE001
+                            second_py_skipped.append(d.isoformat())
+                            try:  # clear any half-open panel before the next day
+                                _close_panel(page)
+                                _wait_panel_closed(page, timeout_ms=4000)
+                            except Exception:
+                                pass
                         d += timedelta(days=1)
 
                 # advance to Review
@@ -792,16 +860,20 @@ def main() -> int:
                     "booked_activities": {"play_yard": booked_py, "nature_walk": booked_nw},
                     "review": summary,
                 }
+                if not args.simple_slate and second_py_skipped:
+                    base["second_play_yard"] = {
+                        "added": second_py_added, "skipped_dates": second_py_skipped}
                 warns = []
                 if booked_py is not None and booked_py < counts["play_yard"]:
                     warns.append(
                         f"requested {counts['play_yard']} Play Yard sessions but the portal "
-                        f"booked {booked_py}: Gingr dedupes Play Yard to once per day, so the "
-                        f"per-day second session can't be pre-booked online (arrange on-site).")
+                        f"booked only {booked_py} — one or more per-day second Play Yard adds "
+                        f"did not register. The booking still went to Review; re-run --dry-run "
+                        f"to inspect, or use --simple-slate (1 Play Yard/day) for a clean slate.")
                 if booked_nw is not None and booked_nw < counts["nature_walk"]:
                     warns.append(
                         f"requested {counts['nature_walk']} Nature Walk sessions but the portal "
-                        f"booked {booked_nw}.")
+                        f"booked only {booked_nw}.")
                 if warns:
                     base["slate_warning"] = " ".join(warns)
 
@@ -831,7 +903,6 @@ def main() -> int:
                 artifacts = Path.home() / "pallo-boarding" / "artifacts"
                 artifacts.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(artifacts / "book_confirmation.png"), full_page=True)
-                import re
                 conf = re.search(r"(Reservation|Confirmation|Request)[^\n]{0,40}?(#?\s?[A-Z0-9]{4,})", confirm_text)
                 base["status"] = "booked"
                 base["manage_url"] = page.url

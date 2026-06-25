@@ -93,6 +93,20 @@ Yard + 1 Nature Walk; pickup day = 1 Nature Walk. `pallo-book-trip.py` applies
 this automatically. `--simple-slate` drops the second daily Play Yard (faster;
 reasonable for long stays).
 
+**The per-day SECOND Play Yard is best-effort.** The portal's activity date
+picker has flaky month navigation, so on a multi-day stay some of the per-day
+second Play Yards may not register. The script never fails the booking over
+this — it books the guaranteed slate (1 Play Yard + 1 Nature Walk per day) plus
+whatever second sessions land, then reports:
+- `booked_activities`: what the Review actually shows.
+- `second_play_yard`: `{added, skipped_dates}` when any per-day second add was skipped.
+- `slate_warning`: a plain-English note when fewer sessions booked than requested.
+
+When you see `slate_warning`, **relay it to the user** — tell them how many
+Play Yard sessions landed and which days fell short, and offer either to arrange
+the extra Play Yards with the facility directly or to re-book. For a guaranteed
+clean slate with no warning, use `--simple-slate` (1 Play Yard/day).
+
 ## Gina coordination
 
 When the user's request involves a stay whose drop-off or pickup falls on a day
