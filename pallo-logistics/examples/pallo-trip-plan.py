@@ -31,7 +31,8 @@ import triplib  # noqa: E402
 
 
 def _build_plan(trip_name: str, trip_start: date, trip_end: date,
-                drop_off: date | None = None, pick_up: date | None = None) -> dict:
+                drop_off: date | None = None, pick_up: date | None = None,
+                drop_time: str = "08:00 AM", pickup_time: str = "09:00 AM") -> dict:
     if drop_off is None:
         drop_off = trip_start - timedelta(days=1)   # afternoon before departure
     if pick_up is None:
@@ -64,6 +65,8 @@ def _build_plan(trip_name: str, trip_start: date, trip_end: date,
         "trip_end": trip_end.isoformat(),
         "drop_off": drop_off.isoformat(),
         "pick_up": pick_up.isoformat(),
+        "drop_time": drop_time,
+        "pickup_time": pickup_time,
         "nights": (pick_up - drop_off).days,
         "activity_slate": slate,
         "gina_messages": gina_messages,
@@ -81,7 +84,18 @@ def main() -> int:
                     help="Explicit kennel drop-off date (no buffer added). Use when the user gives boarding dates directly.")
     ap.add_argument("--pickup-date", default=None,
                     help="Explicit kennel pickup date (no buffer added). Use when the user gives boarding dates directly.")
+    ap.add_argument("--drop-time", default="08:00 AM",
+                    help="Drop-off clock time, e.g. '3pm' or '03:00 PM' (default 08:00 AM).")
+    ap.add_argument("--pickup-time", default="09:00 AM",
+                    help="Pickup clock time, e.g. '11am' or '11:00 AM' (default 09:00 AM).")
     args = ap.parse_args()
+
+    try:
+        drop_time = triplib.normalize_clock_time(args.drop_time)
+        pickup_time = triplib.normalize_clock_time(args.pickup_time)
+    except triplib.TimeFormatError as e:
+        print(json.dumps({"status": "dates_invalid", "reason": str(e)}, indent=2))
+        return 2
 
     # Direct boarding dates — bypass the trip-date buffer entirely.
     explicit_drop = None
@@ -138,11 +152,12 @@ def main() -> int:
         return 2
 
     plan = _build_plan(trip_name, ts, te,
-                       drop_off=explicit_drop, pick_up=explicit_pickup)
+                       drop_off=explicit_drop, pick_up=explicit_pickup,
+                       drop_time=drop_time, pickup_time=pickup_time)
     plan["status"] = "ok"
     plan["plan_json"] = json.dumps({k: plan[k] for k in (
         "trip_name", "trip_start", "trip_end", "drop_off", "pick_up",
-        "activity_slate", "gina_messages")})
+        "drop_time", "pickup_time", "activity_slate", "gina_messages")})
     print(json.dumps(plan, indent=2))
     return 0
 

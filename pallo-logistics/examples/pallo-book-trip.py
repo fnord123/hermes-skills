@@ -28,8 +28,11 @@ Usage:
       --confirm-drop-date 2026-07-10 --confirm-pickup-date 2026-07-31 --dry-run
 
 Options:
-  --drop-time   "08:00 AM"   drop-off clock time (default 08:00 AM)
-  --pickup-time "09:00 AM"   pickup clock time   (default 09:00 AM)
+  --drop-time   "3pm"        drop-off clock time. Accepts loose forms ('3pm',
+                             '3:00 PM', '15:00'). Overrides the plan's drop_time;
+                             falls back to the plan's, then 08:00 AM.
+  --pickup-time "11am"       pickup clock time, same parsing/precedence as above
+                             (plan's pickup_time, then 09:00 AM).
   --dry-run                  fill the whole wizard, stop at Review, DO NOT submit
   --allow-overlap            skip the "already booked for these dates" guard
   --no-gina                  do not send the plan's Gina-coordination messages
@@ -58,6 +61,7 @@ if _VENV_PY.exists() and sys.executable != str(_VENV_PY):
     os.execv(str(_VENV_PY), [str(_VENV_PY), *sys.argv])
 
 import gingr_lib  # noqa: E402
+import triplib  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 PORTAL = gingr_lib.PORTAL
@@ -85,8 +89,10 @@ def out(d: dict, code: int = 0) -> int:
 
 # ── plan / invariants ────────────────────────────────────────────────────────
 
-def resolve_dates(args) -> tuple[date, date, list, str | None]:
-    """Return (drop_date, pick_date, gina_messages, trip_name)."""
+def resolve_dates(args) -> tuple[date, date, str | None, str | None, list, str | None]:
+    """Return (drop_date, pick_date, plan_drop_time, plan_pickup_time,
+    gina_messages, trip_name). The plan times are None when not carried by the
+    plan (or when booking from explicit --drop-date/--pickup-date)."""
     if args.plan:
         try:
             plan = json.loads(args.plan)
@@ -97,10 +103,11 @@ def resolve_dates(args) -> tuple[date, date, list, str | None]:
         if not (d and p):
             raise ValueError("--plan missing drop_off/pick_up")
         return (date.fromisoformat(d), date.fromisoformat(p),
+                plan.get("drop_time"), plan.get("pickup_time"),
                 plan.get("gina_messages", []), plan.get("trip_name"))
     if args.drop_date and args.pickup_date:
         return (date.fromisoformat(args.drop_date),
-                date.fromisoformat(args.pickup_date), [], None)
+                date.fromisoformat(args.pickup_date), None, None, [], None)
     raise ValueError("supply --plan OR both --drop-date and --pickup-date")
 
 
@@ -386,8 +393,12 @@ def main() -> int:
     ap.add_argument("--pickup-date", default=None, help="ISO pickup date (with --drop-date)")
     ap.add_argument("--confirm-drop-date", required=True, help="ISO; must equal the plan drop-off")
     ap.add_argument("--confirm-pickup-date", required=True, help="ISO; must equal the plan pickup")
-    ap.add_argument("--drop-time", default="08:00 AM")
-    ap.add_argument("--pickup-time", default="09:00 AM")
+    ap.add_argument("--drop-time", default=None,
+                    help="Drop-off clock time, e.g. '3pm' or '03:00 PM'. Overrides the "
+                         "plan's time; defaults to the plan's, then 08:00 AM.")
+    ap.add_argument("--pickup-time", default=None,
+                    help="Pickup clock time, e.g. '11am' or '11:00 AM'. Overrides the "
+                         "plan's time; defaults to the plan's, then 09:00 AM.")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--allow-overlap", action="store_true")
     ap.add_argument("--no-gina", action="store_true")
@@ -401,8 +412,17 @@ def main() -> int:
                     "reason": "No saved Gingr session. Run gingr-login.py first."}, 2)
 
     try:
-        drop_date, pick_date, gina_messages, trip_name = resolve_dates(args)
+        drop_date, pick_date, plan_drop_time, plan_pickup_time, gina_messages, trip_name = resolve_dates(args)
     except ValueError as e:
+        return out({"status": "error", "reason": str(e)}, 2)
+
+    # Time precedence: explicit CLI flag > plan-carried time > hard default.
+    try:
+        drop_time = triplib.normalize_clock_time(
+            args.drop_time or plan_drop_time or "08:00 AM")
+        pickup_time = triplib.normalize_clock_time(
+            args.pickup_time or plan_pickup_time or "09:00 AM")
+    except triplib.TimeFormatError as e:
         return out({"status": "error", "reason": str(e)}, 2)
 
     # --confirm-* invariants (the square-appointments safety pattern)
@@ -456,8 +476,8 @@ def main() -> int:
                     _goto_month(page, pick_date)
                 _click_day(page, pick_date.day)
                 page.wait_for_timeout(900)
-                _pick_dropdown(page, "Select a drop off time", args.drop_time)
-                _pick_dropdown(page, "Select a pick up time", args.pickup_time)
+                _pick_dropdown(page, "Select a drop off time", drop_time)
+                _pick_dropdown(page, "Select a pick up time", pickup_time)
                 _click_bottom_nav(page, "SERVICES")
                 page.wait_for_timeout(4000)
 
@@ -481,8 +501,8 @@ def main() -> int:
                 base = {
                     "dog": "Pallo",
                     "facility": "Laurel Acres Kennels - Hillsboro",
-                    "drop_off": f"{drop_date.isoformat()} {args.drop_time}",
-                    "pick_up": f"{pick_date.isoformat()} {args.pickup_time}",
+                    "drop_off": f"{drop_date.isoformat()} {drop_time}",
+                    "pick_up": f"{pick_date.isoformat()} {pickup_time}",
                     "nights": counts["nights"],
                     "expected_activities": {
                         "play_yard_total": counts["play_yard"],

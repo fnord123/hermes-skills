@@ -18,6 +18,7 @@ David" → user_home; "<child> with Christine" → gina_mom.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -38,6 +39,47 @@ GINA_PREFIX = "[Gina] "
 
 class CalendarError(Exception):
     pass
+
+
+class TimeFormatError(ValueError):
+    pass
+
+
+_CLOCK_RE = re.compile(
+    r"^\s*(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?\s*$", re.IGNORECASE)
+_24H_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*$")
+
+
+def normalize_clock_time(s: str) -> str:
+    """Normalize a loose clock time into Gingr's dropdown format: zero-padded
+    12-hour "HH:MM AM/PM" (e.g. "03:00 PM", "11:00 AM").
+
+    Accepts "3pm", "3 pm", "3:00pm", "3:00 PM", "03:00 PM", and 24-hour
+    "15:00" / "11:00". Raises TimeFormatError on anything it can't parse so
+    the caller surfaces a clear error rather than booking a wrong/blank time.
+    """
+    if not s or not s.strip():
+        raise TimeFormatError("empty time")
+    raw = s.strip()
+    m = _CLOCK_RE.match(raw)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        ampm = m.group(3).upper() + "M"
+        if not (1 <= hour <= 12) or not (0 <= minute <= 59):
+            raise TimeFormatError(f"out-of-range time: {s!r}")
+        return f"{hour:02d}:{minute:02d} {ampm}"
+    m = _24H_RE.match(raw)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if not (0 <= hour <= 23) or not (0 <= minute <= 59):
+            raise TimeFormatError(f"out-of-range time: {s!r}")
+        ampm = "AM" if hour < 12 else "PM"
+        h12 = hour % 12 or 12
+        return f"{h12:02d}:{minute:02d} {ampm}"
+    raise TimeFormatError(
+        f"could not parse time {s!r}; use forms like '3pm', '3:00 PM', or '15:00'")
 
 
 def _calendar_script(name: str) -> Path:

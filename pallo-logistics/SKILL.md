@@ -47,10 +47,10 @@ The 27B model cannot process images and these paths will fail with errors.
 |---|---|---|
 | `pallo-stays.py [--include-past] [--include-canceled] [--all]` | List Pallo's reservations from the portal. Default = upcoming + in-progress. | No |
 | `pallo-trip-plan.py --trip-name <name>` *or* `--trip-start <ISO> --trip-end <ISO>` | Build the boarding window + activity slate + proposed Gina messages for a trip. **Adds one day of buffer each end** (drop-off = day before trip, pickup = day after). Returns an opaque `plan_json`. | No |
-| `pallo-trip-plan.py --drop-date <ISO> --pickup-date <ISO>` | Same as above but uses the given dates **directly as boarding dates** — no buffer added. Use this when the user specifies explicit drop-off and pickup dates (e.g. "drop Pallo on Sep 30, pick up Oct 4") rather than travel dates. | No |
+| `pallo-trip-plan.py --drop-date <ISO> --pickup-date <ISO> [--drop-time <t>] [--pickup-time <t>]` | Same as above but uses the given dates **directly as boarding dates** — no buffer added. Use this when the user specifies explicit drop-off and pickup dates (e.g. "drop Pallo on Sep 30, pick up Oct 4") rather than travel dates. Pass `--drop-time`/`--pickup-time` when the user gives clock times; they're carried in the `plan_json` so the booking uses them. | No |
 | `pallo-trip-status.py [--trip-name <name>] [--trip-start/--trip-end] [--horizon-days N]` | Is a trip's boarding set up? No trip identifier = sweep ALL upcoming trips. | No |
 | `gina-where.py --date <ISO> [--who Gina\|Sky]` | Where is Gina (residency) on a date, from the merged 2Houses feed. | No |
-| `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--dry-run] [--simple-slate]` | Make the boarding reservation + activity slate, then send the plan's Gina messages. | **Yes — real, paid** |
+| `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--drop-time <t>] [--pickup-time <t>] [--dry-run] [--simple-slate]` | Make the boarding reservation + activity slate, then send the plan's Gina messages. Drop/pickup times come from the plan; `--drop-time`/`--pickup-time` here override them. | **Yes — real, paid** |
 | `pallo-cancel.py --stay-id <id> --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--dry-run]` | Cancel a stay (located by its dates; re-verifies the displayed dates before cancelling). | **Yes** |
 | `pallo-modify-stay.py --stay-id <id> --new-drop-date <ISO> --new-pickup-date <ISO> [--simple-slate] [--dry-run]` | Change a stay's dates/activities. The portal has no in-place edit, so this books the new stay, then cancels the old. | **Yes** |
 | `pallo-trip-prep.py --trip-name <name> [--commit --confirm-drop-date <ISO> --confirm-pickup-date <ISO>]` | One-call trip prep: readiness → plan → (with `--commit`) book + notify Gina. No `--commit` = read-only preview. | **Yes (with `--commit`)** |
@@ -115,6 +115,26 @@ buffer is added. Use these when the user says things like "drop Pallo off Sep 30
 pick up Oct 4" or gives you specific kennel times ("Sep 30 3pm to Oct 4 11am").
 If in doubt about which kind of dates the user means, ask — getting this wrong
 adds an unwanted extra day on each end.
+
+## Drop-off / pickup times
+
+When the user gives clock times ("3pm", "11am", "Sep 30 3pm to Oct 4 11am"),
+pass them as `--drop-time` / `--pickup-time`. The scripts accept loose forms —
+`3pm`, `3:00 PM`, `15:00` all work; you do NOT need to reformat them. Without
+these flags the booking defaults to **08:00 AM drop / 09:00 AM pickup**, so if
+the user stated times and you omit the flags, the reservation gets the wrong
+times. Set them on `pallo-trip-plan.py` (they travel in the `plan_json`) or
+directly on `pallo-book-trip.py`. A `dates_invalid` status with a time reason
+means the clock value couldn't be parsed — re-read what the user said.
+
+Example for "book Pallo Sep 30 3pm to Oct 4 11am":
+```
+pallo-trip-plan.py --drop-date 2026-09-30 --pickup-date 2026-10-04 \
+    --drop-time 3pm --pickup-time 11am
+# then, after the user confirms:
+pallo-book-trip.py --plan '<plan_json>' \
+    --confirm-drop-date 2026-09-30 --confirm-pickup-date 2026-10-04
+```
 
 ## Session expiry
 
