@@ -204,8 +204,16 @@ def _pick_dropdown(page, placeholder: str, value: str):
 
 
 def _click_bottom_nav(page, label: str):
-    """Click an uppercase bottom-bar wizard button (SERVICES/NOTES/REVIEW/BACK)."""
-    page.get_by_text(label, exact=True).first.click(timeout=8000)
+    """Click an uppercase bottom-bar wizard button (SERVICES/NOTES/REVIEW/BACK).
+
+    After the last ADD SERVICE a success toast / full-screen backdrop lingers and
+    intercepts this click, so let the panel settle, then route through _press_text
+    (real Playwright click, then a pointer-dispatch fallback that ignores the
+    overlay). prefer_last=False: the bottom-nav 'NOTES' is distinct from the
+    'Notes' step-indicator by case (exact match)."""
+    _wait_panel_closed(page, timeout_ms=4000)
+    if not _press_text(page, label, exact=True, prefer_last=False, timeout=8000):
+        raise RuntimeError(f"could not click bottom-nav {label!r}")
 
 
 def _open_activity_time(page):
@@ -315,20 +323,108 @@ def _open_frequency(page):
     }""")
 
 
-def _click_service_row(page, row_label: str):
-    """Open a service's panel by clicking its row in the Services list.
-
-    The list is a React-Native-Web responder surface: a bare JS .click() does
-    NOT trigger its press handler. So we use a normal Playwright click first
-    (which RNW honours), and only if that's intercepted fall back to dispatching
-    a real pointer-event sequence on the row — preferring the list row
-    (data-testid 'addonsList.*') over the identically-named panel title."""
+def _press_text(page, text: str, exact: bool = True,
+                prefer_last: bool = True, timeout: int = 6000) -> bool:
+    """Click a dropdown OPTION / control by text, getting through the full-screen
+    backdrop that overlays an OPEN dropdown (it intercepts Playwright clicks on
+    the option even though the option is visible). Real Playwright click first;
+    if intercepted, dispatch a pointer press directly on the element. `prefer_last`
+    picks the option (rendered after the field) over an identically-texted field."""
+    loc = page.get_by_text(text, exact=exact)
+    target = loc.last if prefer_last else loc.first
     try:
-        page.get_by_text(row_label, exact=True).first.click(timeout=10000)
+        target.click(timeout=timeout)
         return True
     except Exception:
         pass
-    ok = bool(page.evaluate(r"""(label) => {
+    return bool(page.evaluate(r"""(args) => {
+        const [txt, exact, preferLast] = args;
+        let els=[...document.querySelectorAll('div,span,a,button')].filter(e=>{
+            const t=(e.innerText||'').trim();
+            return exact ? t===txt : t.includes(txt);
+        });
+        // keep leaf-most matches so we click the option text, not a wrapper
+        els = els.filter(e => !els.some(o => o!==e && e.contains(o)));
+        if(!els.length) return false;
+        const el = preferLast ? els[els.length-1] : els[0];
+        const r=el.getBoundingClientRect();
+        const o={bubbles:true, cancelable:true,
+                 clientX:r.x+r.width/2, clientY:r.y+r.height/2, pointerId:1};
+        el.dispatchEvent(new PointerEvent('pointerdown', o));
+        el.dispatchEvent(new MouseEvent('mousedown', o));
+        el.dispatchEvent(new PointerEvent('pointerup', o));
+        el.dispatchEvent(new MouseEvent('mouseup', o));
+        el.dispatchEvent(new MouseEvent('click', o));
+        return true;
+    }""", [text, exact, prefer_last]))
+
+
+def _panel_shows(page, row_label: str) -> bool:
+    """True if the OPEN activity panel is for `row_label` — i.e. its title (top
+    of the right-hand panel) equals the label. Used to detect a mis-targeted
+    row click that opened the wrong service."""
+    return bool(page.evaluate(r"""(label) => {
+        const W=window.innerWidth, H=window.innerHeight;
+        return [...document.querySelectorAll('div,span')].some(e => {
+            if((e.innerText||'').trim() !== label) return false;
+            const r=e.getBoundingClientRect();
+            // panel title sits in the upper portion of the right-hand panel
+            return r.width>0 && r.x > W*0.45 && r.y < H*0.30;
+        });
+    }""", row_label))
+
+
+def _close_panel(page):
+    """Dismiss an open activity panel (e.g. when the wrong service opened).
+    Try the panel's top-right 'X', then Escape, then click the dimmed backdrop."""
+    page.evaluate(r"""() => {
+        const W=window.innerWidth;
+        let best=null;
+        for(const e of document.querySelectorAll('div,span,button,svg')){
+            const r=e.getBoundingClientRect();
+            if(r.y<80 && r.x>W-80 && r.width>0 && r.width<60 && r.height<60){
+                if(!best || r.x>best.x) best={el:e, x:r.x};
+            }
+        }
+        if(best){
+            let t=best.el;
+            for(let i=0;i<3 && t;i++){
+                const role=t.getAttribute && t.getAttribute('role');
+                if(t.tagName==='BUTTON' || role==='button') break;
+                if(t.parentElement) t=t.parentElement; else break;
+            }
+            t.click();
+        }
+    }""")
+    page.wait_for_timeout(400)
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    page.wait_for_timeout(600)
+
+
+def _press_row(page, row_label: str) -> bool:
+    """Open a service's row in the Services list. The list is a React-Native-Web
+    responder surface: a bare JS .click() does NOT trigger its press handler, so
+    scroll the row into view and use a real Playwright click first; only if that
+    is intercepted fall back to dispatching a full pointer sequence on the row
+    element (preferring the list row, data-testid 'addonsList.*')."""
+    # Scroll the row into view so a stale/scrolled layout can't mis-target.
+    page.evaluate(r"""(label) => {
+        const row=[...document.querySelectorAll('[data-testid^="addonsList."]')]
+            .find(e => (e.innerText||'').trim()===label)
+          || [...document.querySelectorAll('div,span')]
+            .find(e => (e.innerText||'').trim()===label);
+        if(row && row.scrollIntoView) row.scrollIntoView({block:'center'});
+    }""", row_label)
+    page.wait_for_timeout(300)
+    try:
+        page.get_by_text(row_label, exact=True).first.click(timeout=6000)
+        return True
+    except Exception:
+        pass
+    return bool(page.evaluate(r"""(label) => {
         const els=[...document.querySelectorAll('div,span,a,button')];
         let row=els.find(e => (e.getAttribute && /^addonsList\./.test(
                 e.getAttribute('data-testid')||'')) &&
@@ -336,10 +432,8 @@ def _click_service_row(page, row_label: str):
         if(!row) row=els.find(e => (e.innerText||'').trim()===label);
         if(!row) return false;
         const r=row.getBoundingClientRect();
-        const x=r.x+r.width/2, y=r.y+r.height/2;
-        const opts={bubbles:true, cancelable:true, clientX:x, clientY:y, pointerId:1};
-        // RNW's press responder listens to the pointer/mouse sequence, not a
-        // lone click. Fire one full press (no double-dispatch).
+        const opts={bubbles:true, cancelable:true,
+                    clientX:r.x+r.width/2, clientY:r.y+r.height/2, pointerId:1};
         row.dispatchEvent(new PointerEvent('pointerdown', opts));
         row.dispatchEvent(new MouseEvent('mousedown', opts));
         row.dispatchEvent(new PointerEvent('pointerup', opts));
@@ -347,9 +441,22 @@ def _click_service_row(page, row_label: str):
         row.dispatchEvent(new MouseEvent('click', opts));
         return true;
     }""", row_label))
-    if not ok:
-        raise RuntimeError(f"could not open service row {row_label!r}")
-    return True
+
+
+def _click_service_row(page, row_label: str, attempts: int = 3):
+    """Open `row_label`'s panel and VERIFY the right service opened. After the
+    bulk adds the list can scroll, so a click may mis-target an adjacent row
+    (observed: asking for Play Yard, getting Romp n' Rassle). Verify the panel
+    title; if it's wrong or nothing opened, close and retry."""
+    for i in range(attempts):
+        _press_row(page, row_label)
+        if _wait_panel_open(page, timeout_ms=7000) and _panel_shows(page, row_label):
+            return True
+        # wrong service or no panel — reset and retry
+        _close_panel(page)
+        _wait_panel_closed(page, timeout_ms=5000)
+    raise RuntimeError(f"could not open the correct panel for {row_label!r} "
+                       f"after {attempts} attempts")
 
 
 def _click_add_service(page) -> bool:
@@ -407,12 +514,14 @@ def _add_activity(page, row_label: str, frequency: str, time_slot: str):
     # when the field already shows the same text.
     _open_frequency(page)
     page.wait_for_timeout(800)
-    page.get_by_text(frequency, exact=True).last.click(timeout=8000)
+    if not _press_text(page, frequency):
+        raise RuntimeError(f"could not select frequency {frequency!r} for {row_label}")
     page.wait_for_timeout(800)
     # TIME (defaults to a value; open it, then pick the slot)
     _open_activity_time(page)
     page.wait_for_timeout(900)
-    page.get_by_text(time_slot, exact=True).last.click(timeout=8000)
+    if not _press_text(page, time_slot):
+        raise RuntimeError(f"could not select time {time_slot!r} for {row_label}")
     page.wait_for_timeout(700)
     if not _click_add_service(page):
         raise RuntimeError(f"could not click ADD SERVICE for {row_label}")
@@ -427,7 +536,8 @@ def _add_activity_once(page, row_label: str, target: date, time_slot: str):
     page.wait_for_timeout(800)
     _open_frequency(page)
     page.wait_for_timeout(700)
-    page.get_by_text("Once", exact=True).last.click(timeout=8000)
+    if not _press_text(page, "Once"):
+        raise RuntimeError(f"could not select 'Once' frequency for {row_label}")
     page.wait_for_timeout(900)
     _open_date_field(page)
     page.wait_for_timeout(1000)
@@ -438,7 +548,8 @@ def _add_activity_once(page, row_label: str, target: date, time_slot: str):
     page.wait_for_timeout(700)
     _open_activity_time(page)
     page.wait_for_timeout(900)
-    page.get_by_text(time_slot, exact=True).last.click(timeout=8000)
+    if not _press_text(page, time_slot):
+        raise RuntimeError(f"could not select time {time_slot!r} for {row_label} (once)")
     page.wait_for_timeout(600)
     if not _click_add_service(page):
         raise RuntimeError(f"could not click ADD SERVICE for {row_label} (once)")
@@ -651,6 +762,20 @@ def main() -> int:
                 page.wait_for_timeout(4000)
 
                 summary = _review_summary(page)
+
+                # Verify the portal actually accepted the requested slate. Gingr
+                # collapses same-day same-activity sessions, so a per-day SECOND
+                # Play Yard does not register as an extra session — surface that
+                # rather than silently reporting success.
+                def _count_from_lines(lines, name):
+                    for ln in lines or []:
+                        m = re.search(rf"{name}\s*\((\d+)\)", ln, re.I)
+                        if m:
+                            return int(m.group(1))
+                    return None
+                booked_py = _count_from_lines(summary.get("activity_lines"), "PLAY YARD")
+                booked_nw = _count_from_lines(summary.get("activity_lines"), "NATURE WALK")
+
                 base = {
                     "dog": "Pallo",
                     "facility": "Laurel Acres Kennels - Hillsboro",
@@ -664,8 +789,21 @@ def main() -> int:
                                          if args.simple_slate
                                          else "2x Play Yard + 1x Nature Walk"),
                     },
+                    "booked_activities": {"play_yard": booked_py, "nature_walk": booked_nw},
                     "review": summary,
                 }
+                warns = []
+                if booked_py is not None and booked_py < counts["play_yard"]:
+                    warns.append(
+                        f"requested {counts['play_yard']} Play Yard sessions but the portal "
+                        f"booked {booked_py}: Gingr dedupes Play Yard to once per day, so the "
+                        f"per-day second session can't be pre-booked online (arrange on-site).")
+                if booked_nw is not None and booked_nw < counts["nature_walk"]:
+                    warns.append(
+                        f"requested {counts['nature_walk']} Nature Walk sessions but the portal "
+                        f"booked {booked_nw}.")
+                if warns:
+                    base["slate_warning"] = " ".join(warns)
 
                 if args.dry_run:
                     artifacts = Path.home() / "pallo-boarding" / "artifacts"
@@ -686,7 +824,8 @@ def main() -> int:
                                           "refusing to submit. Re-run with --dry-run and inspect the review screenshot."}, 1)
                 _check_terms(page)
                 page.wait_for_timeout(900)
-                page.get_by_text("SUBMIT REQUEST", exact=True).first.click(timeout=10000)
+                if not _press_text(page, "SUBMIT REQUEST", exact=True, prefer_last=False, timeout=10000):
+                    raise RuntimeError("could not click SUBMIT REQUEST")
                 page.wait_for_timeout(6000)
                 confirm_text = page.inner_text("body")
                 artifacts = Path.home() / "pallo-boarding" / "artifacts"
