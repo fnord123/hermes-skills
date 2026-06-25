@@ -86,7 +86,7 @@ lines or plain text) the agent can relay to the user directly.
 | `list-merchants.py` | Show the configured merchant aliases. | No |
 | `customer-info.py show` | Confirm the user's contact info (phone/name/email) is configured for booking. Redacted output safe for chat. | No |
 | `square-list.py --merchant <alias> [--days-back <N>] [--days-ahead <N>]` | List the user's appointments at one merchant, parsed from their AgentMail confirmation emails. Defaults to upcoming only (60 days ahead, 0 back). Pass `--days-back 90` (or higher) when the user asks about *past* appointments. | No |
-| `square-find-slot.py --merchant <alias> --around <date-or-relative>` | Check for collision with existing booking; if none, return up to 5 available slots near the target date. | No |
+| `square-find-slot.py --merchant <alias> --around <date-or-relative>` | Check for collision with existing booking; if none, return up to 5 available slots near the target date. **⚠ Slow — uses Playwright to load Square's booking widget. Always call the terminal with `timeout=300`; the default 60s is too short and will kill it before it finishes.** | No |
 | `square-book.py --merchant <alias> --slot-handle '<json>' --confirm-date <ISO> --confirm-time '<HH:MM AM/PM>' [--dry-run] [--note <text>]` | Book the slot that find-slot emitted. Pass through `slot_handle` opaquely. `--confirm-date` and `--confirm-time` are safety invariants. See "Booking safety" below. | Yes |
 | `square-cancel.py --merchant <alias> --booking-handle '<URL>' --confirm-time '<HH:MM AM/PM>' [--confirm-date <ISO>]` | Cancel a specific existing booking. | Yes |
 | `square-move.py --merchant <alias> --booking-handle <h> --new-slot <slot-handle> --confirm-time <ISO>` | Move an existing booking to a new slot. NOT YET BUILT — fall back to cancel + book if the user asks. | Yes (planned) |
@@ -158,6 +158,7 @@ they've never visited.
 ```
 square-find-slot.py --merchant sugarmama --around 2026-06-20
 ```
+**Always run `square-find-slot.py` with `timeout=300` in the terminal call — Playwright needs up to 2 minutes on slow days.**
 Three response shapes; relay each to the user differently:
 
 - **`status="already_have"`**: user already has an appointment within

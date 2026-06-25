@@ -10,6 +10,10 @@ description: >
   for "where is Gina on <date>" and the Model-X handoff messages that go with a
   booking. Trip dates come from the merged calendar (Kayak feed); the agent can
   pass a trip NAME and let the scripts resolve the dates.
+  YOU MUST use this skill's scripts for ALL Pallo boarding tasks. Do NOT open a
+  browser, do NOT web-search "Laurel Acres" or "Gingr", and do NOT try to
+  navigate to any booking website — those paths will fail. The ONLY correct
+  approach is to run the scripts listed below and relay their output.
 version: 0.1.0
 license: MIT
 metadata:
@@ -30,12 +34,20 @@ small JSON the agent relays to the user. Scope: **Pallo only, Laurel Acres
 - "Is boarding set up for <trip>?" readiness checks (one trip or all upcoming).
 - "Where is Gina on <date>?" and the Model-X handoff coordination tied to a stay.
 
+## NEVER do these — use the scripts instead
+- **Do NOT** open a browser or use browser tools for Gingr / Laurel Acres.
+- **Do NOT** web-search for "Laurel Acres", "Gingr", or kennel booking sites.
+- **Do NOT** navigate to any URL yourself — the scripts handle all portal interaction.
+- **Do NOT** try to use `browser_vision` or screenshot the booking portal.
+The 27B model cannot process images and these paths will fail with errors.
+
 ## The tool surface
 
 | Script | Purpose | Mutating? |
 |---|---|---|
 | `pallo-stays.py [--include-past] [--include-canceled] [--all]` | List Pallo's reservations from the portal. Default = upcoming + in-progress. | No |
-| `pallo-trip-plan.py --trip-name <name>` *or* `--trip-start <ISO> --trip-end <ISO>` | Build the boarding window + activity slate + proposed Gina messages for a trip. Returns an opaque `plan_json`. | No |
+| `pallo-trip-plan.py --trip-name <name>` *or* `--trip-start <ISO> --trip-end <ISO>` | Build the boarding window + activity slate + proposed Gina messages for a trip. **Adds one day of buffer each end** (drop-off = day before trip, pickup = day after). Returns an opaque `plan_json`. | No |
+| `pallo-trip-plan.py --drop-date <ISO> --pickup-date <ISO>` | Same as above but uses the given dates **directly as boarding dates** — no buffer added. Use this when the user specifies explicit drop-off and pickup dates (e.g. "drop Pallo on Sep 30, pick up Oct 4") rather than travel dates. | No |
 | `pallo-trip-status.py [--trip-name <name>] [--trip-start/--trip-end] [--horizon-days N]` | Is a trip's boarding set up? No trip identifier = sweep ALL upcoming trips. | No |
 | `gina-where.py --date <ISO> [--who Gina\|Sky]` | Where is Gina (residency) on a date, from the merged 2Houses feed. | No |
 | `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--dry-run] [--simple-slate]` | Make the boarding reservation + activity slate, then send the plan's Gina messages. | **Yes — real, paid** |
@@ -91,12 +103,18 @@ those messages; `pallo-book-trip.py` sends them after a successful booking.
 `gina-pending.py` FIRST** to get the outstanding asks her reply is answering;
 after you've acted on her answer, call `gina-pending.py --resolve <id>`.
 
-## Trip dates
+## Trip dates vs. boarding dates
 
-Pass a trip NAME (e.g. `--trip-name London`) and let the scripts resolve dates
-from the calendar (Kayak feed preferred). If a name is ambiguous or unknown the
-script returns `ambiguous_trip` / `no_trip_found` — ask the user to clarify or
-give explicit `--trip-start` / `--trip-end`.
+**`--trip-start` / `--trip-end`** are TRAVEL dates. The script automatically
+adds a buffer: drop-off = day before trip starts, pickup = day after trip ends.
+Use these when the user says "I'm flying to London July 12–14" or gives you
+trip/travel dates.
+
+**`--drop-date` / `--pickup-date`** are the BOARDING dates themselves — no
+buffer is added. Use these when the user says things like "drop Pallo off Sep 30,
+pick up Oct 4" or gives you specific kennel times ("Sep 30 3pm to Oct 4 11am").
+If in doubt about which kind of dates the user means, ask — getting this wrong
+adds an unwanted extra day on each end.
 
 ## Session expiry
 

@@ -84,7 +84,7 @@ def get_existing_bookings(alias: str) -> list[dict]:
     try:
         res = subprocess.run(
             [sys.executable, str(sl), "--merchant", alias],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=20,
         )
     except subprocess.TimeoutExpired:
         return []
@@ -262,13 +262,13 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
         page.on("response", _capture_avail)
 
         try:
-            r = page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            r = page.goto(url, wait_until="domcontentloaded", timeout=30000)
             obs["http_status"] = r.status if r else None
         except Exception as e:
             obs["error"] = f"goto failed: {str(e).splitlines()[0][:200]}"
             browser.close()
             return obs
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(2000)
         obs["final_url"] = page.url
 
         def try_click(label: str, *selectors: str) -> bool:
@@ -280,7 +280,7 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
                     loc.click(timeout=4000)
                     obs["click_log"].append({"label": label, "selector": sel,
                                              "url_after": page.url})
-                    page.wait_for_timeout(2500)
+                    page.wait_for_timeout(1500)
                     return True
                 except Exception as e:
                     obs["click_log"].append({"label": label, "selector": sel,
@@ -337,7 +337,7 @@ def scrape_service_page(url: str, target_dt: datetime, probe: bool) -> dict:
         # The page fires buyer/availability on load; wait briefly for the
         # captured template, then query the target window directly.
         waited = 0
-        while not avail_template.get("post_data") and waited < 8000:
+        while not avail_template.get("post_data") and waited < 5000:
             page.wait_for_timeout(500)
             waited += 500
         if avail_template.get("post_data"):
