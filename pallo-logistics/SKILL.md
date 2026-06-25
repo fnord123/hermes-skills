@@ -50,7 +50,7 @@ The 27B model cannot process images and these paths will fail with errors.
 | `pallo-trip-plan.py --drop-date <ISO> --pickup-date <ISO> [--drop-time <t>] [--pickup-time <t>]` | Same as above but uses the given dates **directly as boarding dates** — no buffer added. Use this when the user specifies explicit drop-off and pickup dates (e.g. "drop Pallo on Sep 30, pick up Oct 4") rather than travel dates. Pass `--drop-time`/`--pickup-time` when the user gives clock times; they're carried in the `plan_json` so the booking uses them. | No |
 | `pallo-trip-status.py [--trip-name <name>] [--trip-start/--trip-end] [--horizon-days N]` | Is a trip's boarding set up? No trip identifier = sweep ALL upcoming trips. | No |
 | `gina-where.py --date <ISO> [--who Gina\|Sky]` | Where is Gina (residency) on a date, from the merged 2Houses feed. | No |
-| `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--drop-time <t>] [--pickup-time <t>] [--dry-run] [--simple-slate]` | Make the boarding reservation + activity slate, then send the plan's Gina messages. Drop/pickup times come from the plan; `--drop-time`/`--pickup-time` here override them. | **Yes — real, paid** |
+| `pallo-book-trip.py --plan '<plan_json>' --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--drop-time <t>] [--pickup-time <t>] [--dry-run] [--simple-slate]` | Make the boarding reservation + activity slate, then send the plan's Gina messages. Drop/pickup times come from the plan; `--drop-time`/`--pickup-time` here override them. **SLOW: drives the whole Playwright wizard — 1–4 minutes. ALWAYS call the terminal tool with `timeout=600` (or run it in the background); the default 60–120s timeout WILL kill it mid-booking. `--simple-slate` is much faster (~1 min) and reliable; the full slate is slower.** | **Yes — real, paid** |
 | `pallo-cancel.py --stay-id <id> --confirm-drop-date <ISO> --confirm-pickup-date <ISO> [--dry-run]` | Cancel a stay (located by its dates; re-verifies the displayed dates before cancelling). | **Yes** |
 | `pallo-modify-stay.py --stay-id <id> --new-drop-date <ISO> --new-pickup-date <ISO> [--simple-slate] [--dry-run]` | Change a stay's dates/activities. The portal has no in-place edit, so this books the new stay, then cancels the old. | **Yes** |
 | `pallo-trip-prep.py --trip-name <name> [--commit --confirm-drop-date <ISO> --confirm-pickup-date <ISO>]` | One-call trip prep: readiness → plan → (with `--commit`) book + notify Gina. No `--commit` = read-only preview. | **Yes (with `--commit`)** |
@@ -152,10 +152,19 @@ pallo-book-trip.py --plan '<plan_json>' \
 
 ## Session expiry
 
-If any script returns `session_expired` or `not_logged_in`, run
-`gingr-login.py` (reads credentials from the secrets file). If it returns
-`login_failed`, tell the user to check the portal credentials — do not retry in
-a loop.
+Run `gingr-login.py` **only** when a script's JSON explicitly returns
+`session_expired` or `not_logged_in`. Do NOT run it because a booking timed out,
+errored, or "felt stuck" — a timeout means the booking is slow (re-run with
+`timeout=600`), not that the session died. Running login needlessly wastes a
+minute and can trip the portal's rate limiting.
+
+If `gingr-login.py` returns `login_failed`, **stop and tell the user** — do not
+retry in a loop. The Gingr portal is a React-Native-Web app whose login form
+resists headless automation (the LOGIN press fires no auth request), so an
+automated refresh may simply not be possible from here; the user likely needs to
+refresh the saved session another way or verify the portal credentials. The
+existing saved session usually keeps working for reads and bookings until it
+truly expires, so a `login_failed` does not necessarily block the current task.
 
 ## Files this skill must NEVER read
 

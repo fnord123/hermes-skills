@@ -64,39 +64,56 @@ def login(login_id: str, password: str, show_head: bool) -> dict:
             return {"status": "error", "reason": f"goto login failed: {e}"}
         page.wait_for_timeout(3500)
 
-        # The form fields carry no name/id — match on placeholder text.
+        # The fields are React-Native-Web TextInputs (no name/id; match on
+        # placeholder). page.fill() sets the DOM value but RNW's controlled state
+        # does NOT register it, so enter REAL keystrokes: focus via JS (a Playwright
+        # click is intercepted by an overlay div) then keyboard.type.
+        def _type_into(placeholder: str, value: str) -> bool:
+            focused = page.evaluate(
+                """(ph) => { const i=[...document.querySelectorAll('input')]
+                    .find(x=>x.placeholder===ph); if(!i) return false; i.focus(); return true; }""",
+                placeholder)
+            if not focused:
+                return False
+            page.keyboard.type(value, delay=25)
+            return True
+
         try:
-            page.fill('input[placeholder="Enter email or mobile phone"]', login_id, timeout=15000)
-            page.fill('input[placeholder="Enter your password"]', password, timeout=15000)
+            if not _type_into("Enter email or mobile phone", login_id) or \
+               not _type_into("Enter your password", password):
+                browser.close()
+                return {"status": "error", "reason": "could not find the login fields"}
         except Exception as e:
             browser.close()
-            return {"status": "error", "reason": f"could not fill login fields: {e}"}
+            return {"status": "error", "reason": f"could not type into login fields: {e}"}
 
-        # Submit: press Enter, then fall back to clicking a login-ish control.
+        # Submit. The LOGIN control is a DIV (RNW pressable), not a <button> or a
+        # real <form>, so Enter and button:has-text selectors don't submit. Press
+        # Enter, then a real mouse click at the LOGIN button's coordinates.
         submitted_via = None
         try:
-            page.press('input[placeholder="Enter your password"]', "Enter")
+            page.keyboard.press("Enter")
             submitted_via = "enter"
-            page.wait_for_timeout(4500)
+            page.wait_for_timeout(2500)
         except Exception:
             pass
 
         if "public/login" in page.url:
-            for sel in (
-                'button:has-text("Log in")', 'button:has-text("Login")',
-                'button:has-text("Sign in")', 'button[type="submit"]',
-                '[role="button"]:has-text("Log in")', 'text="Log in"',
-            ):
+            box = page.evaluate(r"""() => {
+                const c=[...document.querySelectorAll('div,span,a')]
+                    .filter(e => /^log\s*in$/i.test((e.innerText||'').trim()));
+                if(!c.length) return null;
+                c.sort((a,b)=>b.getBoundingClientRect().width-a.getBoundingClientRect().width);
+                const r=c[0].getBoundingClientRect();
+                return {x:r.x+r.width/2, y:r.y+r.height/2};
+            }""")
+            if box:
                 try:
-                    loc = page.locator(sel).first
-                    if loc.count() == 0:
-                        continue
-                    loc.click(timeout=4000)
-                    submitted_via = sel
+                    page.mouse.click(box["x"], box["y"])
+                    submitted_via = "click-login"
                     page.wait_for_timeout(4500)
-                    break
                 except Exception:
-                    continue
+                    pass
 
         page.wait_for_timeout(2500)
         final_url = page.url
@@ -117,8 +134,13 @@ def login(login_id: str, password: str, show_head: bool) -> dict:
                 "status": "login_failed",
                 "submitted_via": submitted_via,
                 "final_url": final_url,
-                "hint": "Check GINGR_LOGIN / GINGR_PASSWORD in secrets.env. "
-                        "If correct, the portal may have shown a 2FA / captcha step.",
+                "hint": "Headless login to this Gingr portal does not complete: the "
+                        "LOGIN press fires no auth request (the form is a React-Native-Web "
+                        "app that appears to block headless/automated submission). The "
+                        "EXISTING saved session usually still works for reads and bookings "
+                        "until it truly expires — try the task anyway. To refresh the "
+                        "session, a non-headless login may be required; also verify "
+                        "GINGR_LOGIN / GINGR_PASSWORD in secrets.env are current.",
                 "body_head": body[:600],
             }
 
