@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
@@ -251,30 +252,182 @@ def _check_terms(page):
     }""")
 
 
+def _wait_panel_closed(page, timeout_ms: int = 9000) -> bool:
+    """After an ADD SERVICE the activity panel closes back to the Services list,
+    leaving a transient full-screen backdrop that briefly intercepts clicks.
+    Poll until the panel (identified by its 'ADD SERVICE' action button) is gone
+    so the next row click lands on a clean list. Returns True once closed."""
+    waited = 0
+    while waited < timeout_ms:
+        present = page.evaluate(r"""() =>
+            [...document.querySelectorAll('div,span,button,a')]
+              .some(e => /^\+?\s*ADD SERVICE$/i.test((e.innerText||'').trim()))""")
+        if not present:
+            page.wait_for_timeout(600)  # let the backdrop detach
+            return True
+        page.wait_for_timeout(400)
+        waited += 400
+    return False
+
+
+def _wait_panel_open(page, timeout_ms: int = 9000) -> bool:
+    """Wait until an activity panel is actually open — identified by its
+    'ADD SERVICE' action button — so we don't try to read FREQUENCY/TIME from a
+    list that never transitioned. Returns False if it never opens."""
+    waited = 0
+    while waited < timeout_ms:
+        present = page.evaluate(r"""() =>
+            [...document.querySelectorAll('div,span,button,a')]
+              .some(e => /^\+?\s*ADD SERVICE$/i.test((e.innerText||'').trim()))""")
+        if present:
+            return True
+        page.wait_for_timeout(400)
+        waited += 400
+    return False
+
+
+def _open_frequency(page):
+    """Open the FREQUENCY dropdown. Every activity panel reliably shows the
+    'Select a frequency' placeholder, so click it with a real Playwright event
+    (retries through any settling) — a one-shot JS click flaked on the second
+    panel. Fall back to a position-based JS click only if the text moved."""
+    try:
+        page.get_by_text("Select a frequency", exact=False).first.click(timeout=8000)
+        return
+    except Exception:
+        pass
+    page.evaluate(r"""() => {
+        const all=[...document.querySelectorAll('div,span')];
+        const lab=all.find(d=>(d.innerText||'').trim()==='FREQUENCY');
+        if(!lab) return;
+        const ly=lab.getBoundingClientRect().y;
+        const tlab=all.find(d=>(d.innerText||'').trim()==='TIME');
+        const maxY=tlab?tlab.getBoundingClientRect().y:1e9;
+        let best=null;
+        for(const d of all){
+            const t=(d.innerText||'').trim();
+            const r=d.getBoundingClientRect();
+            if(r.y>ly && r.y<maxY && d.children.length===0 && t.length>0){
+                if(!best || r.y<best.y) best={el:d,y:r.y};
+            }
+        }
+        if(best) best.el.click();
+    }""")
+
+
+def _click_service_row(page, row_label: str):
+    """Open a service's panel by clicking its row in the Services list.
+
+    The list is a React-Native-Web responder surface: a bare JS .click() does
+    NOT trigger its press handler. So we use a normal Playwright click first
+    (which RNW honours), and only if that's intercepted fall back to dispatching
+    a real pointer-event sequence on the row — preferring the list row
+    (data-testid 'addonsList.*') over the identically-named panel title."""
+    try:
+        page.get_by_text(row_label, exact=True).first.click(timeout=10000)
+        return True
+    except Exception:
+        pass
+    ok = bool(page.evaluate(r"""(label) => {
+        const els=[...document.querySelectorAll('div,span,a,button')];
+        let row=els.find(e => (e.getAttribute && /^addonsList\./.test(
+                e.getAttribute('data-testid')||'')) &&
+                (e.innerText||'').trim()===label);
+        if(!row) row=els.find(e => (e.innerText||'').trim()===label);
+        if(!row) return false;
+        const r=row.getBoundingClientRect();
+        const x=r.x+r.width/2, y=r.y+r.height/2;
+        const opts={bubbles:true, cancelable:true, clientX:x, clientY:y, pointerId:1};
+        // RNW's press responder listens to the pointer/mouse sequence, not a
+        // lone click. Fire one full press (no double-dispatch).
+        row.dispatchEvent(new PointerEvent('pointerdown', opts));
+        row.dispatchEvent(new MouseEvent('mousedown', opts));
+        row.dispatchEvent(new PointerEvent('pointerup', opts));
+        row.dispatchEvent(new MouseEvent('mouseup', opts));
+        row.dispatchEvent(new MouseEvent('click', opts));
+        return true;
+    }""", row_label))
+    if not ok:
+        raise RuntimeError(f"could not open service row {row_label!r}")
+    return True
+
+
+def _click_add_service(page) -> bool:
+    """Click the panel's '+ ADD SERVICE' button.
+
+    Two things make a naive get_by_text('ADD SERVICE', exact=True) flaky:
+      • the label renders with a leading '+' icon, so the element's text is
+        '+ ADD SERVICE' and an exact match misses it;
+      • an open TIME/FREQUENCY dropdown expands over the bottom-right of the
+        panel, covering the button, so Playwright's not-obscured actionability
+        check fails even when the locator resolves.
+    Try a couple of forgiving Playwright locators, then fall back to a direct
+    JS click (which ignores both the '+' prefix and the overlay)."""
+    for loc in (
+        page.locator("button:has-text('ADD SERVICE')"),
+        page.get_by_text(re.compile(r"^\+?\s*ADD SERVICE\s*$", re.I)),
+    ):
+        try:
+            loc.first.click(timeout=4000)
+            return True
+        except Exception:
+            continue
+    # JS fallback: pick the lowest on-page element whose text is (optionally a
+    # '+' then) 'ADD SERVICE' — that's the panel action button, not stray text —
+    # and click its nearest button-like ancestor.
+    return bool(page.evaluate(r"""() => {
+        const els=[...document.querySelectorAll('button,div,span,a')];
+        let best=null;
+        for(const e of els){
+            const t=(e.innerText||'').trim();
+            if(/^\+?\s*ADD SERVICE$/i.test(t)){
+                const r=e.getBoundingClientRect();
+                if(r.width>0 && r.height>0 && (!best || r.y>best.y)) best={el:e,y:r.y};
+            }
+        }
+        if(!best) return false;
+        let t=best.el;
+        for(let i=0;i<3 && t;i++){
+            const role=t.getAttribute && t.getAttribute('role');
+            if(t.tagName==='BUTTON' || role==='button') break;
+            if(t.parentElement) t=t.parentElement; else break;
+        }
+        t.click();
+        return true;
+    }"""))
+
+
 def _add_activity(page, row_label: str, frequency: str, time_slot: str):
-    page.get_by_text(row_label, exact=True).first.click(timeout=10000)
-    page.wait_for_timeout(2500)
-    # FREQUENCY
-    page.get_by_text("Select a frequency", exact=False).first.click(timeout=8000)
+    _click_service_row(page, row_label)
+    if not _wait_panel_open(page):
+        raise RuntimeError(f"service panel did not open for {row_label}")
     page.wait_for_timeout(800)
-    page.get_by_text(frequency, exact=True).first.click(timeout=8000)
+    # FREQUENCY — open by position (placeholder OR pre-filled value), then pick
+    # the option. Options render below the field, so .last is the option even
+    # when the field already shows the same text.
+    _open_frequency(page)
+    page.wait_for_timeout(800)
+    page.get_by_text(frequency, exact=True).last.click(timeout=8000)
     page.wait_for_timeout(800)
     # TIME (defaults to a value; open it, then pick the slot)
     _open_activity_time(page)
     page.wait_for_timeout(900)
-    page.get_by_text(time_slot, exact=True).first.click(timeout=8000)
+    page.get_by_text(time_slot, exact=True).last.click(timeout=8000)
     page.wait_for_timeout(700)
-    page.get_by_text("ADD SERVICE", exact=True).first.click(timeout=10000)
-    page.wait_for_timeout(3000)
+    if not _click_add_service(page):
+        raise RuntimeError(f"could not click ADD SERVICE for {row_label}")
+    _wait_panel_closed(page)
 
 
 def _add_activity_once(page, row_label: str, target: date, time_slot: str):
     """Add a single-day ('Once') activity on `target` at `time_slot`."""
-    page.get_by_text(row_label, exact=True).first.click(timeout=10000)
-    page.wait_for_timeout(2500)
-    page.get_by_text("Select a frequency", exact=False).first.click(timeout=8000)
+    _click_service_row(page, row_label)
+    if not _wait_panel_open(page):
+        raise RuntimeError(f"service panel did not open for {row_label} (once)")
+    page.wait_for_timeout(800)
+    _open_frequency(page)
     page.wait_for_timeout(700)
-    page.get_by_text("Once", exact=True).first.click(timeout=8000)
+    page.get_by_text("Once", exact=True).last.click(timeout=8000)
     page.wait_for_timeout(900)
     _open_date_field(page)
     page.wait_for_timeout(1000)
@@ -285,10 +438,11 @@ def _add_activity_once(page, row_label: str, target: date, time_slot: str):
     page.wait_for_timeout(700)
     _open_activity_time(page)
     page.wait_for_timeout(900)
-    page.get_by_text(time_slot, exact=True).first.click(timeout=8000)
+    page.get_by_text(time_slot, exact=True).last.click(timeout=8000)
     page.wait_for_timeout(600)
-    page.get_by_text("ADD SERVICE", exact=True).first.click(timeout=10000)
-    page.wait_for_timeout(2500)
+    if not _click_add_service(page):
+        raise RuntimeError(f"could not click ADD SERVICE for {row_label} (once)")
+    _wait_panel_closed(page)
 
 
 def _navigate_to_wizard(page):
@@ -309,7 +463,6 @@ def _navigate_to_wizard(page):
 
 
 def _review_summary(page) -> dict:
-    import re
     text = page.inner_text("body")
     total = None
     m = re.search(r"ESTIMATED TOTAL:\s*\$?\s?([\d,]+\.\d{2})", text, re.I)
@@ -507,7 +660,9 @@ def main() -> int:
                     "expected_activities": {
                         "play_yard_total": counts["play_yard"],
                         "nature_walk_total": counts["nature_walk"],
-                        "per_full_day": "2x Play Yard + 1x Nature Walk",
+                        "per_full_day": ("1x Play Yard + 1x Nature Walk"
+                                         if args.simple_slate
+                                         else "2x Play Yard + 1x Nature Walk"),
                     },
                     "review": summary,
                 }
@@ -543,6 +698,15 @@ def main() -> int:
                 base["manage_url"] = page.url
                 base["confirmation_hint"] = conf.group(0).strip() if conf else None
                 base["confirmation_screenshot"] = str(artifacts / "book_confirmation.png")
+            except Exception:
+                # Capture the page state at the moment of failure for diagnosis.
+                try:
+                    dbg = Path.home() / "pallo-boarding" / "artifacts"
+                    dbg.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(dbg / "book_failure.png"), full_page=True)
+                except Exception:
+                    pass
+                raise
             finally:
                 ctx.storage_state(path=str(gingr_lib.STATE_FILE))
                 browser.close()
