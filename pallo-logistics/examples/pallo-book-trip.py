@@ -324,22 +324,59 @@ def _set_activity_time(page, target: str) -> bool:
     return _norm_time(_current_activity_time(page)) == want
 
 
-def _check_terms(page):
-    """Tick the required 'I agree to the terms and conditions' checkbox."""
-    page.evaluate(r"""() => {
-        const all=[...document.querySelectorAll('div,span,input')];
-        const row=all.find(d=>/I agree to the terms/i.test(d.innerText||''));
-        if(!row) return;
+def _terms_checked(page) -> bool:
+    """True if the 'I agree to the terms and conditions' box is ticked — detected
+    by its filled (blue-dominant) background. Unchecked is white/transparent."""
+    return bool(page.evaluate(r"""() => {
+        const rows=[...document.querySelectorAll('div,span')]
+            .filter(x=>/I agree to the terms/i.test(x.innerText||''));
+        const row=rows[rows.length-1]; if(!row) return false;
         const ry=row.getBoundingClientRect();
-        let box=null;
-        for(const d of all){
-            const r=d.getBoundingClientRect();
-            if(Math.abs(r.y-ry.y)<30 && r.x<ry.x+20 && r.width>8 && r.width<40 && r.height<40){
-                if(!box || r.x<box.x){box={el:d, x:r.x};}
+        for(const el of document.querySelectorAll('div')){
+            const r=el.getBoundingClientRect();
+            if(r.width>12 && r.width<34 && r.height>12 && r.height<34 &&
+               Math.abs(r.y+r.height/2-(ry.y+ry.height/2))<40 && r.x<ry.x+12){
+                const m=(getComputedStyle(el).backgroundColor||'')
+                    .match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                if(m){const rr=+m[1],gg=+m[2],bb=+m[3];
+                      if(bb>120 && bb>rr+40 && bb>gg+40) return true;}
             }
         }
-        (box?box.el:row).click();
-    }""")
+        return false;
+    }"""))
+
+
+def _check_terms(page) -> bool:
+    """Tick the required terms checkbox and VERIFY it's ticked. It's an RNW
+    pressable that ignores a bare JS .click(), so use a real mouse click at its
+    coordinates (proven to toggle it). Retries; returns whether it ended checked."""
+    for _ in range(3):
+        if _terms_checked(page):
+            return True
+        box = page.evaluate(r"""() => {
+            const rows=[...document.querySelectorAll('div,span')]
+                .filter(x=>/I agree to the terms/i.test(x.innerText||''));
+            const row=rows[rows.length-1]; if(!row) return null;
+            const ry=row.getBoundingClientRect();
+            let best=null;
+            for(const el of document.querySelectorAll('div')){
+                const c=(el.className||'').toString();
+                const r=el.getBoundingClientRect();
+                if(c.includes('r-1loqt21') && r.width>10 && r.width<45 &&
+                   Math.abs(r.y+r.height/2-(ry.y+ry.height/2))<40 && r.x<ry.x+30){
+                    if(!best || r.x<best.x) best={x:r.x+r.width/2, y:r.y+r.height/2};
+                }
+            }
+            return best;
+        }""")
+        if not box:
+            break
+        try:
+            page.mouse.click(box["x"], box["y"])
+        except Exception:
+            pass
+        page.wait_for_timeout(900)
+    return _terms_checked(page)
 
 
 def _wait_panel_closed(page, timeout_ms: int = 9000) -> bool:
@@ -916,16 +953,52 @@ def main() -> int:
                     return out({**base, "status": "error",
                                 "reason": f"could not find the 'SUBMIT REQUEST' button (saw {label!r}); "
                                           "refusing to submit. Re-run with --dry-run and inspect the review screenshot."}, 1)
-                _check_terms(page)
-                page.wait_for_timeout(900)
-                if not _press_text(page, "SUBMIT REQUEST", exact=True, prefer_last=False, timeout=10000):
-                    raise RuntimeError("could not click SUBMIT REQUEST")
-                page.wait_for_timeout(6000)
-                confirm_text = page.inner_text("body")
                 artifacts = Path.home() / "pallo-boarding" / "artifacts"
                 artifacts.mkdir(parents=True, exist_ok=True)
+                # The terms checkbox gates SUBMIT REQUEST. It MUST end up ticked or
+                # the button is inert and the submit silently no-ops.
+                if not _check_terms(page):
+                    page.screenshot(path=str(artifacts / "book_failure.png"), full_page=True)
+                    return out({**base, "status": "error",
+                                "reason": "could not tick the terms-and-conditions checkbox; "
+                                          "did NOT submit. Nothing was booked.",
+                                "screenshot": str(artifacts / "book_failure.png")}, 1)
+                page.wait_for_timeout(600)
+                # Real submit. SUBMIT REQUEST is an RNW pressable; a real mouse
+                # click at its coordinates is what reliably fires it (same as the
+                # terms checkbox). Fall back to _press_text.
+                sbox = page.evaluate(r"""() => {
+                    const el=[...document.querySelectorAll('div,span,button')]
+                        .find(e => /^SUBMIT REQUEST$/i.test((e.innerText||'').trim()));
+                    if(!el) return null;
+                    const r=el.getBoundingClientRect();
+                    return {x:r.x+r.width/2, y:r.y+r.height/2};
+                }""")
+                clicked = False
+                if sbox:
+                    try:
+                        page.mouse.click(sbox["x"], sbox["y"])
+                        clicked = True
+                    except Exception:
+                        pass
+                if not clicked and not _press_text(page, "SUBMIT REQUEST", exact=True, prefer_last=False, timeout=10000):
+                    raise RuntimeError("could not click SUBMIT REQUEST")
+                page.wait_for_timeout(6000)
                 page.screenshot(path=str(artifacts / "book_confirmation.png"), full_page=True)
-                conf = re.search(r"(Reservation|Confirmation|Request)[^\n]{0,40}?(#?\s?[A-Z0-9]{4,})", confirm_text)
+                # VERIFY the submit actually went through. A successful request
+                # leaves the Review step; if the 'SUBMIT REQUEST' button is still
+                # present we never submitted — do NOT falsely report a booking.
+                still_on_review = bool(page.evaluate(
+                    r"""() => [...document.querySelectorAll('div,span,button')]
+                        .some(e => /^SUBMIT REQUEST$/i.test((e.innerText||'').trim()))"""))
+                if still_on_review:
+                    return out({**base, "status": "submit_failed",
+                                "reason": "clicked SUBMIT REQUEST but the page stayed on the "
+                                          "Review step — the request did NOT go through and "
+                                          "nothing was booked. Re-run to retry.",
+                                "screenshot": str(artifacts / "book_confirmation.png")}, 1)
+                confirm_text = page.inner_text("body")
+                conf = re.search(r"(Reservation|Confirmation)[^\n]{0,40}?(#?\s?[A-Z0-9]{4,})", confirm_text)
                 base["status"] = "booked"
                 base["manage_url"] = page.url
                 base["confirmation_hint"] = conf.group(0).strip() if conf else None
