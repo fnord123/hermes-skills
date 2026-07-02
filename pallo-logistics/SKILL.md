@@ -90,22 +90,21 @@ them.
 
 Every booking gets, per §5: drop-off day = 1 Play Yard; each full day = 2 Play
 Yard + 1 Nature Walk; pickup day = 1 Nature Walk. `pallo-book-trip.py` applies
-this automatically. `--simple-slate` drops the second daily Play Yard (faster;
-reasonable for long stays).
+this automatically via three frequency rules — the second daily Play Yard is
+just the Play Yard activity added again at a DIFFERENT time (07:30 AM + 03:30 PM),
+which is how Gingr allows two same-day sessions. `--simple-slate` drops the
+second daily Play Yard (1 Play Yard/day; faster, reasonable for long stays).
 
-**The per-day SECOND Play Yard is best-effort.** The portal's activity date
-picker has flaky month navigation, so on a multi-day stay some of the per-day
-second Play Yards may not register. The script never fails the booking over
-this — it books the guaranteed slate (1 Play Yard + 1 Nature Walk per day) plus
-whatever second sessions land, then reports:
-- `booked_activities`: what the Review actually shows.
-- `second_play_yard`: `{added, skipped_dates}` when any per-day second add was skipped.
-- `slate_warning`: a plain-English note when fewer sessions booked than requested.
-
-When you see `slate_warning`, **relay it to the user** — tell them how many
-Play Yard sessions landed and which days fell short, and offer either to arrange
-the extra Play Yards with the facility directly or to re-book. For a guaranteed
-clean slate with no warning, use `--simple-slate` (1 Play Yard/day).
+The result reports:
+- `activity_rules`: how many frequency rules attached per activity — the real
+  slate signal. Play Yard should be **2** (both times) unless `--simple-slate`;
+  Nature Walk **1**.
+- `estimate_days`: the Review estimate's per-activity count. Note this is UNIQUE
+  DAYS, not sessions, so it shows e.g. Play Yard "5" for a 5-day stay even with
+  both rules attached — that's expected, not a shortfall.
+- `slate_warning`: only appears if a rule failed to attach (e.g. Play Yard shows
+  1 rule instead of 2). **Relay it to the user** and offer to re-run; a clean
+  booking has no `slate_warning`.
 
 ## Gina coordination
 

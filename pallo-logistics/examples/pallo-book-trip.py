@@ -68,17 +68,20 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 PORTAL = gingr_lib.PORTAL
 HOME_URL = f"{PORTAL}/secure/home"
 
-# §5 activity slate. Gingr's "Every Day…" frequency rules give at most ONE
-# session of an activity per day (it dedupes per-day regardless of time), so the
-# two daily Play Yards can't both come from frequency rules. We add:
-#   - one Nature Walk and one Play Yard via fast frequency rules, then
-#   - a SECOND Play Yard per full day via individual "Once" adds at a later time
-#     (the facility's documented way to get two same-day sessions).
+# §5 activity slate — all via frequency rules (no per-day date-picker adds).
+# Gingr dedupes a same-day same-activity session ONLY when the TIME matches, so a
+# SECOND Play Yard just needs a DIFFERENT time — it does NOT need a per-day "Once"
+# add. Three bulk frequency ops give the whole slate:
+#   - Nature Walk : "Every Day Except First Day"        @ 11:30 AM (full days + pickup)
+#   - Play Yard #1: "Every Day Except Last Day"         @ 07:30 AM (drop-off + full days)
+#   - Play Yard #2: "Every Day Except First & Last Day" @ 03:30 PM (full days only)
+# Net: drop-off = 1 PY; each full day = 2 PY + 1 Nature Walk; pickup = 1 Nature Walk.
 BULK_OPS = [
     ("Activity | Nature Walk", "Every Day Except First Day", "11:30 AM"),
     ("Activity | Play Yard", "Every Day Except Last Day", "07:30 AM"),
 ]
-SECOND_PLAY_YARD_TIME = "03:30 PM"
+# Second daily Play Yard, full days only, at a distinct time (added unless --simple-slate).
+SECOND_PLAY_YARD_OP = ("Activity | Play Yard", "Every Day Except First & Last Day", "03:30 PM")
 _MONTHS = ["January", "February", "March", "April", "May", "June",
            "July", "August", "September", "October", "November", "December"]
 
@@ -275,6 +278,50 @@ def _open_activity_time(page):
         }
         if(best) best.el.click();
     }""")
+
+
+def _current_activity_time(page):
+    """Read the TIME field's current value (the control below the 'TIME' label,
+    above 'Existing Add-on Services'). Returns e.g. '7:30 AM' or None."""
+    return page.evaluate(r"""() => {
+        const all=[...document.querySelectorAll('div,span')];
+        const label=all.find(d=>(d.innerText||'').trim()==='TIME');
+        if(!label) return null;
+        const ly=label.getBoundingClientRect().y;
+        const ex=all.find(d=>(d.innerText||'').trim().startsWith('Existing Add-on'));
+        const maxY=ex?ex.getBoundingClientRect().y:1e9;
+        let best=null;
+        for(const d of all){
+            const t=(d.innerText||'').trim();
+            const r=d.getBoundingClientRect();
+            if(r.y>ly && r.y<maxY && d.children.length===0 &&
+               /^\d{1,2}:\d{2}\s?(AM|PM)$/i.test(t)){
+                if(!best || r.y<best.y) best={t, y:r.y};
+            }
+        }
+        return best ? best.t : null;
+    }""")
+
+
+def _norm_time(s: str) -> str:
+    m = re.match(r"\s*(\d{1,2}):(\d{2})\s*([AP]M)", (s or "").strip(), re.I)
+    return f"{int(m.group(1))}:{m.group(2)} {m.group(3).upper()}" if m else (s or "").strip()
+
+
+def _set_activity_time(page, target: str) -> bool:
+    """Set the activity TIME to `target`, VERIFYING it actually changed. This is
+    load-bearing for the second daily Play Yard: it must differ from the first or
+    Gingr dedupes the two same-day sessions into one. Retries because opening the
+    dropdown / picking the option flakes on a re-opened panel."""
+    want = _norm_time(target)
+    for _ in range(4):
+        if _norm_time(_current_activity_time(page)) == want:
+            return True
+        _open_activity_time(page)
+        page.wait_for_timeout(900)
+        _press_text(page, target)          # click the option (padded, e.g. '03:30 PM')
+        page.wait_for_timeout(900)
+    return _norm_time(_current_activity_time(page)) == want
 
 
 def _check_terms(page):
@@ -540,10 +587,12 @@ def _click_add_service(page) -> bool:
 
 
 def _add_activity(page, row_label: str, frequency: str, time_slot: str):
+    _tag = (row_label.split("|")[-1].strip() + "_" + frequency).replace(" ", "").replace("&", "and")[:40]
     _click_service_row(page, row_label)
     if not _wait_panel_open(page):
         raise RuntimeError(f"service panel did not open for {row_label}")
     page.wait_for_timeout(800)
+    _dbg(page, f"add_{_tag}_1panel", f"panel open for {row_label} / {frequency}")
     # FREQUENCY — open by position (placeholder OR pre-filled value), then pick
     # the option. Options render below the field, so .last is the option even
     # when the field already shows the same text.
@@ -552,61 +601,18 @@ def _add_activity(page, row_label: str, frequency: str, time_slot: str):
     if not _press_text(page, frequency):
         raise RuntimeError(f"could not select frequency {frequency!r} for {row_label}")
     page.wait_for_timeout(800)
-    # TIME (defaults to a value; open it, then pick the slot)
-    _open_activity_time(page)
-    page.wait_for_timeout(900)
-    if not _press_text(page, time_slot):
-        raise RuntimeError(f"could not select time {time_slot!r} for {row_label}")
-    page.wait_for_timeout(700)
+    _dbg(page, f"add_{_tag}_2freq", f"after selecting {frequency}")
+    # TIME — must actually land on the target (a wrong/duplicate time makes Gingr
+    # dedupe a second same-activity add). Verify-and-retry rather than one-shot.
+    if not _set_activity_time(page, time_slot):
+        raise RuntimeError(
+            f"could not set time {time_slot!r} for {row_label} "
+            f"(stuck on {_current_activity_time(page)!r})")
+    _dbg(page, f"add_{_tag}_3time", f"time now {_current_activity_time(page)!r}")
     if not _click_add_service(page):
         raise RuntimeError(f"could not click ADD SERVICE for {row_label}")
     _wait_panel_closed(page)
-
-
-def _add_activity_once(page, row_label: str, target: date, time_slot: str):
-    """Add a single-day ('Once') activity on `target` at `time_slot`."""
-    _click_service_row(page, row_label)
-    if not _wait_panel_open(page):
-        raise RuntimeError(f"service panel did not open for {row_label} (once)")
-    page.wait_for_timeout(800)
-    _open_frequency(page)
-    page.wait_for_timeout(700)
-    if not _press_text(page, "Once"):
-        raise RuntimeError(f"could not select 'Once' frequency for {row_label}")
-    page.wait_for_timeout(900)
-    # Open the date picker and navigate to the target month. The popup opens on
-    # an inconsistent month (sometimes today's, sometimes the booking's), and a
-    # single chevron press can miss, so retry the open+navigate a few times and
-    # REFUSE to click a day unless we're on the right month — a wrong-month day
-    # is silently dropped by the portal and undercounts the slate.
-    reached = False
-    for nav_try in range(3):
-        _open_date_field(page)
-        page.wait_for_timeout(900)
-        _dbg(page, f"once_{target.isoformat()}_try{nav_try}_open",
-             f"picker opened on month={_month_label(page)!r}")
-        reached = _goto_month(page, target)
-        _dbg(page, f"once_{target.isoformat()}_try{nav_try}_goto",
-             f"reached={reached} month_now={_month_label(page)!r}")
-        if reached:
-            break
-    if not reached:
-        raise RuntimeError(
-            f"could not navigate the activity date picker to {target} "
-            f"(stuck on {_month_label(page)!r})")
-    _click_day(page, target.day)
-    page.wait_for_timeout(500)
-    _click_day(page, target.day)   # start == end -> single day
-    page.wait_for_timeout(700)
-    _dbg(page, f"once_{target.isoformat()}_after_day", "after day selection")
-    _open_activity_time(page)
-    page.wait_for_timeout(900)
-    if not _press_text(page, time_slot):
-        raise RuntimeError(f"could not select time {time_slot!r} for {row_label} (once)")
-    page.wait_for_timeout(600)
-    if not _click_add_service(page):
-        raise RuntimeError(f"could not click ADD SERVICE for {row_label} (once)")
-    _wait_panel_closed(page)
+    _dbg(page, f"add_{_tag}_4done", "after ADD SERVICE")
 
 
 def _navigate_to_wizard(page):
@@ -624,6 +630,33 @@ def _navigate_to_wizard(page):
     page.get_by_text("Boarding | Dog", exact=False).first.click(timeout=10000)
     page.wait_for_timeout(4500)
     return "reservation-request" in page.url
+
+
+def _addon_rule_count(page, activity_label: str) -> int:
+    """Count how many add-on RULES are attached to an activity on the Services
+    list — the '+N' badge next to the row (e.g. Play Yard shows '+2' when both
+    the 07:30 AM and 03:30 PM frequency rules are attached). This is the ground
+    truth for the slate; the Review estimate instead collapses to unique days.
+    Returns 0 if the row isn't badged."""
+    return int(page.evaluate(r"""(label) => {
+        const rows=[...document.querySelectorAll('div,span')].filter(
+            e => (e.innerText||'').trim()===label);
+        let best=0;
+        for(const row of rows){
+            const rr=row.getBoundingClientRect();
+            // scan elements on the same row line for a '+N' badge
+            for(const e of document.querySelectorAll('div,span')){
+                const t=(e.innerText||'').trim();
+                const m=t.match(/^\+\s*(\d+)$/);
+                if(!m) continue;
+                const r=e.getBoundingClientRect();
+                if(Math.abs(r.y-rr.y)<25 && r.x>rr.x){
+                    best=Math.max(best, parseInt(m[1],10));
+                }
+            }
+        }
+        return best;
+    }""", activity_label))
 
 
 def _review_summary(page) -> dict:
@@ -798,30 +831,22 @@ def main() -> int:
                 _click_bottom_nav(page, "SERVICES")
                 page.wait_for_timeout(4000)
 
-                # Services step — bulk frequency ops (1 Nature Walk + 1 Play Yard/day).
-                # These give the GUARANTEED slate; they must succeed.
+                # Services step — all activities via bulk frequency ops. The second
+                # daily Play Yard is just another frequency rule at a DIFFERENT time
+                # (full days only), exactly like adding it by hand — no per-day
+                # date-picker adds, which is what used to fail.
                 for row, freq, slot in BULK_OPS:
                     _add_activity(page, row, freq, slot)
-                # Second Play Yard per full day via individual 'Once' adds. This is
-                # BEST-EFFORT: the activity popup's date picker has flaky month
-                # navigation, so a given day may not land. Never let one day error
-                # the whole booking — skip it, keep going, and report the shortfall
-                # (the slate_warning below reflects what actually booked).
-                second_py_added, second_py_skipped = 0, []
                 if not args.simple_slate:
-                    d = drop_date + timedelta(days=1)
-                    while d < pick_date:
-                        try:
-                            _add_activity_once(page, "Activity | Play Yard", d, SECOND_PLAY_YARD_TIME)
-                            second_py_added += 1
-                        except Exception:  # noqa: BLE001
-                            second_py_skipped.append(d.isoformat())
-                            try:  # clear any half-open panel before the next day
-                                _close_panel(page)
-                                _wait_panel_closed(page, timeout_ms=4000)
-                            except Exception:
-                                pass
-                        d += timedelta(days=1)
+                    _add_activity(page, *SECOND_PLAY_YARD_OP)
+
+                # Ground-truth check on the Services list: count the '+N' rule
+                # badges. Play Yard should carry 2 rules (07:30 + 03:30) unless
+                # --simple-slate; Nature Walk 1. The Review estimate collapses to
+                # unique days, so it can't confirm the second Play Yard.
+                py_rules = _addon_rule_count(page, "Activity | Play Yard")
+                nw_rules = _addon_rule_count(page, "Activity | Nature Walk")
+                expected_py_rules = 1 if args.simple_slate else 2
 
                 # advance to Review
                 _click_bottom_nav(page, "NOTES")
@@ -857,23 +882,20 @@ def main() -> int:
                                          if args.simple_slate
                                          else "2x Play Yard + 1x Nature Walk"),
                     },
-                    "booked_activities": {"play_yard": booked_py, "nature_walk": booked_nw},
+                    # Rule badges are the real slate signal; estimate_days is the
+                    # Review's unique-day count (informational, not sessions).
+                    "activity_rules": {"play_yard": py_rules, "nature_walk": nw_rules},
+                    "estimate_days": {"play_yard": booked_py, "nature_walk": booked_nw},
                     "review": summary,
                 }
-                if not args.simple_slate and second_py_skipped:
-                    base["second_play_yard"] = {
-                        "added": second_py_added, "skipped_dates": second_py_skipped}
                 warns = []
-                if booked_py is not None and booked_py < counts["play_yard"]:
+                if py_rules < expected_py_rules:
                     warns.append(
-                        f"requested {counts['play_yard']} Play Yard sessions but the portal "
-                        f"booked only {booked_py} — one or more per-day second Play Yard adds "
-                        f"did not register. The booking still went to Review; re-run --dry-run "
-                        f"to inspect, or use --simple-slate (1 Play Yard/day) for a clean slate.")
-                if booked_nw is not None and booked_nw < counts["nature_walk"]:
-                    warns.append(
-                        f"requested {counts['nature_walk']} Nature Walk sessions but the portal "
-                        f"booked only {booked_nw}.")
+                        f"expected {expected_py_rules} Play Yard frequency rule(s) but only "
+                        f"{py_rules} attached — the second daily Play Yard (03:30 PM) did not "
+                        f"register. Re-run --dry-run to inspect, or use --simple-slate.")
+                if nw_rules < 1:
+                    warns.append("the Nature Walk activity did not attach.")
                 if warns:
                     base["slate_warning"] = " ".join(warns)
 
