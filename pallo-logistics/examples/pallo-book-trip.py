@@ -789,6 +789,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--allow-overlap", action="store_true")
     ap.add_argument("--no-gina", action="store_true")
+    ap.add_argument("--no-calendar", action="store_true",
+                    help="do not email drop-off/pickup Google-Calendar invites after booking")
     ap.add_argument("--simple-slate", action="store_true",
                     help="One Play Yard + one Nature Walk per day (skip the per-day "
                          "second Play Yard). Faster; use for long stays.")
@@ -1028,6 +1030,22 @@ def main() -> int:
         base["gina_messages_failed"] = failed
         if failed:
             base["status"] = "booked_with_notification_warnings"
+
+    # Google-Calendar handoff invites (after a real booking only). Non-fatal:
+    # a send failure never undoes the booking, just surfaces a warning.
+    if not args.no_calendar and base.get("status", "").startswith("booked"):
+        cmd = ["python3", str(SCRIPT_DIR / "pallo-calendar-invite.py"),
+               "--events", "pickup,dropoff",
+               "--drop-date", drop_date.isoformat(), "--drop-time", drop_time,
+               "--pickup-date", pick_date.isoformat(), "--pickup-time", pickup_time]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            data = json.loads(r.stdout) if r.stdout.strip() else {"status": "no_output"}
+        except Exception as e:  # noqa: BLE001
+            data = {"status": "error", "reason": str(e)}
+        base["calendar_invites"] = data.get("status")
+        if data.get("status") not in ("ok",):
+            base["calendar_invites_detail"] = data
     return out(base)
 
 

@@ -56,6 +56,7 @@ The 27B model cannot process images and these paths will fail with errors.
 | `pallo-trip-prep.py --trip-name <name> [--commit --confirm-drop-date <ISO> --confirm-pickup-date <ISO>]` | One-call trip prep: readiness → plan → (with `--commit`) book + notify Gina. No `--commit` = read-only preview. | **Yes (with `--commit`)** |
 | `gina-notify.py --topic <t> --body <b> [--handoff-date <ISO>] [--trip-name <n>] [--dry-run]` | Post a Model-X coordination message to the shared Discord channel (mentions Gina + the user). Normally fired automatically by a booking; direct call is an escape hatch. | **Yes — sends a message** |
 | `gina-pending.py [--resolve <id>]` | List outstanding Gina-coordination asks; `--resolve` clears one. | Read / small write |
+| `pallo-calendar-invite.py --plan '<plan_json>' [--events pickup,dropoff] [--to <emails>] [--dry-run]` *or* `--drop-date/--drop-time/--pickup-date/--pickup-time` | Email Google-Calendar invites (iMIP `.ics`) for the drop-off and/or pickup to you + Gina via AgentMail — they land in Google Calendar with RSVP. Fired automatically after a booking; call directly to (re)send for an existing stay. `--dry-run` prints the `.ics` without sending. | **Yes — sends email invites** |
 | `gingr-login.py [--show-head]` | Capture / refresh the saved portal session. Run only when a script reports `session_expired` or `not_logged_in`. | No (writes session file) |
 
 ## Safety — read-only by default
@@ -115,6 +116,23 @@ those messages; `pallo-book-trip.py` sends them after a successful booking.
 **When you see a message FROM Gina in the coordination channel, call
 `gina-pending.py` FIRST** to get the outstanding asks her reply is answering;
 after you've acted on her answer, call `gina-pending.py --resolve <id>`.
+
+## Calendar invites (drop-off + pickup)
+
+After a real booking, `pallo-book-trip.py` automatically emails Google-Calendar
+invites for BOTH handoffs (drop-off and pickup) to you and Gina via AgentMail —
+they arrive as normal calendar invites and land on both Google Calendars with
+RSVP + reminders (1 day and 2 hours before). The booking result includes a
+`calendar_invites` field (`ok` / `partial` / an error status); a send failure
+never undoes the booking. Pass `--no-calendar` to skip.
+
+To (re)send for an EXISTING stay, or send just one handoff, call
+`pallo-calendar-invite.py` directly (e.g. `--events pickup`). Re-sending uses a
+stable per-stay UID, so it UPDATES the same calendar event rather than
+duplicating it. Attendee emails come from `USER_EMAIL` / `GINA_EMAIL` in
+secrets.env (override with `--to`); the AgentMail key/inbox are reused from
+Hermes' config. If a stay's time changes, bump `--sequence` so the update
+supersedes the prior invite.
 
 ## Trip dates vs. boarding dates
 
