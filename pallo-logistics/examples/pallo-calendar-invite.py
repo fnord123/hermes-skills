@@ -84,16 +84,19 @@ def _load_env(path: Path) -> dict:
 
 
 def _api_key(env: dict) -> str:
-    # Prefer the same key Hermes already uses for AgentMail.
+    # Reuse the same key Hermes already uses for AgentMail. Parse it out of
+    # config.yaml WITHOUT importing yaml (the skill venv may not have it); the
+    # config has a single AGENTMAIL_API_KEY line under the agentmail mcp server.
+    if env.get("AGENTMAIL_API_KEY"):
+        return env["AGENTMAIL_API_KEY"]
     try:
-        import yaml
-        cfg = yaml.safe_load(HERMES_CONFIG.read_text())
-        k = cfg["mcp_servers"]["agentmail"]["env"]["AGENTMAIL_API_KEY"]
-        if k:
-            return k
+        m = re.search(r'^\s*AGENTMAIL_API_KEY:\s*["\']?([^\s"\']+)',
+                      HERMES_CONFIG.read_text(), re.M)
+        if m:
+            return m.group(1)
     except Exception:
         pass
-    return env.get("AGENTMAIL_API_KEY", "")
+    return ""
 
 
 def _http(method: str, path: str, key: str, body: dict | None = None):
