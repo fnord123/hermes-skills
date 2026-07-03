@@ -54,6 +54,8 @@ AGENTMAIL_BASE = "https://api.agentmail.to/v0"
 TZ_NAME = "America/Los_Angeles"          # Laurel Acres — Hillsboro, OR (Pacific)
 LOCATION = "Laurel Acres Kennels, Hillsboro, OR"
 EVENT_MINUTES = 30
+# Notification reminders as iCal VALARM triggers (before the event).
+REMINDERS = ["-P7D", "-P1D", "-PT2H"]    # 7 days, 1 day, 2 hours
 
 _VENV_PY = SCRIPT_DIR / ".venv" / "bin" / "python"
 if _VENV_PY.exists() and sys.executable != str(_VENV_PY):
@@ -182,13 +184,10 @@ def build_ics(kind: str, start_local: datetime, attendees: list[str], organizer:
         lines.append(
             "ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;"
             f"RSVP=TRUE;CN={a}:mailto:{a}")
-    lines += [
-        "BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{_esc(summary)}",
-        "TRIGGER:-P1D", "END:VALARM",
-        "BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{_esc(summary)}",
-        "TRIGGER:-PT2H", "END:VALARM",
-        "END:VEVENT", "END:VCALENDAR",
-    ]
+    for trig in REMINDERS:
+        lines += ["BEGIN:VALARM", "ACTION:DISPLAY",
+                  f"DESCRIPTION:{_esc(summary)}", f"TRIGGER:{trig}", "END:VALARM"]
+    lines += ["END:VEVENT", "END:VCALENDAR"]
     return "\r\n".join(lines) + "\r\n", summary, uid
 
 
