@@ -153,6 +153,19 @@ object; failures are `{"ok": false, "error": "…"}` with exit 1. `delete` and
   re-inserts it (hence it needs `--url` again) at the new size and same position,
   in one atomic batch. Existing images are addressed by `--nth` (reading order)
   or `--after` an anchor.
+- **Bad image URLs fail loudly.** `insert-image`/`resize-image` pre-check the
+  `--url` (a web-page URL, a 404, or an unsupported/oversized type gets a clear
+  "give a direct image link" error) and translate the Docs API's opaque
+  "problem retrieving the image" 400 into the same actionable message — so a
+  wrong URL is corrected, not retried blindly.
+
+## Debug log
+
+Every invocation and its result are appended to `~/.hermes/logs/google-docs.log`
+(one JSON line each; string values truncated). This records exactly what the
+agent passed — verb, arguments, the `--url` — so a failed run can be diagnosed
+after the fact. It's local-only, next to the other Hermes logs, and logging
+never breaks the tool (failures to write are swallowed).
 
 ## Files
 

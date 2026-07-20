@@ -52,9 +52,32 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 DOC_MIME = "application/vnd.google-apps.document"
+LOG_PATH = Path.home() / ".hermes" / "logs" / "google-docs.log"
+
+
+def _truncate(s, n=400):
+    s = str(s)
+    return s if len(s) <= n else s[:n] + f"…(+{len(s) - n} chars)"
+
+
+def _log(event):
+    """Append a timestamped JSON line to the skill's debug log. Records every
+    invocation and its result so failures can be diagnosed after the fact.
+    Never raises — logging must not break the tool. Local only, alongside the
+    other Hermes logs; string values are truncated."""
+    try:
+        import datetime
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        with LOG_PATH.open("a") as fh:
+            fh.write(f"{stamp} {json.dumps(event, ensure_ascii=False)}\n")
+    except Exception:
+        pass
 
 
 def out(d, code=0):
+    _log({"result": {k: (_truncate(v) if isinstance(v, str) else v)
+                      for k, v in d.items()}})
     print(json.dumps(d))
     sys.exit(code)
 
@@ -230,6 +253,59 @@ def _object_size(width, height):
     return size or None
 
 
+_IMG_SUPPORTED = {"image/png", "image/jpeg", "image/jpg", "image/gif"}
+
+
+def _check_image_url(url):
+    """Best-effort pre-check. Returns a clear error string if the URL is plainly
+    NOT a usable public image (a web page, a 404, an unsupported/oversized type);
+    returns None to proceed. Ambiguous cases (403, timeouts, no content-type)
+    return None and let the Docs API be the judge — _image_error() translates its
+    failure. This is what turns 'model pasted a web-page URL' into actionable
+    feedback instead of a raw 400."""
+    import urllib.request
+    import urllib.error
+    req = urllib.request.Request(
+        url, method="GET",
+        headers={"User-Agent": "Mozilla/5.0 (compatible; HermesDocs/1.0)"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            clen = r.headers.get("Content-Length")
+    except urllib.error.HTTPError as e:
+        return (f"the image URL returned HTTP {e.code}. Give a direct, public link "
+                "to a PNG/JPEG/GIF image file (not a web page); ask the user for "
+                "one if unsure.")
+    except Exception:
+        return None  # network/UA ambiguity — let the Docs API try
+    if ctype in ("text/html", "application/xhtml+xml"):
+        return ("that --url is a web page, not an image. Provide a direct link to "
+                "a PNG/JPEG/GIF image file (its URL usually ends in .jpg/.png/.gif "
+                "or serves image/* content); ask the user for one if unsure.")
+    if ctype and not ctype.startswith("image/"):
+        return (f"that --url returned {ctype}, not an image. Provide a direct link "
+                "to a PNG/JPEG/GIF image file.")
+    if ctype and ctype not in _IMG_SUPPORTED:
+        return f"that image is {ctype}; Google Docs supports only PNG, JPEG, and GIF."
+    try:
+        if clen and int(clen) > 50 * 1024 * 1024:
+            return "that image is larger than 50 MB, which Google Docs won't accept."
+    except ValueError:
+        pass
+    return None
+
+
+def _image_error(e, url):
+    """Translate the Docs API's opaque image-fetch 400 into actionable text."""
+    msg = str(e)
+    if ("problem retrieving the image" in msg or "publicly accessible" in msg
+            or "supported formats" in msg):
+        return (f"Google could not retrieve the image at {url!r}. It must point "
+                "directly to a publicly accessible PNG, JPEG, or GIF (not a web "
+                "page) under 50 MB. Ask the user for a direct image link if unsure.")
+    return msg
+
+
 # ── commands ─────────────────────────────────────────────────────────────────
 
 def cmd_create(args):
@@ -396,6 +472,9 @@ def cmd_delete(args):
 def cmd_insert_image(args):
     """Insert an inline image from a public HTTPS URL at a located spot. Google
     fetches the URL at insert time, so it must be publicly reachable."""
+    url_err = _check_image_url(args.url)
+    if url_err:
+        fail(url_err)
     docs = _docs()
     try:
         doc = _get_doc(docs, args.doc_id)
@@ -433,13 +512,16 @@ def cmd_insert_image(args):
         _batch(docs, args.doc_id, requests)
         out({"ok": True, "document_id": args.doc_id, "action": "image_inserted"})
     except Exception as e:  # noqa: BLE001
-        fail(e)
+        fail(_image_error(e, args.url))
 
 
 def cmd_resize_image(args):
     """Resize an existing inline image. The Docs API has no resize request, so
     this deletes the image and re-inserts it from --url at the new size and same
     position (one atomic batch)."""
+    url_err = _check_image_url(args.url)
+    if url_err:
+        fail(url_err)
     docs = _docs()
     try:
         doc = _get_doc(docs, args.doc_id)
@@ -457,7 +539,7 @@ def cmd_resize_image(args):
         _batch(docs, args.doc_id, requests)
         out({"ok": True, "document_id": args.doc_id, "action": "image_resized"})
     except Exception as e:  # noqa: BLE001
-        fail(e)
+        fail(_image_error(e, args.url))
 
 
 def cmd_delete_image(args):
@@ -478,6 +560,7 @@ def cmd_delete_image(args):
 
 
 def main():
+    _log({"argv": [_truncate(a) for a in sys.argv[1:]]})
     p = argparse.ArgumentParser(prog="docs", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
