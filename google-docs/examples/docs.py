@@ -23,10 +23,11 @@ Verbs (each prints ONE JSON object on stdout; exit 1 on error):
                   [--heading N] [--match-case]   format every occurrence of text
   delete  <doc_id> --find "<text>" --confirm [--match-case]
                                                  DESTRUCTIVE: remove text everywhere
-  insert-image <doc_id> --url <public_url>
+  insert-image <doc_id> (--url <public_url> | --file <local_path>)
                   (--replace "<placeholder>" | --after "<anchor>" | --at-start)
-                  [--width <pt>] [--height <pt>]  insert an image from a public URL
-  resize-image <doc_id> --url <public_url> (--nth N | --after "<anchor>")
+                  [--width <pt>] [--height <pt>]  insert an image (URL or local file)
+  resize-image <doc_id> (--url <public_url> | --file <local_path>)
+                  (--nth N | --after "<anchor>")
                   [--width <pt>] [--height <pt>]  resize an existing image
   delete-image <doc_id> (--nth N | --after "<anchor>") --confirm
                                                  DESTRUCTIVE: remove an image
@@ -306,6 +307,60 @@ def _image_error(e, url):
     return msg
 
 
+def _upload_public_image(path):
+    """Upload a local image into the shared folder, make it link-readable, and
+    return (fetch_uri, drive_service, file_id). The Docs API can only insert
+    images by URL, so a local file is briefly hosted this way; the caller deletes
+    the file_id after inserting (the image is copied into the document)."""
+    import mimetypes
+    from googleapiclient.http import MediaFileUpload
+
+    p = Path(path).expanduser()
+    if not p.exists() or not p.is_file():
+        fail(f"no such image file: {p}")
+    mime = mimetypes.guess_type(str(p))[0]
+    if mime not in ("image/png", "image/jpeg", "image/gif"):
+        fail(f"{p.name!r} isn't a supported image type (need PNG, JPEG, or GIF).")
+    if p.stat().st_size > 50 * 1024 * 1024:
+        fail(f"{p.name!r} is larger than 50 MB, which Google Docs won't accept.")
+
+    folder = _folder_id()
+    drive = _drive()
+    try:
+        up = drive.files().create(
+            body={"name": p.name, "parents": [folder]},
+            media_body=MediaFileUpload(str(p), mimetype=mime),
+            fields="id", supportsAllDrives=True).execute()
+        fid = up["id"]
+        drive.permissions().create(
+            fileId=fid, body={"type": "anyone", "role": "reader"},
+            supportsAllDrives=True).execute()
+    except Exception as e:  # noqa: BLE001
+        fail(f"couldn't upload the local image: {e}")
+    return f"https://lh3.googleusercontent.com/d/{fid}", drive, fid
+
+
+def _resolve_image_source(args):
+    """Return (uri, drive_service_or_None, temp_file_id_or_None) for --file or
+    --url. For --file the caller must trash temp_file_id after inserting."""
+    if getattr(args, "file", None):
+        return _upload_public_image(args.file)
+    url_err = _check_image_url(args.url)
+    if url_err:
+        fail(url_err)
+    return args.url, None, None
+
+
+def _cleanup_temp(drive, fid):
+    if drive is None or not fid:
+        return
+    try:
+        drive.files().update(fileId=fid, body={"trashed": True},
+                             supportsAllDrives=True).execute()
+    except Exception:
+        pass
+
+
 # ── commands ─────────────────────────────────────────────────────────────────
 
 def cmd_create(args):
@@ -470,13 +525,13 @@ def cmd_delete(args):
 
 
 def cmd_insert_image(args):
-    """Insert an inline image from a public HTTPS URL at a located spot. Google
-    fetches the URL at insert time, so it must be publicly reachable."""
-    url_err = _check_image_url(args.url)
-    if url_err:
-        fail(url_err)
-    docs = _docs()
+    """Insert an inline image from a public URL (--url) or a local file (--file).
+    Google copies the image into the document at insert time; a local file is
+    briefly uploaded to the shared folder to give Google a URL to fetch, then
+    that upload is removed."""
+    uri, drive, temp_fid = _resolve_image_source(args)
     try:
+        docs = _docs()
         doc = _get_doc(docs, args.doc_id)
         size = _object_size(args.width, args.height)
 
@@ -486,7 +541,7 @@ def cmd_insert_image(args):
             if not ranges:
                 fail(f"couldn't find placeholder {args.replace!r} in the document.")
             s, e = ranges[0]
-            img_req = {"insertInlineImage": {"uri": args.url, "location": {"index": s}}}
+            img_req = {"insertInlineImage": {"uri": uri, "location": {"index": s}}}
             if size:
                 img_req["insertInlineImage"]["objectSize"] = size
             # After the image is inserted at s (1 index unit), the placeholder
@@ -504,7 +559,7 @@ def cmd_insert_image(args):
                 index = ranges[0][1]
             else:  # default: end of document
                 index = _end_index(doc)
-            img_req = {"insertInlineImage": {"uri": args.url, "location": {"index": index}}}
+            img_req = {"insertInlineImage": {"uri": uri, "location": {"index": index}}}
             if size:
                 img_req["insertInlineImage"]["objectSize"] = size
             requests = [img_req]
@@ -512,25 +567,25 @@ def cmd_insert_image(args):
         _batch(docs, args.doc_id, requests)
         out({"ok": True, "document_id": args.doc_id, "action": "image_inserted"})
     except Exception as e:  # noqa: BLE001
-        fail(_image_error(e, args.url))
+        fail(_image_error(e, uri))
+    finally:
+        _cleanup_temp(drive, temp_fid)
 
 
 def cmd_resize_image(args):
     """Resize an existing inline image. The Docs API has no resize request, so
-    this deletes the image and re-inserts it from --url at the new size and same
-    position (one atomic batch)."""
-    url_err = _check_image_url(args.url)
-    if url_err:
-        fail(url_err)
-    docs = _docs()
+    this deletes the image and re-inserts it (from --url or --file) at the new
+    size and same position (one atomic batch)."""
+    uri, drive, temp_fid = _resolve_image_source(args)
     try:
+        docs = _docs()
         doc = _get_doc(docs, args.doc_id)
         img = _pick_image(doc, args)
         size = _object_size(args.width, args.height)
         if not size:
             fail("resize-image needs --width and/or --height (in points).")
         s, e = img["start"], img["end"]
-        img_req = {"insertInlineImage": {"uri": args.url, "location": {"index": s},
+        img_req = {"insertInlineImage": {"uri": uri, "location": {"index": s},
                                          "objectSize": size}}
         # Delete the old image first; after that its slot collapses and inserting
         # at the same start index restores the position.
@@ -539,7 +594,9 @@ def cmd_resize_image(args):
         _batch(docs, args.doc_id, requests)
         out({"ok": True, "document_id": args.doc_id, "action": "image_resized"})
     except Exception as e:  # noqa: BLE001
-        fail(_image_error(e, args.url))
+        fail(_image_error(e, uri))
+    finally:
+        _cleanup_temp(drive, temp_fid)
 
 
 def cmd_delete_image(args):
@@ -612,9 +669,11 @@ def main():
     g.add_argument("--match-case", dest="match_case", action="store_true")
     g.set_defaults(func=cmd_delete)
 
-    g = sub.add_parser("insert-image", help="insert an image from a public URL")
+    g = sub.add_parser("insert-image", help="insert an image from a public URL or local file")
     g.add_argument("doc_id")
-    g.add_argument("--url", required=True, help="public HTTPS URL of the image (PNG/JPEG/GIF)")
+    src = g.add_mutually_exclusive_group(required=True)
+    src.add_argument("--url", help="public HTTPS URL of the image (PNG/JPEG/GIF)")
+    src.add_argument("--file", help="path to a local image file (PNG/JPEG/GIF); uploaded automatically")
     g.add_argument("--replace", help="replace this placeholder text with the image")
     g.add_argument("--after", help="insert right after the first occurrence of this text")
     g.add_argument("--at-start", dest="at_start", action="store_true",
@@ -624,9 +683,11 @@ def main():
     g.add_argument("--match-case", dest="match_case", action="store_true")
     g.set_defaults(func=cmd_insert_image)
 
-    g = sub.add_parser("resize-image", help="resize an existing image (re-inserts from --url)")
+    g = sub.add_parser("resize-image", help="resize an existing image (re-inserts from --url/--file)")
     g.add_argument("doc_id")
-    g.add_argument("--url", required=True, help="public HTTPS URL of the image (needed to re-insert)")
+    src = g.add_mutually_exclusive_group(required=True)
+    src.add_argument("--url", help="public HTTPS URL of the image (needed to re-insert)")
+    src.add_argument("--file", help="path to a local image file (needed to re-insert)")
     g.add_argument("--nth", type=int, help="which image, 1-based in reading order")
     g.add_argument("--after", help="the image after this text")
     g.add_argument("--width", type=float, help="new width in points")

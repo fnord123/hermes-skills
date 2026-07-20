@@ -66,19 +66,20 @@ and url; keep them to edit the same document afterward.
 | `replace <doc_id> --find "<s>" --with "<s>"` | Replaces every occurrence of one string with another. |
 | `style <doc_id> --find "<text>" [--bold] [--italic] [--underline] [--heading N]` | Formats every occurrence of the text. `--heading` 1–6 makes its paragraph a heading; 0 returns it to normal. |
 | `delete <doc_id> --find "<text>" --confirm` | **Destructive.** Removes every occurrence of the text. Needs `--confirm`. |
-| `insert-image <doc_id> --url "<public_url>" (--replace "<placeholder>" \| --after "<anchor>" \| --at-start) [--width N] [--height N]` | Inserts an image from a public HTTPS URL (PNG/JPEG/GIF). Placement is one of: `--replace` (swap a placeholder like `[IMAGE:x]` for the image), `--after` (right after some text), `--at-start`, or nothing (end of document). |
-| `resize-image <doc_id> --url "<public_url>" (--nth N \| --after "<anchor>") [--width N] [--height N]` | Resizes an existing image. Pass the image's URL again (the resize re-inserts it). |
+| `insert-image <doc_id> (--url "<public_url>" \| --file "<local_path>") (--replace "<placeholder>" \| --after "<anchor>" \| --at-start) [--width N] [--height N]` | Inserts an image, either from a public HTTPS URL or a **local file** (PNG/JPEG/GIF). Placement is one of: `--replace` (swap a placeholder like `[IMAGE:x]` for the image), `--after` (right after some text), `--at-start`, or nothing (end of document). |
+| `resize-image <doc_id> (--url "<public_url>" \| --file "<local_path>") (--nth N \| --after "<anchor>") [--width N] [--height N]` | Resizes an existing image. Pass its source again (`--url` or `--file`) — the resize re-inserts it. |
 | `delete-image <doc_id> (--nth N \| --after "<anchor>") --confirm` | **Destructive.** Removes an image. Needs `--confirm`. |
 
 Add `--match-case` to `insert --after`, `replace`, `style`, `delete`, or the
 image verbs when the match must respect capitalization; by default matching
 ignores case.
 
-**Images:** `--url` must be a public HTTPS image URL (the tool does not upload
-local files). `--width`/`--height` are in points; **give just `--width` and the
-height scales to keep the image's aspect ratio** (a full text-column width is
-~468). Address an existing image by `--nth N` (1-based, in reading order) or
-`--after "<nearby text>"`.
+**Images:** give the image with EITHER `--url` (a public HTTPS image URL) OR
+`--file` (a path to a local PNG/JPEG/GIF, which is uploaded for you) — not both.
+`--width`/`--height` are in points; **give just `--width` and the height scales
+to keep the image's aspect ratio** (a full text-column width is ~468). Address an
+existing image by `--nth N` (1-based, in reading order) or `--after "<nearby
+text>"`.
 
 ## Turning the user's words into calls
 
@@ -100,6 +101,7 @@ the user names.
 | "remove the line 'draft — do not send'" | `delete <doc_id> --find "draft — do not send" --confirm` (confirm first) |
 | "put this banner where it says [IMAGE:Gents]" | `insert-image <doc_id> --url "https://…/banner.jpg" --replace "[IMAGE:Gents]" --width 468` |
 | "add the logo after the title" | `insert-image <doc_id> --url "https://…/logo.png" --after "Trip Plan"` |
+| "insert this image file I have at ~/pics/map.png" | `insert-image <doc_id> --file "~/pics/map.png" --after "Directions"` |
 | "make the first image smaller / 300pt wide" | `resize-image <doc_id> --url "https://…/banner.jpg" --nth 1 --width 300` |
 | "remove the second image" | `delete-image <doc_id> --nth 2 --confirm` (confirm first) |
 
@@ -173,7 +175,10 @@ insert-image <id> --url "https://…/desert.jpg" --replace "[IMAGE:Desert]" --wi
   to see the actual text, then retry with text that appears.
 - An image error mentioning the URL / `"Invalid image"` / fetch failure → the
   `--url` isn't a public, directly-reachable image (PNG/JPEG/GIF). Ask the user
-  for a public image URL; this skill can't upload local files.
+  for a public image URL, or — if the image is a file on disk — insert it with
+  `--file "<path>"` instead (that path uploads the file for you).
+- `"isn't a supported image type"` / `"no such image file"` (from `--file`) → the
+  path is wrong or the file isn't a PNG/JPEG/GIF. Confirm the path with the user.
 - `"the document has N images; say which…"` (image verbs) → be specific with
   `--nth N` or `--after "<nearby text>"`.
 - A `"...not found"` or permission error on an existing `<doc_id>` → the document

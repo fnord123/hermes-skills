@@ -38,7 +38,9 @@ Google Docs API v1 + Drive API v3  — service-account auth (ADC via GOOGLE_APPL
    │  edit   → Docs documents.batchUpdate (insertText / replaceAllText /
    │           updateTextStyle / updateParagraphStyle)
    │  images → Docs batchUpdate (insertInlineImage from a public URL /
-   │           deleteContentRange); Google fetches the URL at insert time
+   │           deleteContentRange); Google fetches the URL at insert time.
+   │           --file uploads a local image to the Shared Drive, shares it
+   │           link-readable, inserts it, then trashes the upload artifact
    ▼
 one JSON object on stdout (document_id / title / url / action / occurrences …)
 ```
@@ -158,6 +160,14 @@ object; failures are `{"ok": false, "error": "…"}` with exit 1. `delete` and
   "give a direct image link" error) and translate the Docs API's opaque
   "problem retrieving the image" 400 into the same actionable message — so a
   wrong URL is corrected, not retried blindly.
+- **Local images (`--file`).** The Docs API can only insert an image by URL, so a
+  local file is uploaded to the Shared Drive, shared link-readable, inserted, and
+  then the upload is trashed — the document keeps its own embedded copy (verified:
+  the embedded image is a fresh `googleusercontent.com/docsz/…` object that
+  survives deleting the source). This is the *supported* way to add a local
+  image; the earlier agent failures came from ad-hoc scripts that uploaded to
+  My Drive (where the quota-less service account can't own files) and tried to
+  insert by Drive `objectId` (not a valid image URI).
 
 ## Debug log
 
