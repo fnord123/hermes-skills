@@ -23,6 +23,13 @@ Verbs (each prints ONE JSON object on stdout; exit 1 on error):
                   [--heading N] [--match-case]   format every occurrence of text
   delete  <doc_id> --find "<text>" --confirm [--match-case]
                                                  DESTRUCTIVE: remove text everywhere
+  insert-image <doc_id> --url <public_url>
+                  (--replace "<placeholder>" | --after "<anchor>" | --at-start)
+                  [--width <pt>] [--height <pt>]  insert an image from a public URL
+  resize-image <doc_id> --url <public_url> (--nth N | --after "<anchor>")
+                  [--width <pt>] [--height <pt>]  resize an existing image
+  delete-image <doc_id> (--nth N | --after "<anchor>") --confirm
+                                                 DESTRUCTIVE: remove an image
 """
 
 import os
@@ -171,6 +178,56 @@ def _find_ranges(text, idx_map, needle, match_case):
 def _batch(docs, doc_id, requests):
     return docs.documents().batchUpdate(
         documentId=doc_id, body={"requests": requests}).execute()
+
+
+def _inline_images(doc):
+    """Return the document's inline images in reading order:
+    [{"object_id": ..., "start": <index>, "end": <index>}]. Each inline image
+    occupies a single index in the body."""
+    images = []
+    for element in doc.get("body", {}).get("content", []):
+        for pe in element.get("paragraph", {}).get("elements", []):
+            ioe = pe.get("inlineObjectElement")
+            if ioe and ioe.get("inlineObjectId"):
+                images.append({"object_id": ioe["inlineObjectId"],
+                               "start": pe.get("startIndex"),
+                               "end": pe.get("endIndex")})
+    return images
+
+
+def _pick_image(doc, args):
+    """Resolve --nth / --after to one inline image, or fail with guidance."""
+    images = _inline_images(doc)
+    if not images:
+        fail("the document has no images.")
+    if getattr(args, "nth", None) is not None:
+        if args.nth < 1 or args.nth > len(images):
+            fail(f"--nth {args.nth} is out of range; the document has "
+                 f"{len(images)} image(s).")
+        return images[args.nth - 1]
+    if getattr(args, "after", None):
+        text, idx_map = _flatten(doc)
+        ranges = _find_ranges(text, idx_map, args.after, getattr(args, "match_case", False))
+        if not ranges:
+            fail(f"couldn't find {args.after!r} in the document.")
+        anchor_end = ranges[0][1]
+        for img in images:
+            if img["start"] is not None and img["start"] >= anchor_end:
+                return img
+        fail(f"no image appears after {args.after!r}.")
+    if len(images) == 1:
+        return images[0]
+    fail(f"the document has {len(images)} images; say which with --nth N "
+         "(1-based, in reading order) or --after \"<nearby text>\".")
+
+
+def _object_size(width, height):
+    size = {}
+    if width is not None:
+        size["width"] = {"magnitude": float(width), "unit": "PT"}
+    if height is not None:
+        size["height"] = {"magnitude": float(height), "unit": "PT"}
+    return size or None
 
 
 # ── commands ─────────────────────────────────────────────────────────────────
@@ -336,6 +393,90 @@ def cmd_delete(args):
         fail(e)
 
 
+def cmd_insert_image(args):
+    """Insert an inline image from a public HTTPS URL at a located spot. Google
+    fetches the URL at insert time, so it must be publicly reachable."""
+    docs = _docs()
+    try:
+        doc = _get_doc(docs, args.doc_id)
+        size = _object_size(args.width, args.height)
+
+        if args.replace:
+            text, idx_map = _flatten(doc)
+            ranges = _find_ranges(text, idx_map, args.replace, args.match_case)
+            if not ranges:
+                fail(f"couldn't find placeholder {args.replace!r} in the document.")
+            s, e = ranges[0]
+            img_req = {"insertInlineImage": {"uri": args.url, "location": {"index": s}}}
+            if size:
+                img_req["insertInlineImage"]["objectSize"] = size
+            # After the image is inserted at s (1 index unit), the placeholder
+            # sits at [s+1, e+1); delete it in the same atomic batch.
+            requests = [img_req,
+                        {"deleteContentRange": {"range": {"startIndex": s + 1, "endIndex": e + 1}}}]
+        else:
+            if args.at_start:
+                index = 1
+            elif args.after:
+                text, idx_map = _flatten(doc)
+                ranges = _find_ranges(text, idx_map, args.after, args.match_case)
+                if not ranges:
+                    fail(f"couldn't find {args.after!r} in the document to insert after.")
+                index = ranges[0][1]
+            else:  # default: end of document
+                index = _end_index(doc)
+            img_req = {"insertInlineImage": {"uri": args.url, "location": {"index": index}}}
+            if size:
+                img_req["insertInlineImage"]["objectSize"] = size
+            requests = [img_req]
+
+        _batch(docs, args.doc_id, requests)
+        out({"ok": True, "document_id": args.doc_id, "action": "image_inserted"})
+    except Exception as e:  # noqa: BLE001
+        fail(e)
+
+
+def cmd_resize_image(args):
+    """Resize an existing inline image. The Docs API has no resize request, so
+    this deletes the image and re-inserts it from --url at the new size and same
+    position (one atomic batch)."""
+    docs = _docs()
+    try:
+        doc = _get_doc(docs, args.doc_id)
+        img = _pick_image(doc, args)
+        size = _object_size(args.width, args.height)
+        if not size:
+            fail("resize-image needs --width and/or --height (in points).")
+        s, e = img["start"], img["end"]
+        img_req = {"insertInlineImage": {"uri": args.url, "location": {"index": s},
+                                         "objectSize": size}}
+        # Delete the old image first; after that its slot collapses and inserting
+        # at the same start index restores the position.
+        requests = [{"deleteContentRange": {"range": {"startIndex": s, "endIndex": e}}},
+                    img_req]
+        _batch(docs, args.doc_id, requests)
+        out({"ok": True, "document_id": args.doc_id, "action": "image_resized"})
+    except Exception as e:  # noqa: BLE001
+        fail(e)
+
+
+def cmd_delete_image(args):
+    # Destructive. Requires --confirm (footgun guard).
+    if not args.confirm:
+        fail("delete-image removes an image from the document and cannot be "
+             "undone by this tool. Re-run with --confirm ONLY after the user has "
+             "explicitly approved removing it.")
+    docs = _docs()
+    try:
+        doc = _get_doc(docs, args.doc_id)
+        img = _pick_image(doc, args)
+        _batch(docs, args.doc_id, [{"deleteContentRange": {
+            "range": {"startIndex": img["start"], "endIndex": img["end"]}}}])
+        out({"ok": True, "document_id": args.doc_id, "action": "image_deleted"})
+    except Exception as e:  # noqa: BLE001
+        fail(e)
+
+
 def main():
     p = argparse.ArgumentParser(prog="docs", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -387,6 +528,37 @@ def main():
                    help="required; only after explicit user approval")
     g.add_argument("--match-case", dest="match_case", action="store_true")
     g.set_defaults(func=cmd_delete)
+
+    g = sub.add_parser("insert-image", help="insert an image from a public URL")
+    g.add_argument("doc_id")
+    g.add_argument("--url", required=True, help="public HTTPS URL of the image (PNG/JPEG/GIF)")
+    g.add_argument("--replace", help="replace this placeholder text with the image")
+    g.add_argument("--after", help="insert right after the first occurrence of this text")
+    g.add_argument("--at-start", dest="at_start", action="store_true",
+                   help="insert at the very beginning (default is end of document)")
+    g.add_argument("--width", type=float, help="width in points (optional)")
+    g.add_argument("--height", type=float, help="height in points (optional)")
+    g.add_argument("--match-case", dest="match_case", action="store_true")
+    g.set_defaults(func=cmd_insert_image)
+
+    g = sub.add_parser("resize-image", help="resize an existing image (re-inserts from --url)")
+    g.add_argument("doc_id")
+    g.add_argument("--url", required=True, help="public HTTPS URL of the image (needed to re-insert)")
+    g.add_argument("--nth", type=int, help="which image, 1-based in reading order")
+    g.add_argument("--after", help="the image after this text")
+    g.add_argument("--width", type=float, help="new width in points")
+    g.add_argument("--height", type=float, help="new height in points")
+    g.add_argument("--match-case", dest="match_case", action="store_true")
+    g.set_defaults(func=cmd_resize_image)
+
+    g = sub.add_parser("delete-image", help="DESTRUCTIVE: remove an image")
+    g.add_argument("doc_id")
+    g.add_argument("--nth", type=int, help="which image, 1-based in reading order")
+    g.add_argument("--after", help="the image after this text")
+    g.add_argument("--confirm", action="store_true",
+                   help="required; only after explicit user approval")
+    g.add_argument("--match-case", dest="match_case", action="store_true")
+    g.set_defaults(func=cmd_delete_image)
 
     args = p.parse_args()
     args.func(args)

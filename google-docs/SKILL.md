@@ -66,9 +66,19 @@ and url; keep them to edit the same document afterward.
 | `replace <doc_id> --find "<s>" --with "<s>"` | Replaces every occurrence of one string with another. |
 | `style <doc_id> --find "<text>" [--bold] [--italic] [--underline] [--heading N]` | Formats every occurrence of the text. `--heading` 1–6 makes its paragraph a heading; 0 returns it to normal. |
 | `delete <doc_id> --find "<text>" --confirm` | **Destructive.** Removes every occurrence of the text. Needs `--confirm`. |
+| `insert-image <doc_id> --url "<public_url>" (--replace "<placeholder>" \| --after "<anchor>" \| --at-start) [--width N] [--height N]` | Inserts an image from a public HTTPS URL (PNG/JPEG/GIF). Placement is one of: `--replace` (swap a placeholder like `[IMAGE:x]` for the image), `--after` (right after some text), `--at-start`, or nothing (end of document). |
+| `resize-image <doc_id> --url "<public_url>" (--nth N \| --after "<anchor>") [--width N] [--height N]` | Resizes an existing image. Pass the image's URL again (the resize re-inserts it). |
+| `delete-image <doc_id> (--nth N \| --after "<anchor>") --confirm` | **Destructive.** Removes an image. Needs `--confirm`. |
 
-Add `--match-case` to `insert --after`, `replace`, `style`, or `delete` when the
-match must respect capitalization; by default matching ignores case.
+Add `--match-case` to `insert --after`, `replace`, `style`, `delete`, or the
+image verbs when the match must respect capitalization; by default matching
+ignores case.
+
+**Images:** `--url` must be a public HTTPS image URL (the tool does not upload
+local files). `--width`/`--height` are in points; **give just `--width` and the
+height scales to keep the image's aspect ratio** (a full text-column width is
+~468). Address an existing image by `--nth N` (1-based, in reading order) or
+`--after "<nearby text>"`.
 
 ## Turning the user's words into calls
 
@@ -88,6 +98,10 @@ the user names.
 | "make 'Agenda' a heading" | `style <doc_id> --find "Agenda" --heading 1` |
 | "bold the word 'urgent'" | `style <doc_id> --find "urgent" --bold` |
 | "remove the line 'draft — do not send'" | `delete <doc_id> --find "draft — do not send" --confirm` (confirm first) |
+| "put this banner where it says [IMAGE:Gents]" | `insert-image <doc_id> --url "https://…/banner.jpg" --replace "[IMAGE:Gents]" --width 468` |
+| "add the logo after the title" | `insert-image <doc_id> --url "https://…/logo.png" --after "Trip Plan"` |
+| "make the first image smaller / 300pt wide" | `resize-image <doc_id> --url "https://…/banner.jpg" --nth 1 --width 300` |
+| "remove the second image" | `delete-image <doc_id> --nth 2 --confirm` (confirm first) |
 
 Notes:
 - When the text should start on its own line, include a `\n` in `--text` (as in
@@ -104,6 +118,9 @@ Notes:
 - `replace` → `{"ok": true, "document_id": "1AbC...", "action": "replaced", "occurrences": 3}`
 - `style` → `{"ok": true, "document_id": "1AbC...", "action": "styled", "occurrences": 1}`
 - `delete` → `{"ok": true, "document_id": "1AbC...", "action": "deleted", "occurrences": 1}`
+- `insert-image` → `{"ok": true, "document_id": "1AbC...", "action": "image_inserted"}`
+- `resize-image` → `{"ok": true, "document_id": "1AbC...", "action": "image_resized"}`
+- `delete-image` → `{"ok": true, "document_id": "1AbC...", "action": "image_deleted"}`
 
 After `create`, give the user the `url` so they can open the document. After an
 edit, confirm what changed (e.g. "Replaced 3 occurrences of 'Rome' with
@@ -140,11 +157,25 @@ read <id>
 delete <id> --find "do not send" --confirm
 ```
 
+### "Build a doc with banner images for each section."
+Write the text first with a placeholder where each image goes, then swap each
+placeholder for its image — one `insert-image --replace` per banner:
+```
+create --title "Theme Nights" --text "Thursday — GENTS & MAIDS\n[IMAGE:Gents]\nFriday — DESERT OF DESIRE\n[IMAGE:Desert]"
+insert-image <id> --url "https://…/gents.jpg"  --replace "[IMAGE:Gents]"  --width 468
+insert-image <id> --url "https://…/desert.jpg" --replace "[IMAGE:Desert]" --width 468
+```
+
 ## When a verb reports an error
 
-- `"couldn't find '<x>' in the document…"` (from `insert`/`style`) → the anchor
-  text isn't in the document. Read it back with `read` to see the actual text,
-  then retry with text that appears.
+- `"couldn't find '<x>' in the document…"` (from `insert`/`style`/image verbs) →
+  the anchor or placeholder text isn't in the document. Read it back with `read`
+  to see the actual text, then retry with text that appears.
+- An image error mentioning the URL / `"Invalid image"` / fetch failure → the
+  `--url` isn't a public, directly-reachable image (PNG/JPEG/GIF). Ask the user
+  for a public image URL; this skill can't upload local files.
+- `"the document has N images; say which…"` (image verbs) → be specific with
+  `--nth N` or `--after "<nearby text>"`.
 - A `"...not found"` or permission error on an existing `<doc_id>` → the document
   isn't shared with the agent. Tell the user it needs to be shared (or dropped in
   the shared folder); don't try to reach it another way.

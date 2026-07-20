@@ -37,6 +37,8 @@ Google Docs API v1 + Drive API v3  — service-account auth (ADC via GOOGLE_APPL
    │  create → Drive files.create (mimeType google-apps.document) in the shared folder
    │  edit   → Docs documents.batchUpdate (insertText / replaceAllText /
    │           updateTextStyle / updateParagraphStyle)
+   │  images → Docs batchUpdate (insertInlineImage from a public URL /
+   │           deleteContentRange); Google fetches the URL at insert time
    ▼
 one JSON object on stdout (document_id / title / url / action / occurrences …)
 ```
@@ -125,10 +127,11 @@ $PY $D read    $ID                                   # inspect the result
 
 ## The verbs
 
-`create` · `read` · `append` · `insert` · `replace` · `style` · `delete` — see
-[`SKILL.md`](./SKILL.md) for the model-facing contract and the word→call mapping.
-Each prints one JSON object; failures are `{"ok": false, "error": "…"}` with
-exit 1. `delete` is destructive and refuses to run without `--confirm`.
+`create` · `read` · `append` · `insert` · `replace` · `style` · `delete` ·
+`insert-image` · `resize-image` · `delete-image` — see [`SKILL.md`](./SKILL.md)
+for the model-facing contract and the word→call mapping. Each prints one JSON
+object; failures are `{"ok": false, "error": "…"}` with exit 1. `delete` and
+`delete-image` are destructive and refuse to run without `--confirm`.
 
 ## Design notes
 
@@ -138,8 +141,18 @@ exit 1. `delete` is destructive and refuses to run without `--confirm`.
 - **Create lands in the shared folder.** A service account has no ordinary Drive
   of its own that a human can browse, so new docs are created directly inside the
   shared folder; folder access is what makes them visible to the user.
-- **Destructive-op guard.** `delete` requires `--confirm`, matching the repo's
-  footgun convention for a local small-model audience.
+- **Destructive-op guard.** `delete` and `delete-image` require `--confirm`,
+  matching the repo's footgun convention for a local small-model audience.
+- **Images are URL-only.** `insert-image` takes a public HTTPS image URL that
+  Google fetches at insert time (`insertInlineImage.uri`) — no local-file upload
+  and no Drive round-trip. `--replace "<placeholder>"` swaps a text marker (e.g.
+  `[IMAGE:x]`) for the image in one atomic batch. Passing only `--width` (points)
+  preserves the image's aspect ratio.
+- **Resize is delete-and-reinsert.** The Docs API has *no* request to change an
+  existing image's size, so `resize-image` deletes the target image and
+  re-inserts it (hence it needs `--url` again) at the new size and same position,
+  in one atomic batch. Existing images are addressed by `--nth` (reading order)
+  or `--after` an anchor.
 
 ## Files
 
