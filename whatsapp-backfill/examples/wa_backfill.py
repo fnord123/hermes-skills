@@ -148,9 +148,11 @@ def _is_system(msg):
 
 
 def group_blocks(messages, include_system, block_messages, gap_hours):
-    """Group consecutive messages into coherent conversation blocks. A block
-    breaks on size (block_messages) or a long time gap (gap_hours)."""
-    blocks, cur, last_dt = [], [], None
+    """Group consecutive messages into small, SINGLE-DAY conversation blocks.
+    A block breaks on a calendar-day change, a size cap (block_messages), or a
+    long idle gap (gap_hours). Small single-day blocks extract quickly/reliably
+    on modest hardware and keep each fact's date unambiguous."""
+    blocks, cur, last_dt, block_day = [], [], None, None
     for msg in messages:
         if not include_system and _is_system(msg):
             continue
@@ -160,14 +162,37 @@ def group_blocks(messages, include_system, block_messages, gap_hours):
             gap = None
             if last_dt and msg["dt"]:
                 gap = (msg["dt"] - last_dt).total_seconds() / 3600.0
-            if len(cur) >= block_messages or (gap is not None and gap >= gap_hours):
+            day_changed = bool(msg["dt"] and block_day and msg["dt"].date() != block_day)
+            if len(cur) >= block_messages or day_changed or (gap is not None and gap >= gap_hours):
                 blocks.append(cur)
                 cur = []
+        if not cur and msg["dt"]:
+            block_day = msg["dt"].date()
         cur.append(msg)
         last_dt = msg["dt"] or last_dt
     if cur:
         blocks.append(cur)
     return blocks
+
+
+def _filter_range(messages, since, until):
+    """Keep only messages whose date is within [since, until] (YYYY-MM-DD)."""
+    if not since and not until:
+        return messages
+    import datetime
+    s = datetime.date.fromisoformat(since) if since else None
+    u = datetime.date.fromisoformat(until) if until else None
+    kept = []
+    for m in messages:
+        d = m["dt"].date() if m["dt"] else None
+        if d is None:
+            continue
+        if s and d < s:
+            continue
+        if u and d > u:
+            continue
+        kept.append(m)
+    return kept
 
 
 def render_block(chat, block):
@@ -182,8 +207,10 @@ def render_block(chat, block):
         span = "unknown date"
     lines = [f"WhatsApp chat: {chat}", f"When: {span}",
              f"Participants: {', '.join(senders) or 'unknown'}", ""]
+    # Full date on EVERY line: a block can span multiple days, and with only
+    # a time the extractor mis-dates facts to the block's first day.
     for m in block:
-        t = m["dt"].strftime("%H:%M") if m["dt"] else "--:--"
+        t = m["dt"].strftime("%Y-%m-%d %H:%M") if m["dt"] else "unknown time"
         who = m["sender"] or "system"
         lines.append(f"[{t}] {who}: {m['text'].strip()}")
     first_dt = dts[0].isoformat() if dts else None
@@ -202,9 +229,9 @@ def _load_hindsight_config():
 
 
 def cmd_preview(args):
-    messages = parse_export(args.file)
+    messages = _filter_range(parse_export(args.file), args.since, args.until)
     if not messages:
-        fail("no messages parsed — is this a WhatsApp 'Export chat' .txt?")
+        fail("no messages parsed in range — check the file / --since / --until.")
     chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
     blocks = group_blocks(messages, args.include_system, args.block_messages, args.block_gap_hours)
     dts = [m["dt"] for m in messages if m["dt"]]
@@ -219,9 +246,9 @@ def cmd_preview(args):
 
 def cmd_import(args):
     import asyncio
-    messages = parse_export(args.file)
+    messages = _filter_range(parse_export(args.file), args.since, args.until)
     if not messages:
-        fail("no messages parsed — is this a WhatsApp 'Export chat' .txt?")
+        fail("no messages parsed in range — check the file / --since / --until.")
     chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
     blocks = group_blocks(messages, args.include_system, args.block_messages, args.block_gap_hours)
     if not blocks:
@@ -289,10 +316,13 @@ def main():
     def common(g):
         g.add_argument("--file", required=True, help="WhatsApp Export chat .txt")
         g.add_argument("--chat", help="chat name (default: derived from filename)")
-        g.add_argument("--block-messages", dest="block_messages", type=int, default=30,
-                       help="max messages per conversation block (default 30)")
+        g.add_argument("--block-messages", dest="block_messages", type=int, default=10,
+                       help="max messages per block (default 10; blocks are also "
+                            "split at day boundaries)")
         g.add_argument("--block-gap-hours", dest="block_gap_hours", type=float, default=6.0,
                        help="a gap this many hours starts a new block (default 6)")
+        g.add_argument("--since", help="only messages on/after this date (YYYY-MM-DD)")
+        g.add_argument("--until", help="only messages on/before this date (YYYY-MM-DD)")
         g.add_argument("--include-system", dest="include_system", action="store_true",
                        help="keep system/notice lines (default: skip)")
 

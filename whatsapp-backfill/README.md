@@ -16,6 +16,35 @@ history is the app's own **Chat → Export chat → Without media**, which produ
 small recent window, not full history — so file export is the right source for
 backfill. Live, going-forward capture is a separate effort (deferred).
 
+### Ban risk — why this skill avoids the live bridge
+
+Meta bans accounts for automation, and the risk is real but it attaches to the
+**live Baileys bridge**, not to this skill:
+
+- **This skill has ~zero ban risk.** It only reads a `.txt` the user exported
+  with WhatsApp's own built-in **Export chat** feature. It never connects Baileys
+  or any unofficial client to WhatsApp, so there is nothing for Meta to detect.
+- **The live bridge is where the risk lives.** Baileys reverse-engineers the
+  WhatsApp Web protocol; Meta treats a personal AI assistant the same as a spam
+  bot. Bans on the unofficial API are typically **permanent and unappealable**,
+  and **unpredictable** — accounts have run for years and then been killed in an
+  enforcement wave, while others are banned within a week. Detection is
+  protocol-fingerprinting at the connection layer (independent of how little you
+  send) plus behavioral ML (low reply-ratio, messaging strangers, robotic
+  timing, block/report signals). Read-only linking is **not** a documented safe
+  harbor — the connection itself is detectable and still violates the ToS.
+- **If the live path is ever enabled:** use a **dedicated/burner number** (never
+  the personal one), no unsolicited or bulk outbound, warm up slowly, run on
+  Node.js, and treat the account as disposable. Avoid third-party "anti-ban" npm
+  packages — at least one (`lotusbail`) was caught exfiltrating WhatsApp session
+  credentials; the session directory grants full account access. The only
+  zero-ToS-risk automated route is the official WhatsApp Business Cloud API
+  (business numbers, templates, opt-in — not personal chats).
+
+Sources: Baileys ban thread (WhiskeySockets/Baileys #1869), engineer risk guides
+(zenvanriel, kraya-ai, achiya-automation), and the WhatsApp Help Center on
+account bans.
+
 ## How it works
 
 ```
