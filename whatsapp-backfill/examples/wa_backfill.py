@@ -175,6 +175,21 @@ def group_blocks(messages, include_system, block_messages, gap_hours):
     return blocks
 
 
+def _apply_aliases(messages, aliases):
+    """Rename senders per 'Old Name=New Name' entries — for contact renames or a
+    number switch that splits one person across two chats."""
+    amap = {}
+    for a in (aliases or []):
+        if "=" in a:
+            old, new = a.split("=", 1)
+            amap[old.strip()] = new.strip()
+    if amap:
+        for m in messages:
+            if m.get("sender") in amap:
+                m["sender"] = amap[m["sender"]]
+    return messages
+
+
 def _filter_range(messages, since, until):
     """Keep only messages whose date is within [since, until] (YYYY-MM-DD)."""
     if not since and not until:
@@ -229,7 +244,8 @@ def _load_hindsight_config():
 
 
 def cmd_preview(args):
-    messages = _filter_range(parse_export(args.file), args.since, args.until)
+    messages = _apply_aliases(
+        _filter_range(parse_export(args.file), args.since, args.until), args.alias)
     if not messages:
         fail("no messages parsed in range — check the file / --since / --until.")
     chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
@@ -246,7 +262,8 @@ def cmd_preview(args):
 
 def cmd_import(args):
     import asyncio
-    messages = _filter_range(parse_export(args.file), args.since, args.until)
+    messages = _apply_aliases(
+        _filter_range(parse_export(args.file), args.since, args.until), args.alias)
     if not messages:
         fail("no messages parsed in range — check the file / --since / --until.")
     chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
@@ -323,6 +340,8 @@ def main():
                        help="a gap this many hours starts a new block (default 6)")
         g.add_argument("--since", help="only messages on/after this date (YYYY-MM-DD)")
         g.add_argument("--until", help="only messages on/before this date (YYYY-MM-DD)")
+        g.add_argument("--alias", action="append", default=[],
+                       help="rename a sender: \"Old Name=New Name\" (repeatable)")
         g.add_argument("--include-system", dest="include_system", action="store_true",
                        help="keep system/notice lines (default: skip)")
 
