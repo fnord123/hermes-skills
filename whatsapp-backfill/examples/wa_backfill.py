@@ -535,6 +535,41 @@ def cmd_status(args):
     out(res)
 
 
+def cmd_clear(args):
+    """Delete a bank and everything in it (documents, facts, observations).
+    Dry-run unless --confirm is given; --bank is required (no default) so a bank
+    is never wiped by accident."""
+    import asyncio
+    import hindsight_client_api
+    from hindsight_client_api.api.banks_api import BanksApi
+    api_url, _cfg_bank, api_key = _load_hindsight_config()
+    bank = args.bank
+
+    async def run():
+        cfg = hindsight_client_api.Configuration(host=api_url)
+        async with hindsight_client_api.ApiClient(cfg) as api:
+            auth = api_key or None
+            summary = await _bank_summary(api, bank, auth)
+            if not args.confirm:
+                return False, summary, None
+            r = await _call(BanksApi(api).delete_bank, bank, auth=auth)
+            return True, summary, (_d2(r) if r is not None else {})
+
+    try:
+        deleted, summary, result = asyncio.run(run())
+    except Exception as e:  # noqa: BLE001
+        fail(f"clear failed: {e}")
+
+    if not deleted:
+        out({"ok": True, "bank": bank, "deleted": False, "bank_summary": summary,
+             "note": f"Dry run — nothing deleted. Re-run with --confirm to delete "
+                     f"bank '{bank}' and all its data ({summary}). "})
+    else:
+        out({"ok": True, "bank": bank, "deleted": True,
+             "deleted_count": result.get("deleted_count"),
+             "message": result.get("message"), "was": summary})
+
+
 def _add_wait_args(g):
     g.add_argument("--wait", action="store_true",
                    help="block and poll until the retain operations finish, then "
@@ -590,6 +625,14 @@ def main():
                    help="operation id to check, from an earlier import (repeatable)")
     _add_wait_args(g)
     g.set_defaults(func=cmd_status)
+
+    g = sub.add_parser("clear",
+                       help="delete a bank and all its memories (dry-run without --confirm)")
+    g.add_argument("--bank", required=True,
+                   help="bank id to delete — REQUIRED, no default (safety)")
+    g.add_argument("--confirm", action="store_true",
+                   help="actually delete; without it this only reports what's there")
+    g.set_defaults(func=cmd_clear)
 
     args = p.parse_args()
     args.func(args)

@@ -99,6 +99,16 @@ FAKE_PKG = {
         "                return {'memory_unit_count': d['memory_unit_count'], 'original_text': d['content']}\n"
         "        return {'memory_unit_count': 0}\n"
     ),
+    "hindsight_client_api/api/banks_api.py": (
+        "from .._state import load, save\n"
+        "class BanksApi:\n"
+        "    def __init__(self, api=None): pass\n"
+        "    async def delete_bank(self, bank_id, authorization=None):\n"
+        "        s = load(); b = s['banks'].get(bank_id, {'docs': [], 'ops': {}})\n"
+        "        n = len(b.get('docs', [])) + len(b.get('ops', {}))\n"
+        "        s['banks'].pop(bank_id, None); save(s)\n"
+        "        return {'success': True, 'deleted_count': n, 'message': \"Bank '%s' deleted\" % bank_id}\n"
+    ),
     "hindsight_client_api/models/__init__.py": "",
     "hindsight_client_api/models/retain_request.py": (
         "class RetainRequest:\n"
@@ -226,6 +236,32 @@ class WaBackfillTest(unittest.TestCase):
         self.assertEqual(d["operation_status"], {op: "completed"})
         self.assertTrue(d["all_completed"])
         self.assertEqual(d["bank_summary"], {"documents": 1, "facts": 1})
+
+    # ── clear (mocked Hindsight) ─────────────────────────────────────────────────
+    def test_clear_dry_run_keeps_data(self):
+        self.run_cmd("import", "--file", str(self.zip),
+                     "--block-days", "7", "--bank", "clr1", "--wait")
+        rc, d, _ = self.run_cmd("clear", "--bank", "clr1")   # no --confirm
+        self.assertEqual(rc, 0)
+        self.assertFalse(d["deleted"])
+        self.assertEqual(d["bank_summary"], {"documents": 1, "facts": 1})
+        state = json.loads(self.state.read_text())
+        self.assertIn("clr1", state["banks"])                # still there
+
+    def test_clear_confirm_deletes(self):
+        self.run_cmd("import", "--file", str(self.zip),
+                     "--block-days", "7", "--bank", "clr2", "--wait")
+        rc, d, _ = self.run_cmd("clear", "--bank", "clr2", "--confirm")
+        self.assertEqual(rc, 0)
+        self.assertTrue(d["deleted"])
+        self.assertEqual(d["deleted_count"], 2)              # 1 doc + 1 op
+        state = json.loads(self.state.read_text())
+        self.assertNotIn("clr2", state["banks"])             # gone
+
+    def test_clear_requires_bank(self):
+        rc, d, err = self.run_cmd("clear", "--confirm")      # missing --bank
+        self.assertEqual(rc, 2)                              # argparse usage error
+        self.assertIn("--bank", err)
 
     # ── error paths ──────────────────────────────────────────────────────────────
     def test_error_missing_file(self):

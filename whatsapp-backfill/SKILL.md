@@ -52,6 +52,7 @@ invoked as `python3 <path> <command> [args]`. Each call prints ONE JSON object
 | `preview --file <export.zip>` | Parse the export (`.zip` or `.txt`) and report stats (messages, blocks, date range, what was skipped) plus a sample block. No memory is written. |
 | `import --file <export.zip> [--bank <id>]` | Parse and store the conversation into Hindsight memory. Returns how many blocks were submitted and the operation ids. |
 | `status --bank <id> [--operation-id <id> …] [--wait]` | Report how many documents/facts are in the bank, and the status of specific import operations. Use this to monitor an import — no external tooling needed. |
+| `clear --bank <id> [--confirm]` | Delete a bank and everything in it. **Dry-run without `--confirm`** (just reports the document/fact counts); `--bank` is required so nothing is wiped by accident. |
 
 Grouping (both preview and import):
 - `--block-days N` — **preferred.** Put one document per N-day window (e.g. 7)
