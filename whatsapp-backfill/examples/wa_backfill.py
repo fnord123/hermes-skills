@@ -147,27 +147,43 @@ def _is_system(msg):
     return any(h in low for h in _SYSTEM_HINTS)
 
 
-def group_blocks(messages, include_system, block_messages, gap_hours):
-    """Group consecutive messages into small, SINGLE-DAY conversation blocks.
-    A block breaks on a calendar-day change, a size cap (block_messages), or a
-    long idle gap (gap_hours). Small single-day blocks extract quickly/reliably
-    on modest hardware and keep each fact's date unambiguous."""
-    blocks, cur, last_dt, block_day = [], [], None, None
+def group_blocks(messages, include_system, block_messages, gap_hours, block_days=None):
+    """Group consecutive messages into conversation blocks (one document each).
+
+    Two modes:
+    - Window mode (block_days set): break ONLY when a block spans more than
+      block_days from its first message. block_messages / gap_hours / the
+      per-day break are all ignored. This hands Hindsight one large,
+      coherent transcript per window and lets it do its own chunking and
+      fact extraction (its recommended mode — more context = better facts).
+    - Legacy mode (block_days None): small SINGLE-DAY blocks, broken on a
+      calendar-day change, a size cap (block_messages), or an idle gap
+      (gap_hours)."""
+    blocks, cur, last_dt, block_day, block_start_dt = [], [], None, None, None
     for msg in messages:
         if not include_system and _is_system(msg):
             continue
         if _media_only(msg["text"]):
             continue
         if cur:
-            gap = None
-            if last_dt and msg["dt"]:
-                gap = (msg["dt"] - last_dt).total_seconds() / 3600.0
-            day_changed = bool(msg["dt"] and block_day and msg["dt"].date() != block_day)
-            if len(cur) >= block_messages or day_changed or (gap is not None and gap >= gap_hours):
+            if block_days is not None:
+                span_days = None
+                if block_start_dt and msg["dt"]:
+                    span_days = (msg["dt"] - block_start_dt).total_seconds() / 86400.0
+                should_break = span_days is not None and span_days >= block_days
+            else:
+                gap = None
+                if last_dt and msg["dt"]:
+                    gap = (msg["dt"] - last_dt).total_seconds() / 3600.0
+                day_changed = bool(msg["dt"] and block_day and msg["dt"].date() != block_day)
+                should_break = (len(cur) >= block_messages or day_changed
+                                or (gap is not None and gap >= gap_hours))
+            if should_break:
                 blocks.append(cur)
                 cur = []
         if not cur and msg["dt"]:
             block_day = msg["dt"].date()
+            block_start_dt = msg["dt"]
         cur.append(msg)
         last_dt = msg["dt"] or last_dt
     if cur:
@@ -211,7 +227,16 @@ def _filter_range(messages, since, until):
 
 
 def render_block(chat, block):
-    """Render one block into a self-describing transcript for fact extraction."""
+    """Render one block into a self-describing transcript for fact extraction.
+
+    Dates are emphasized aggressively so the extractor stamps each fact with
+    the right day (a multi-day block otherwise lets undated facts fall back to
+    the block's first day):
+    - a dated section header (`===== YYYY-MM-DD (Weekday) =====`) opens each
+      calendar day,
+    - every message carries a full `[YYYY-MM-DD HH:MM]` stamp,
+    - messages are separated by a blank line and flattened to one line each, so
+      a message boundary is unambiguous vs. a within-message line break."""
     dts = [m["dt"] for m in block if m["dt"]]
     senders = sorted({m["sender"] for m in block if m["sender"]})
     if dts:
@@ -220,14 +245,18 @@ def render_block(chat, block):
             f"{d0.strftime('%Y-%m-%d %H:%M')} → {d1.strftime('%Y-%m-%d %H:%M')}"
     else:
         span = "unknown date"
-    lines = [f"WhatsApp chat: {chat}", f"When: {span}",
-             f"Participants: {', '.join(senders) or 'unknown'}", ""]
-    # Full date on EVERY line: a block can span multiple days, and with only
-    # a time the extractor mis-dates facts to the block's first day.
+    lines = [f"WhatsApp chat: {chat}",
+             f"Participants: {', '.join(senders) or 'unknown'}",
+             f"Date range: {span}"]
+    cur_day = None
     for m in block:
+        if m["dt"] and m["dt"].date() != cur_day:
+            cur_day = m["dt"].date()
+            lines += ["", f"===== {m['dt'].strftime('%Y-%m-%d (%A)')} ====="]
         t = m["dt"].strftime("%Y-%m-%d %H:%M") if m["dt"] else "unknown time"
         who = m["sender"] or "system"
-        lines.append(f"[{t}] {who}: {m['text'].strip()}")
+        text = " ".join(m["text"].split())  # flatten internal line breaks
+        lines += ["", f"[{t}] {who}: {text}"]
     first_dt = dts[0].isoformat() if dts else None
     return "\n".join(lines), first_dt, senders, span
 
@@ -243,13 +272,93 @@ def _load_hindsight_config():
     return api_url, cfg.get("bank_id") or "hermes", (cfg.get("apiKey") or "").strip()
 
 
+def _progress(msg):
+    """Emit a live progress line to stderr (stdout stays reserved for the
+    final JSON result)."""
+    import sys
+    print(msg, file=sys.stderr, flush=True)
+
+
+async def _call(method, *pos, auth=None):
+    """Call a generated-client coroutine, passing authorization only if the
+    endpoint accepts it and a key is configured."""
+    import inspect
+    kw = {}
+    try:
+        if auth and "authorization" in inspect.signature(method).parameters:
+            kw["authorization"] = auth
+    except (ValueError, TypeError):
+        pass
+    return await method(*pos, **kw)
+
+
+def _d2(x):
+    return x if isinstance(x, dict) else x.to_dict()
+
+
+async def _poll_operations(api, bank, op_ids, interval, timeout, auth=None):
+    """Poll each retain operation until all are terminal or `timeout` seconds
+    pass. Emits progress to stderr; returns {operation_id: final_status}."""
+    import asyncio
+    from hindsight_client_api.api.operations_api import OperationsApi
+    ops = OperationsApi(api)
+    terminal = {"completed", "failed", "error"}
+    status = {op: "pending" for op in op_ids}
+    waited = 0
+    while True:
+        for op in op_ids:
+            if status[op] in terminal:
+                continue
+            try:
+                s = _d2(await _call(ops.get_operation_status, bank, op, auth=auth))
+                status[op] = s.get("status") or status[op]
+            except Exception as e:  # noqa: BLE001
+                status[op] = f"poll-error: {str(e)[:60]}"
+        done = sum(1 for v in status.values() if v in terminal or v.startswith("poll-error"))
+        _progress(f"[{waited}s] operations {done}/{len(op_ids)} finished "
+                  f"— {', '.join(f'{v}:{n}' for v, n in _counts(status.values()).items())}")
+        if done == len(op_ids) or waited >= timeout:
+            break
+        await asyncio.sleep(interval)
+        waited += interval
+    return status
+
+
+def _counts(values):
+    c = {}
+    for v in values:
+        c[v] = c.get(v, 0) + 1
+    return c
+
+
+async def _bank_summary(api, bank, auth=None):
+    """Return {documents, facts} landed in the bank (facts = sum of each
+    document's memory_unit_count)."""
+    from hindsight_client_api.api.documents_api import DocumentsApi
+    docs = DocumentsApi(api)
+    try:
+        dl = _d2(await _call(docs.list_documents, bank, auth=auth))
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)[:120]}
+    items = dl.get("items") or []
+    facts = 0
+    for doc in items:
+        try:
+            dd = _d2(await _call(docs.get_document, bank, _d2(doc)["id"], auth=auth))
+            facts += dd.get("memory_unit_count") or 0
+        except Exception:  # noqa: BLE001
+            pass
+    return {"documents": dl.get("total", len(items)), "facts": facts}
+
+
 def cmd_preview(args):
     messages = _apply_aliases(
         _filter_range(parse_export(args.file), args.since, args.until), args.alias)
     if not messages:
         fail("no messages parsed in range — check the file / --since / --until.")
     chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
-    blocks = group_blocks(messages, args.include_system, args.block_messages, args.block_gap_hours)
+    blocks = group_blocks(messages, args.include_system, args.block_messages,
+                          args.block_gap_hours, args.block_days)
     dts = [m["dt"] for m in messages if m["dt"]]
     sample = render_block(chat, blocks[0])[0] if blocks else ""
     out({"ok": True, "chat": chat, "messages_parsed": len(messages),
@@ -267,7 +376,8 @@ def cmd_import(args):
     if not messages:
         fail("no messages parsed in range — check the file / --since / --until.")
     chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
-    blocks = group_blocks(messages, args.include_system, args.block_messages, args.block_gap_hours)
+    blocks = group_blocks(messages, args.include_system, args.block_messages,
+                          args.block_gap_hours, args.block_days)
     if not blocks:
         fail("nothing to import after filtering system/media messages.")
     api_url, cfg_bank, api_key = _load_hindsight_config()
@@ -311,19 +421,92 @@ def cmd_import(args):
                 op = getattr(resp, "operation_id", None)
                 if op:
                     ops.append(op)
-            return ops, submitted
+            statuses = summary = None
+            if args.wait and ops:
+                _progress(f"submitted {submitted} block(s) in {len(ops)} "
+                          f"operation(s); waiting for extraction to finish…")
+                statuses = await _poll_operations(
+                    api, bank, ops, args.poll_interval, args.wait_timeout, auth)
+                summary = await _bank_summary(api, bank, auth)
+            return ops, submitted, statuses, summary
 
     try:
-        ops, submitted = asyncio.run(run())
+        ops, submitted, statuses, summary = asyncio.run(run())
     except Exception as e:  # noqa: BLE001
         fail(f"retain failed: {e}")
 
-    out({"ok": True, "chat": chat, "bank": bank, "messages_parsed": len(messages),
-         "blocks_submitted": submitted, "batches": len(ops),
-         "operation_ids": ops[:20],
-         "note": "Retains are processing in the background on the Hindsight "
-                 "server; facts become recallable once the worker finishes "
-                 "(can take a while). Ask the agent afterward to query them."})
+    result = {"ok": True, "chat": chat, "bank": bank,
+              "messages_parsed": len(messages), "blocks_submitted": submitted,
+              "batches": len(ops), "operation_ids": ops[:50]}
+    if statuses is not None:
+        incomplete = [o for o, s in statuses.items() if s != "completed"]
+        result["status_counts"] = _counts(statuses.values())
+        result["all_completed"] = not incomplete
+        if incomplete:
+            result["incomplete_operations"] = incomplete
+        result["bank_summary"] = summary
+        result["note"] = ("Import finished. bank_summary shows documents/facts "
+                          "landed. If any operation did not complete, re-run the "
+                          "import for that date range or ask the user.")
+    else:
+        result["note"] = ("Retains are processing in the background. Monitor with "
+                          "`status --bank <bank> --operation-id <id> --wait`, or "
+                          "re-run import with --wait to block until finished.")
+    out(result)
+
+
+def cmd_status(args):
+    """Report progress of retain operations and how many documents/facts are in
+    the bank — the skill's own monitor, so no external polling is needed."""
+    import asyncio
+    import hindsight_client_api
+    from hindsight_client_api.api.operations_api import OperationsApi
+    api_url, cfg_bank, api_key = _load_hindsight_config()
+    bank = args.bank or cfg_bank
+
+    async def run():
+        cfg = hindsight_client_api.Configuration(host=api_url)
+        async with hindsight_client_api.ApiClient(cfg) as api:
+            auth = api_key or None
+            statuses = None
+            if args.operation_id:
+                if args.wait:
+                    statuses = await _poll_operations(
+                        api, bank, args.operation_id,
+                        args.poll_interval, args.wait_timeout, auth)
+                else:
+                    ops = OperationsApi(api)
+                    statuses = {}
+                    for op in args.operation_id:
+                        try:
+                            s = _d2(await _call(ops.get_operation_status, bank, op, auth=auth))
+                            statuses[op] = s.get("status")
+                        except Exception as e:  # noqa: BLE001
+                            statuses[op] = f"error: {str(e)[:60]}"
+            summary = await _bank_summary(api, bank, auth)
+            return statuses, summary
+
+    try:
+        statuses, summary = asyncio.run(run())
+    except Exception as e:  # noqa: BLE001
+        fail(f"status check failed: {e}")
+
+    res = {"ok": True, "bank": bank, "bank_summary": summary}
+    if statuses is not None:
+        res["operation_status"] = statuses
+        res["status_counts"] = _counts(statuses.values())
+        res["all_completed"] = all(s == "completed" for s in statuses.values())
+    out(res)
+
+
+def _add_wait_args(g):
+    g.add_argument("--wait", action="store_true",
+                   help="block and poll until the retain operations finish, then "
+                        "report documents/facts landed")
+    g.add_argument("--poll-interval", dest="poll_interval", type=int, default=20,
+                   help="seconds between status polls when --wait (default 20)")
+    g.add_argument("--wait-timeout", dest="wait_timeout", type=int, default=3600,
+                   help="max seconds to wait before returning (default 3600)")
 
 
 def main():
@@ -333,11 +516,16 @@ def main():
     def common(g):
         g.add_argument("--file", required=True, help="WhatsApp Export chat .txt")
         g.add_argument("--chat", help="chat name (default: derived from filename)")
+        g.add_argument("--block-days", dest="block_days", type=float, default=None,
+                       help="window mode: one block per this many days (e.g. 7). "
+                            "Disables --block-messages/--block-gap-hours/day splits "
+                            "and lets Hindsight chunk each window itself (recommended)")
         g.add_argument("--block-messages", dest="block_messages", type=int, default=10,
-                       help="max messages per block (default 10; blocks are also "
-                            "split at day boundaries)")
+                       help="legacy mode: max messages per block (default 10; also "
+                            "split at day boundaries). Ignored when --block-days is set")
         g.add_argument("--block-gap-hours", dest="block_gap_hours", type=float, default=6.0,
-                       help="a gap this many hours starts a new block (default 6)")
+                       help="legacy mode: a gap this many hours starts a new block "
+                            "(default 6). Ignored when --block-days is set")
         g.add_argument("--since", help="only messages on/after this date (YYYY-MM-DD)")
         g.add_argument("--until", help="only messages on/before this date (YYYY-MM-DD)")
         g.add_argument("--alias", action="append", default=[],
@@ -354,7 +542,16 @@ def main():
     g.add_argument("--bank", help="Hindsight bank id (default: from config)")
     g.add_argument("--batch-size", dest="batch_size", type=int, default=10,
                    help="blocks per retain request (default 10)")
+    _add_wait_args(g)
     g.set_defaults(func=cmd_import)
+
+    g = sub.add_parser("status",
+                       help="report retain-operation progress and bank fact counts")
+    g.add_argument("--bank", help="Hindsight bank id (default: from config)")
+    g.add_argument("--operation-id", dest="operation_id", action="append", default=[],
+                   help="operation id to check, from an earlier import (repeatable)")
+    _add_wait_args(g)
+    g.set_defaults(func=cmd_status)
 
     args = p.parse_args()
     args.func(args)
