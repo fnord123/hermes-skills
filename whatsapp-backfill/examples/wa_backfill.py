@@ -37,7 +37,10 @@ import json
 import re
 from datetime import datetime
 
-HINDSIGHT_CONFIG = Path.home() / ".hermes" / "hindsight" / "config.json"
+# Path to the Hindsight provider config; overridable via env for testing.
+HINDSIGHT_CONFIG = Path(os.environ.get(
+    "WA_BACKFILL_HINDSIGHT_CONFIG",
+    str(Path.home() / ".hermes" / "hindsight" / "config.json")))
 
 # LTR/RTL marks WhatsApp sprinkles into exports; strip them before matching.
 _MARKS = "‎‏‪‬ "
