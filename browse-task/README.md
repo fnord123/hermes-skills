@@ -1,0 +1,100 @@
+# browse-task
+
+Delegate a **multi-step web task** to an autonomous browser agent. The Hermes
+agent calls one script with a plain-English task; the script drives a real
+browser to completion and returns the result as a single JSON object.
+
+## Why this exists
+
+Hermes' built-in web tools are great for a one-shot search or reading a single
+page. They're a poor fit when the answer requires *operating* a site over many
+steps — applying the site's own filters, paging through listings, following a
+multi-screen flow. This skill hands those tasks to a purpose-built **computer-use
+agent** that perceives the page and acts on it directly, then reports back.
+
+## Architecture
+
+Three layers — the model-facing skill never sees the lower two:
+
+1. **Model transport** — an OpenAI-compatible endpoint serving the browser-agent
+   model. Here that's a LiteLLM route named `fara` →
+   [`Fara1.5-27B`](https://huggingface.co/microsoft/Fara1.5-27B) on the local
+   llama-swap host (`192.168.1.222:8080`). Fara1.5 is Microsoft Research's
+   browser computer-use agent: it observes the page via screenshots and emits
+   grounded actions (click/type/scroll/visit/search).
+2. **Scaffold** — Microsoft's [`microsoft/fara`](https://github.com/microsoft/fara)
+   Playwright harness (`fara-cli`) runs the screenshot→action loop against that
+   endpoint.
+3. **This skill** — `examples/browse_task.py` wraps `fara-cli`: it feeds the task,
+   runs headless with `/dev/null` stdin (so the agent's interactive prompt can't
+   block), reads the trajectory's `data_point.json` (`status` + `outcome.answer`),
+   and emits one domain-shaped JSON object. `SKILL.md` is the model contract and
+   deliberately speaks only in web-task terms — none of the Fara / LiteLLM /
+   screenshot machinery leaks into the model's context.
+
+## Setup
+
+### 1. LiteLLM route (transport)
+Add a route so the scaffold can reach the model through your proxy:
+
+```yaml
+  - model_name: fara
+    litellm_params:
+      model: openai/Fara1.5-27B
+      api_base: http://192.168.1.222:8080/v1
+      api_key: none
+      timeout: 900
+```
+Restart LiteLLM and confirm `fara` appears in `/v1/models`.
+
+### 2. Install the Fara scaffold
+```bash
+git clone https://github.com/microsoft/fara.git ~/fara
+cd ~/fara
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e .          # NOT .[vllm] — the model is served remotely via LiteLLM
+playwright install chromium
+```
+This provides `~/fara/.venv/bin/fara-cli`.
+
+### 3. Configure the skill
+```bash
+cd ~/.hermes/skills/browse-task/examples
+cp config.env.example config.env
+# edit config.env:
+#   FARA_HOME=/home/<you>/fara
+#   BROWSE_BASE_URL=http://192.168.1.226:4000/v1   (your LiteLLM)
+#   BROWSE_MODEL=fara
+#   BROWSE_API_KEY=<your LiteLLM key>
+```
+
+Smoke test:
+```bash
+python3 examples/browse_task.py --task "Find the current time in Tokyo and report it"
+```
+
+## Safety model
+
+- **Read-only is the default.** Without `--confirm`, the script appends a strict
+  instruction telling the agent to only read and report — not to sign in, submit,
+  buy, book, post, or change anything. This is an *instruction to the model*, not
+  a browser-level sandbox: it relies on the agent obeying, so treat it as a strong
+  default, not a hard guarantee.
+- **`--confirm` gates acting.** Any state-changing task requires `--confirm`, and
+  `SKILL.md` instructs the agent to use it only after the user approved that exact
+  action — the standard footgun guard for a local model that might otherwise
+  hallucinate a consequential call.
+- The agent operates a **live browser**. If that browser profile is signed into
+  accounts, an acting run can take real actions as the user. Keep the profile
+  logged out of anything you don't want an agent touching.
+
+## Notes
+
+- Fara1.5-27B on a P40 is **slow** — each step processes a full screenshot; a task
+  can take minutes. `--max-steps` (default 25) bounds cost; the script also caps a
+  run at 30 minutes.
+- Runs are headless. Trajectories (screenshots + `data_point.json`) are written to
+  a temp folder and discarded after the result is read.
+- `data_point.json` fields consumed: `status` (`complete` / `waiting_for_user` /
+  `max_rounds` / `timed_out` / `aborted`) and `outcome.answer`.
