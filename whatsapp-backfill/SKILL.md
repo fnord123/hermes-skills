@@ -3,8 +3,9 @@ name: whatsapp-backfill
 description: >
   Import a WhatsApp chat export into the agent's long-term memory so you can ask
   about those conversations later ("what did Dan say about the regatta?"). Takes
-  a WhatsApp "Export chat" .txt file, groups the messages into conversation
-  blocks, and stores them in the same Hindsight memory bank the agent recalls
+  the WhatsApp "Export chat" .zip (or the _chat.txt inside it), groups the
+  messages into conversation windows, and stores them in a Hindsight memory bank
+  the agent recalls
   from. PREFER THIS SKILL whenever the user wants to load, import, ingest, or
   remember a WhatsApp conversation/history/export. It handles existing history
   only (WhatsApp has no live-history API — the user exports the chat from the
@@ -22,10 +23,11 @@ metadata:
 
 Load an exported WhatsApp chat into the agent's Hindsight memory so its contents
 become recallable later. The user exports a chat from WhatsApp (**Chat → Export
-chat → Without media**), which produces a `.txt` file; this skill parses it,
-groups messages into conversation blocks, and retains them into the memory bank
-the agent already uses. Afterward the user can just ask the agent about the
-conversation.
+chat → Without media**), which produces a `.zip`; pass that `.zip` straight to
+`--file` (the skill extracts the `_chat.txt` inside — no unzip step) or pass a
+`.txt` directly. The skill parses it, groups messages into conversation windows,
+and retains them into a Hindsight bank. Afterward the user can just ask the agent
+about the conversation.
 
 ## When to use
 
@@ -37,7 +39,7 @@ conversation.
 - **Live/ongoing capture.** This imports an exported file; it does not stream new
   messages. There's no WhatsApp history API, so a file export is the only source.
 - **Non-WhatsApp text.** For arbitrary notes/files, use the agent's normal memory
-  directly; this skill is specifically for WhatsApp `Export chat` `.txt` files.
+  directly; this skill is specifically for WhatsApp `Export chat` files.
 
 ## The tool
 
@@ -47,8 +49,8 @@ invoked as `python3 <path> <command> [args]`. Each call prints ONE JSON object
 
 | Command | Purpose |
 |---|---|
-| `preview --file <chat.txt> [--chat "<name>"]` | Parse the export and report stats (messages, blocks, date range, what was skipped) plus a sample block. No memory is written. |
-| `import --file <chat.txt> [--chat "<name>"] [--bank <id>]` | Parse and store the conversation into Hindsight memory. Returns how many blocks were submitted and the operation ids. |
+| `preview --file <export.zip>` | Parse the export (`.zip` or `.txt`) and report stats (messages, blocks, date range, what was skipped) plus a sample block. No memory is written. |
+| `import --file <export.zip> [--bank <id>]` | Parse and store the conversation into Hindsight memory. Returns how many blocks were submitted and the operation ids. |
 | `status --bank <id> [--operation-id <id> …] [--wait]` | Report how many documents/facts are in the bank, and the status of specific import operations. Use this to monitor an import — no external tooling needed. |
 
 Grouping (both preview and import):
@@ -83,9 +85,9 @@ on stdout.
 
 | User said | Call |
 |---|---|
-| "import my WhatsApp export at ~/Downloads/chat.txt" | `preview --file ~/Downloads/chat.txt` → confirm → `import --file ~/Downloads/chat.txt` |
-| "load this WhatsApp chat with the sailing group" | `preview --file <path> --chat "Sailing Group"` → confirm → `import …` |
-| "remember my chat with Mom, keep the system messages" | `import --file <path> --chat "Mom" --include-system` |
+| "import my WhatsApp export at ~/Downloads/chat.zip" | `preview --file ~/Downloads/chat.zip --block-days 7` → confirm → `import --file ~/Downloads/chat.zip --block-days 7 --wait` |
+| "load this WhatsApp chat with the sailing group" | `preview --file <export.zip> --chat "Sailing Group" --block-days 7` → confirm → `import … --wait` |
+| "remember my chat with Mom, keep the system messages" | `import --file <export.zip> --chat "Mom" --block-days 7 --include-system --wait` |
 
 ## Output shape
 
@@ -101,9 +103,11 @@ monitor with `status`.
 
 ## When a command reports an error
 
-- `"no messages parsed…"` → the file isn't a WhatsApp `Export chat` `.txt` (wrong
-  file, or an unusual locale format). Ask the user to re-export via **Chat →
-  Export chat → Without media**.
+- `"no messages parsed…"` → the file isn't a WhatsApp `Export chat` (wrong file,
+  or an unusual locale format). Ask the user to re-export via **Chat → Export
+  chat → Without media**.
+- `"no chat .txt inside the zip…"` / `"not a readable zip"` → the `.zip` isn't a
+  WhatsApp export. Ask the user for the export `.zip` (or the `_chat.txt`).
 - `"Hindsight config not found…"` / `"no api_url…"` → the memory provider isn't
   set up. Tell the user to run `hermes memory setup` and pick Hindsight.
 - `"retain failed…"` → the memory server rejected or timed out on the request.
@@ -115,4 +119,4 @@ to resolve errors yourself.
 ## Empty results
 
 `preview` with `messages_parsed: 0` means nothing was recognized as WhatsApp
-messages — say so plainly and ask for a proper `Export chat` `.txt`.
+messages — say so plainly and ask for a proper `Export chat` export.

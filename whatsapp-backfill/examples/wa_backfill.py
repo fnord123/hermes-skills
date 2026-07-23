@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""wa_backfill.py — import a WhatsApp "Export chat" .txt into Hindsight memory.
+"""wa_backfill.py — import a WhatsApp "Export chat" into Hindsight memory.
 
 Parses a WhatsApp chat export, groups messages into coherent conversation
-blocks, and retains each block into the same Hindsight bank the Hermes agent
-already uses — so the agent can later answer questions about the conversation
-(via its normal memory recall). Retains are submitted asynchronously in
-batches, because Hindsight extracts facts with an LLM in the background.
+windows, and retains each into a Hindsight bank — so the agent can later answer
+questions about the conversation (via its normal memory recall). Retains are
+submitted asynchronously, because Hindsight extracts facts with an LLM in the
+background.
 
 WhatsApp has no message-history API; the supported source of existing history
 is the app's own "Export chat" (Chat → Export chat → Without media). This tool
-imports that .txt.
+takes that export's `.zip` directly (extracts the `_chat.txt` inside) or a
+plain `.txt`.
 
 Commands (each prints ONE JSON object on stdout; exit 1 on error):
-  preview --file <chat.txt> [--chat "<name>"]        parse only: stats + samples
-  import  --file <chat.txt> [--chat "<name>"] [--bank <id>]
-          [--block-messages N] [--block-gap-hours H] [--include-system]
-                                                     parse + retain into Hindsight
+  preview --file <export.zip|.txt> [--chat "<name>"]   parse only: stats + sample
+  import  --file <export.zip|.txt> [--bank <id>] [--block-days N]
+          [--since D --until D] [--alias "Old=New"] [--wait]
+                                                       parse + retain into Hindsight
+  status  --bank <id> [--operation-id <id> …] [--wait]  monitor progress + counts
 
 Auth/target: reads api_url + bank_id (+ apiKey) from
 ~/.hermes/hindsight/config.json — the same server/bank the agent recalls from.
@@ -105,9 +107,40 @@ def _split_sender(rest):
     return rest[:idx].strip(), rest[idx + 2:]
 
 
+def _read_export(path):
+    """Read a WhatsApp export into text. Accepts the exported `.zip` directly
+    (extracts the `_chat.txt` inside — no `unzip` needed) or a plain `.txt`."""
+    import zipfile
+    p = Path(path).expanduser()
+    if not p.exists():
+        fail(f"file not found: {p}")
+    if p.suffix.lower() == ".zip" or zipfile.is_zipfile(str(p)):
+        try:
+            with zipfile.ZipFile(str(p)) as z:
+                names = ([n for n in z.namelist() if n.endswith("_chat.txt")]
+                         or [n for n in z.namelist() if n.lower().endswith(".txt")])
+                if not names:
+                    fail("no chat .txt inside the zip — is it a WhatsApp export?")
+                return z.read(names[0]).decode("utf-8", errors="replace")
+        except zipfile.BadZipFile:
+            fail(f"{p.name} is not a readable zip.")
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def _derive_chat(path):
+    """Turn an export filename into a chat label, stripping WhatsApp's export
+    prefix (e.g. `WhatsApp Chat with Mom.zip` / `WhatsApp_Chat__Mom` -> `Mom`)."""
+    import re
+    stem = Path(path).stem
+    # strip anything up to and including the "WhatsApp Chat [with|-]" marker
+    # (also drops upload/hash prefixes like "d207f316-WhatsApp_Chat__…").
+    stem = re.sub(r"(?i)^.*?whatsapp[ _]*chat[ _]*(?:with|-)?[ _]*", "", stem)
+    return stem.replace("_", " ").strip() or "WhatsApp chat"
+
+
 def parse_export(path):
     """Return a list of message dicts: {dt: datetime|None, sender, text, system}."""
-    text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+    text = _read_export(path)
     messages = []
     for raw_line in text.splitlines():
         line = _strip_marks(raw_line)
@@ -356,7 +389,7 @@ def cmd_preview(args):
         _filter_range(parse_export(args.file), args.since, args.until), args.alias)
     if not messages:
         fail("no messages parsed in range — check the file / --since / --until.")
-    chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
+    chat = args.chat or _derive_chat(args.file)
     blocks = group_blocks(messages, args.include_system, args.block_messages,
                           args.block_gap_hours, args.block_days)
     dts = [m["dt"] for m in messages if m["dt"]]
@@ -375,7 +408,7 @@ def cmd_import(args):
         _filter_range(parse_export(args.file), args.since, args.until), args.alias)
     if not messages:
         fail("no messages parsed in range — check the file / --since / --until.")
-    chat = args.chat or Path(args.file).stem.replace("WhatsApp Chat with ", "").strip()
+    chat = args.chat or _derive_chat(args.file)
     blocks = group_blocks(messages, args.include_system, args.block_messages,
                           args.block_gap_hours, args.block_days)
     if not blocks:
@@ -514,7 +547,9 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(g):
-        g.add_argument("--file", required=True, help="WhatsApp Export chat .txt")
+        g.add_argument("--file", required=True,
+                       help="WhatsApp export .zip (the skill extracts the "
+                            "chat inside) or a plain _chat.txt")
         g.add_argument("--chat", help="chat name (default: derived from filename)")
         g.add_argument("--block-days", dest="block_days", type=float, default=None,
                        help="window mode: one block per this many days (e.g. 7). "
