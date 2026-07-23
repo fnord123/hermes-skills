@@ -13,6 +13,7 @@ Configuration is read from config.env beside this script (see config.env.example
 """
 
 import argparse
+import datetime
 import glob
 import json
 import os
@@ -24,18 +25,33 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 # Config path; overridable via env for testing.
 CONFIG = Path(os.environ.get("BROWSE_TASK_CONFIG", str(HERE / "config.env")))
+# Every run appends the command and the FULL agent output here so failures are
+# diagnosable. Overridable via config (BROWSE_LOG) or env (BROWSE_TASK_LOG).
+LOG = Path(os.environ.get("BROWSE_TASK_LOG",
+                          str(Path.home() / ".hermes" / "logs" / "browse-task.log")))
+
+
+def log(msg):
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG, "a") as f:
+            f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} {msg}\n")
+    except Exception:  # noqa: BLE001 — logging must never break the tool
+        pass
 
 # Appended to the task in read-only mode. Best-effort instruction, not a browser
 # sandbox — see README.
 READONLY_DIRECTIVE = (
-    " IMPORTANT CONSTRAINT: Only read and report information. Do not sign in, "
-    "submit forms, purchase, book, post, send messages, or change any account or "
-    "site state. If the task would require any such action, stop and report what "
-    "you found and what action would be needed."
+    " CONSTRAINT: This is a read-only lookup. You MAY search, set a location or ZIP "
+    "for availability, and apply filters. You must NOT sign in, enter payment or "
+    "personal contact details, purchase, book, post, send messages, or submit any "
+    "order or account change. If the task would require any of those, stop and "
+    "report what you found and what action would be needed."
 )
 
 
 def out(d, code=0):
+    log("RESULT " + json.dumps(d, ensure_ascii=False)[:600])
     print(json.dumps(d, ensure_ascii=False))
     sys.exit(code)
 
@@ -102,6 +118,11 @@ def main():
     args = p.parse_args()
 
     cfg = load_config()
+    global LOG
+    if cfg.get("BROWSE_LOG"):
+        LOG = Path(cfg["BROWSE_LOG"])
+    log("START " + json.dumps({"task": args.task, "acted": bool(args.confirm),
+                               "start_url": args.start_url, "max_steps": args.max_steps}))
     fara_home = cfg.get("FARA_HOME") or ""
     base_url = cfg.get("BROWSE_BASE_URL") or ""
     model = cfg.get("BROWSE_MODEL") or ""
@@ -122,17 +143,29 @@ def main():
                "--output_folder", tmp, "--base_url", base_url,
                "--api_key", api_key, "--model", model,
                "--max_rounds", str(args.max_steps)]
+        redacted, skip = [], False
+        for a in cmd:
+            redacted.append("<redacted>" if skip else a)
+            skip = (a == "--api_key")
+        log("CMD " + " ".join(redacted))
         try:
             # /dev/null stdin: the task runs first, then the agent's interactive
             # prompt gets EOF and exits instead of blocking.
             proc = subprocess.run(cmd, stdin=subprocess.DEVNULL,
                                   capture_output=True, text=True, timeout=1800)
         except subprocess.TimeoutExpired:
+            log("fara-cli TIMEOUT after 1800s")
             fail("the web task ran too long (30 min) and was stopped. Try a narrower "
                  "task or a lower --max-steps.")
         except Exception as e:  # noqa: BLE001
+            log(f"fara-cli launch error: {e}")
             fail(f"could not start the browser agent: {e}")
 
+        log(f"fara-cli exit={proc.returncode}")
+        if proc.stdout:
+            log("STDOUT:\n" + proc.stdout)
+        if proc.stderr:
+            log("STDERR:\n" + proc.stderr)
         status, answer, steps = read_result(tmp, proc.stdout)
 
     base = {"task": args.task, "acted": bool(args.confirm)}

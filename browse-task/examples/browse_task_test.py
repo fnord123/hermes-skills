@@ -63,8 +63,10 @@ class BrowseTaskTest(unittest.TestCase):
             "BROWSE_BASE_URL=http://fake:4000/v1\n"
             "BROWSE_MODEL=fara\n"
             "BROWSE_API_KEY=k\n")
+        cls.log = cls.tmp / "browse.log"
         cls.base_env = {**os.environ,
                         "BROWSE_TASK_CONFIG": str(cls.config),
+                        "BROWSE_TASK_LOG": str(cls.log),
                         "FAKE_CLI_RECORD": str(cls.record)}
 
     @classmethod
@@ -92,7 +94,7 @@ class BrowseTaskTest(unittest.TestCase):
     def test_readonly_directive_and_stdin(self):
         self.run_cmd("--task", "find the price", FAKE_STATUS="complete")
         rec = json.loads(self.__class__.record.read_text())
-        self.assertIn("Only read and report", rec["task"])   # read-only appended
+        self.assertIn("read-only lookup", rec["task"])        # read-only appended
         self.assertTrue(rec["stdin_empty"])                  # /dev/null stdin
         self.assertEqual(rec["model"], "fara")               # config threaded through
 
@@ -100,8 +102,16 @@ class BrowseTaskTest(unittest.TestCase):
         rc, d = self.run_cmd("--task", "book it", "--confirm", FAKE_STATUS="complete")
         self.assertTrue(d["acted"])
         rec = json.loads(self.__class__.record.read_text())
-        self.assertNotIn("Only read and report", rec["task"])
+        self.assertNotIn("read-only lookup", rec["task"])
         self.assertEqual(rec["task"], "book it")
+
+    def test_logs_command_and_full_output(self):
+        self.run_cmd("--task", "find the price", FAKE_STATUS="complete", FAKE_ANSWER="$42")
+        text = self.__class__.log.read_text()
+        self.assertIn("START", text)
+        self.assertIn("--api_key <redacted>", text)      # key never logged in clear
+        self.assertIn("Final Answer: $42", text)          # FULL agent output captured
+        self.assertIn("RESULT", text)
 
     # ── other statuses ───────────────────────────────────────────────────────
     def test_waiting_for_user_is_needs_input(self):
