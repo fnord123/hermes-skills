@@ -74,6 +74,7 @@ class BrowseTaskTest(unittest.TestCase):
                         "BROWSE_TASK_CONFIG": str(cls.config),
                         "BROWSE_TASK_LOG": str(cls.log),
                         "BROWSE_HEADFUL": "false",   # run the fake CLI directly, no xvfb
+                        "BROWSE_HERMES_ENV": str(cls.tmp / "no-hermes-env"),  # isolate
                         "FAKE_CLI_RECORD": str(cls.record)}
 
     @classmethod

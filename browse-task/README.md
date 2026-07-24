@@ -162,10 +162,13 @@ explicit rule, which is why Costco is in the built-in table.)
 
 **BrowserBase** (for `browserbase` mode) is a paid service with a small free tier
 (1 browser-hour/month). Sign up at [browserbase.com](https://www.browserbase.com),
-then set `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` in config; the
-scaffold's `--browserbase` path is used automatically. Without those creds, a
-`browserbase`-policy site fails with a clear "not configured" message rather than
-wasting a run.
+then set **both** `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` — in this
+skill's `config.env`, the process env, or `~/.hermes/.env` (checked in that
+order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
+`BROWSERBASE_ADVANCED_STEALTH`) are passed through too. The scaffold's
+`--browserbase` path is then used automatically. Without both creds, a
+`browserbase`-policy site fails with a clear "not fully configured" message
+(naming the missing var) rather than wasting a run.
 
 ## Notes
 

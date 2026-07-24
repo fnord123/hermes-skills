@@ -77,16 +77,40 @@ def fail(msg):
     out({"ok": False, "error": str(msg)}, 1)
 
 
-def load_config():
-    cfg = {}
-    if CONFIG.exists():
-        for line in CONFIG.read_text().splitlines():
+def _read_env_file(path):
+    d = {}
+    try:
+        for line in Path(path).read_text().splitlines():
             line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            cfg[k.strip()] = v.strip()
-    return cfg
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return d
+
+
+def load_config():
+    return _read_env_file(CONFIG)
+
+
+_HERMES_ENV = None
+
+
+def hermes_env():
+    """Hermes' central secrets file (~/.hermes/.env) — a fallback for creds like
+    BrowserBase. Path overridable via BROWSE_HERMES_ENV (for testing)."""
+    global _HERMES_ENV
+    if _HERMES_ENV is None:
+        _HERMES_ENV = _read_env_file(os.environ.get("BROWSE_HERMES_ENV")
+                                     or str(Path.home() / ".hermes" / ".env"))
+    return _HERMES_ENV
+
+
+def bb_cred(cfg, name):
+    """A BrowserBase setting from config.env, then the process env, then
+    ~/.hermes/.env."""
+    return cfg.get(name) or os.environ.get(name) or hermes_env().get(name)
 
 
 # Per-site browser policy: pick the lightest mode that actually loads a site.
@@ -327,7 +351,8 @@ def main():
     if why == "default" and autoprobe:
         fara_python = Path(fara_home) / ".venv" / "bin" / "python"
         if fara_python.exists():
-            has_bb = bool(cfg.get("BROWSERBASE_API_KEY") and cfg.get("BROWSERBASE_PROJECT_ID"))
+            has_bb = bool(bb_cred(cfg, "BROWSERBASE_API_KEY")
+                          and bb_cred(cfg, "BROWSERBASE_PROJECT_ID"))
             log(f"unknown site {_host(args.start_url)} — probing browser modes")
             mode = probe_ladder(args.start_url, xvfb, has_bb, fara_python)
             save_learned(cfg, _host(args.start_url), mode)
@@ -355,13 +380,18 @@ def main():
                 "--api_key", api_key, "--model", model,
                 "--max_rounds", str(args.max_steps)]
         if mode == "browserbase":
-            bb_key = cfg.get("BROWSERBASE_API_KEY")
-            bb_proj = cfg.get("BROWSERBASE_PROJECT_ID")
+            bb_key = bb_cred(cfg, "BROWSERBASE_API_KEY")
+            bb_proj = bb_cred(cfg, "BROWSERBASE_PROJECT_ID")
             if not (bb_key and bb_proj):
-                fail("this site needs BrowserBase (a managed browser that gets past "
-                     "heavy bot protection), but it isn't configured. Set "
-                     "BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in config "
-                     "(see README).")
+                miss = "BROWSERBASE_PROJECT_ID" if bb_key else "BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID"
+                fail(f"this site needs BrowserBase (a managed browser that gets past "
+                     f"heavy bot protection), but it isn't fully configured — {miss} "
+                     f"missing. Set it in config or ~/.hermes/.env (see README).")
+            # pass all BrowserBase settings through (key, project, proxies, stealth)
+            for src in (hermes_env(), os.environ):
+                for k, v in src.items():
+                    if k.startswith("BROWSERBASE_") and v:
+                        env[k] = v
             env["BROWSERBASE_API_KEY"] = bb_key
             env["BROWSERBASE_PROJECT_ID"] = bb_proj
             fara.insert(1, "--browserbase")
