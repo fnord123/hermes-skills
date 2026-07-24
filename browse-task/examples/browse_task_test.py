@@ -19,6 +19,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+HAS_XVFB = shutil.which("xvfb-run") is not None
+
 SCRIPT = str(Path(__file__).resolve().parent / "browse_task.py")
 
 # A fake fara-cli: records the task/stdin it received, then writes a
@@ -67,6 +69,7 @@ class BrowseTaskTest(unittest.TestCase):
         cls.base_env = {**os.environ,
                         "BROWSE_TASK_CONFIG": str(cls.config),
                         "BROWSE_TASK_LOG": str(cls.log),
+                        "BROWSE_HEADFUL": "false",   # run the fake CLI directly, no xvfb
                         "FAKE_CLI_RECORD": str(cls.record)}
 
     @classmethod
@@ -112,6 +115,15 @@ class BrowseTaskTest(unittest.TestCase):
         self.assertIn("--api_key <redacted>", text)      # key never logged in clear
         self.assertIn("Final Answer: $42", text)          # FULL agent output captured
         self.assertIn("RESULT", text)
+
+    @unittest.skipUnless(HAS_XVFB, "xvfb-run not available")
+    def test_headful_mode_wraps_with_xvfb(self):
+        rc, d = self.run_cmd("--task", "x", FAKE_STATUS="complete", BROWSE_HEADFUL="auto")
+        self.assertEqual(rc, 0)
+        text = self.__class__.log.read_text()
+        self.assertIn("mode=headful-xvfb", text)
+        self.assertIn("xvfb-run", text)
+        self.assertIn("--headful", text)
 
     # ── other statuses ───────────────────────────────────────────────────────
     def test_waiting_for_user_is_needs_input(self):

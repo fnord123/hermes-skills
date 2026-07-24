@@ -56,7 +56,8 @@ python3 -m venv .venv
 pip install -e .          # NOT .[vllm] — the model is served remotely via LiteLLM
 playwright install chromium
 ```
-This provides `~/fara/.venv/bin/fara-cli`.
+This provides `~/fara/.venv/bin/fara-cli`. Also install **xvfb** for headful mode
+(below): `sudo apt-get install -y xvfb`.
 
 ### 3. Configure the skill
 ```bash
@@ -89,12 +90,25 @@ python3 examples/browse_task.py --task "Find the current time in Tokyo and repor
   accounts, an acting run can take real actions as the user. Keep the profile
   logged out of anything you don't want an agent touching.
 
+## Headful vs headless
+
+Many sites reject a *headless* browser (bot detection). By default the wrapper
+runs a real **headful** browser under a virtual display (`xvfb-run --headful`)
+when `xvfb-run` is present, which loads those sites; it falls back to headless if
+xvfb is missing. Override with `BROWSE_HEADFUL=true|false|auto` (default `auto`).
+
+Even headful isn't a silver bullet: heavily-protected retail sites (e.g. Costco)
+may load the homepage headful but still block their *search* endpoint, forcing
+slower menu navigation. For such sites, start from a deep category/product URL
+(`--start-url`) to skip search, and raise `--max-steps`.
+
 ## Notes
 
 - Fara1.5-27B on a P40 is **slow** — each step processes a full screenshot; a task
   can take minutes. `--max-steps` (default 25) bounds cost; the script also caps a
-  run at 30 minutes.
-- Runs are headless. Trajectories (screenshots + `data_point.json`) are written to
-  a temp folder and discarded after the result is read.
+  run at 30 minutes and, on timeout, kills the **whole** browser process group
+  (`start_new_session` + `killpg`) so no `Xvfb`/`chromium` is left orphaned.
+- Trajectories (screenshots + `data_point.json`) are written to a temp folder and
+  discarded after the result is read.
 - `data_point.json` fields consumed: `status` (`complete` / `waiting_for_user` /
   `max_rounds` / `timed_out` / `aborted`) and `outcome.answer`.

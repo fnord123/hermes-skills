@@ -17,6 +17,8 @@ import datetime
 import glob
 import json
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -138,35 +140,64 @@ def main():
     if not args.confirm:
         task = task + READONLY_DIRECTIVE
 
+    # Run a real (headful) browser under a virtual display when possible: many
+    # sites reject a headless browser, and headful+xvfb loads them. Falls back to
+    # headless if xvfb is unavailable. Force with BROWSE_HEADFUL=true|false|auto.
+    headful_cfg = (cfg.get("BROWSE_HEADFUL")
+                   or os.environ.get("BROWSE_HEADFUL") or "auto").lower()
+    xvfb = shutil.which("xvfb-run")
+    use_headful = bool(xvfb) and headful_cfg in ("auto", "true", "1", "yes")
+
     with tempfile.TemporaryDirectory(prefix="browse_task_") as tmp:
-        cmd = [str(cli), "--task", task, "--start_page", args.start_url,
-               "--output_folder", tmp, "--base_url", base_url,
-               "--api_key", api_key, "--model", model,
-               "--max_rounds", str(args.max_steps)]
+        fara = [str(cli), "--task", task, "--start_page", args.start_url,
+                "--output_folder", tmp, "--base_url", base_url,
+                "--api_key", api_key, "--model", model,
+                "--max_rounds", str(args.max_steps)]
+        if use_headful:
+            fara.insert(1, "--headful")
+            cmd = [xvfb, "-a"] + fara
+        else:
+            cmd = fara
+        log("mode=" + ("headful-xvfb" if use_headful else "headless"))
         redacted, skip = [], False
         for a in cmd:
             redacted.append("<redacted>" if skip else a)
             skip = (a == "--api_key")
         log("CMD " + " ".join(redacted))
         try:
-            # /dev/null stdin: the task runs first, then the agent's interactive
-            # prompt gets EOF and exits instead of blocking.
-            proc = subprocess.run(cmd, stdin=subprocess.DEVNULL,
-                                  capture_output=True, text=True, timeout=1800)
-        except subprocess.TimeoutExpired:
-            log("fara-cli TIMEOUT after 1800s")
-            fail("the web task ran too long (30 min) and was stopped. Try a narrower "
-                 "task or a lower --max-steps.")
+            # Own session so a timeout can kill the WHOLE tree (xvfb-run -> Xvfb,
+            # fara-cli -> chromium), not just the direct child. /dev/null stdin so
+            # the agent's post-task interactive prompt gets EOF instead of blocking.
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, start_new_session=True)
         except Exception as e:  # noqa: BLE001
             log(f"fara-cli launch error: {e}")
             fail(f"could not start the browser agent: {e}")
 
+        timed_out = False
+        try:
+            stdout, stderr = proc.communicate(timeout=1800)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=30)
+            except Exception:  # noqa: BLE001
+                stdout, stderr = "", ""
+            log("fara-cli TIMEOUT after 1800s; killed process group")
+
         log(f"fara-cli exit={proc.returncode}")
-        if proc.stdout:
-            log("STDOUT:\n" + proc.stdout)
-        if proc.stderr:
-            log("STDERR:\n" + proc.stderr)
-        status, answer, steps = read_result(tmp, proc.stdout)
+        if stdout:
+            log("STDOUT:\n" + stdout)
+        if stderr:
+            log("STDERR:\n" + stderr)
+        status, answer, steps = read_result(tmp, stdout or "")
+        if timed_out and (status or "").lower() not in ("complete", "waiting_for_user"):
+            status = "timed_out"
 
     base = {"task": args.task, "acted": bool(args.confirm)}
     if steps is not None:
