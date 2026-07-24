@@ -26,7 +26,7 @@ Three layers — the model-facing skill never sees the lower two:
    Playwright harness (`fara-cli`) runs the screenshot→action loop against that
    endpoint.
 3. **This skill** — `examples/browse_task.py` wraps `fara-cli`: it feeds the task,
-   runs headless with `/dev/null` stdin (so the agent's interactive prompt can't
+   runs it in the per-site browser mode (below) with `/dev/null` stdin (so the agent's interactive prompt can't
    block), reads the trajectory's `data_point.json` (`status` + `outcome.answer`),
    and emits one domain-shaped JSON object. `SKILL.md` is the model contract and
    deliberately speaks only in web-task terms — none of the Fara / LiteLLM /
@@ -118,17 +118,42 @@ if _os.environ.get("FARA_INIT_COOKIES"):
 ```
 The wrapper sets `FARA_INIT_COOKIES` when `--cookies`/`BROWSE_COOKIES` is given.
 
-## Headful vs headless
+## Browser modes — per-site policy
 
-Many sites reject a *headless* browser (bot detection). By default the wrapper
-runs a real **headful** browser under a virtual display (`xvfb-run --headful`)
-when `xvfb-run` is present, which loads those sites; it falls back to headless if
-xvfb is missing. Override with `BROWSE_HEADFUL=true|false|auto` (default `auto`).
+Sites differ in how aggressively they block automated browsers, so the wrapper
+picks the lightest mode that actually works, **transparently, by target site**:
 
-Even headful isn't a silver bullet: heavily-protected retail sites (e.g. Costco)
-may load the homepage headful but still block their *search* endpoint, forcing
-slower menu navigation. For such sites, start from a deep category/product URL
-(`--start-url`) to skip search, and raise `--max-steps`.
+| Mode | What it is | When |
+|---|---|---|
+| `headless` | plain headless Chromium (lightest/fastest) | sites that don't block it |
+| `headful` | real browser under a virtual display (`xvfb-run --headful`) | sites that 503/deny headless |
+| `browserbase` | a managed cloud browser built to pass bot detection | bot-hardened sites |
+
+`--mode auto` (the default) resolves via a built-in table (verified empirically):
+
+| Site | Mode | Why |
+|---|---|---|
+| costco.com | `browserbase` | Akamai blocks headless **and** headful past the homepage |
+| amazon.* | `headful` | headless is 503-blocked on search; headful loads it |
+| reddit.com | `headless` | loads fine headless |
+| newegg.com | `headless` | loads fine headless |
+| *(anything else)* | `headful` if xvfb present, else `headless` | safe default |
+
+Override precedence: `--mode` / `BROWSE_MODE` → legacy `BROWSE_HEADFUL=true|false`
+→ site policy → default. Extend or override the table with a JSON file named in
+`BROWSE_SITE_POLICY`:
+```json
+{"default": "headful",
+ "rules": [{"match": "target.com", "mode": "headless"}]}
+```
+User rules are checked before the built-ins, so you can override any site.
+
+**BrowserBase** (for `browserbase` mode) is a paid service with a small free tier
+(1 browser-hour/month). Sign up at [browserbase.com](https://www.browserbase.com),
+then set `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` in config; the
+scaffold's `--browserbase` path is used automatically. Without those creds, a
+`browserbase`-policy site fails with a clear "not configured" message rather than
+wasting a run.
 
 ## Notes
 

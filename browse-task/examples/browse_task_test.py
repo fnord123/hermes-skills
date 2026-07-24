@@ -36,7 +36,8 @@ out_folder = val("--output_folder") or "."
 stdin_data = sys.stdin.read()   # should be empty (/dev/null)
 rec = {"task": task, "stdin_empty": stdin_data == "", "model": val("--model"),
        "base_url": val("--base_url"), "max_rounds": val("--max_rounds"),
-       "init_cookies": os.environ.get("FARA_INIT_COOKIES")}
+       "init_cookies": os.environ.get("FARA_INIT_COOKIES"),
+       "browserbase": "--browserbase" in args, "headful": "--headful" in args}
 Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps(rec))
 status = os.environ.get("FAKE_STATUS", "complete")
 answer = os.environ.get("FAKE_ANSWER", "the answer")
@@ -122,9 +123,50 @@ class BrowseTaskTest(unittest.TestCase):
         rc, d = self.run_cmd("--task", "x", FAKE_STATUS="complete", BROWSE_HEADFUL="auto")
         self.assertEqual(rc, 0)
         text = self.__class__.log.read_text()
-        self.assertIn("mode=headful-xvfb", text)
+        self.assertIn("browser mode=headful", text)
         self.assertIn("xvfb-run", text)
         self.assertIn("--headful", text)
+
+    # ── per-site policy ──────────────────────────────────────────────────────
+    def test_policy_reddit_headless(self):
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.reddit.com/r/x",
+                             BROWSE_HEADFUL="", FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        text = self.__class__.log.read_text()
+        self.assertIn("browser mode=headless (policy:reddit.com)", text)
+        rec = json.loads(self.__class__.record.read_text())
+        self.assertFalse(rec["headful"])
+
+    @unittest.skipUnless(HAS_XVFB, "xvfb-run not available")
+    def test_policy_amazon_headful(self):
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.amazon.com/s?k=lg",
+                             BROWSE_HEADFUL="", FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        self.assertIn("browser mode=headful (policy:amazon.)",
+                      self.__class__.log.read_text())
+
+    def test_policy_costco_browserbase_needs_creds(self):
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.costco.com/",
+                             BROWSE_HEADFUL="")
+        self.assertEqual(rc, 1)
+        self.assertIn("BrowserBase", d["error"])
+
+    def test_browserbase_with_creds_runs(self):
+        cfg = self.tmp / "bb.env"
+        cfg.write_text(f"FARA_HOME={self.fara_home}\nBROWSE_BASE_URL=http://x/v1\n"
+                       "BROWSE_MODEL=fara\nBROWSERBASE_API_KEY=bk\nBROWSERBASE_PROJECT_ID=bp\n")
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.costco.com/",
+                             BROWSE_TASK_CONFIG=str(cfg), BROWSE_HEADFUL="",
+                             FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        rec = json.loads(self.__class__.record.read_text())
+        self.assertTrue(rec["browserbase"])
+
+    def test_mode_override_beats_policy(self):
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.amazon.com/s?k=lg",
+                             "--mode", "headless", BROWSE_HEADFUL="", FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        self.assertIn("browser mode=headless (override)", self.__class__.log.read_text())
 
     def test_cookies_passed_through(self):
         cfile = self.tmp / "cookies.json"

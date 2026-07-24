@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 HERE = Path(__file__).resolve().parent
 # Config path; overridable via env for testing.
@@ -74,6 +75,63 @@ def load_config():
     return cfg
 
 
+# Per-site browser policy: pick the lightest mode that actually loads a site.
+# (hostname substring, mode) — first match wins. Verified empirically:
+#   costco   — Akamai blocks headless AND headful past the homepage -> browserbase
+#   amazon   — headless is 503-blocked on search; headful loads it -> headful
+#   reddit   — loads fine headless
+#   newegg   — loads fine headless
+DEFAULT_SITE_POLICY = [
+    ("costco.com", "browserbase"),
+    ("amazon.", "headful"),
+    ("reddit.com", "headless"),
+    ("newegg.com", "headless"),
+]
+
+
+def _host(url):
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def load_policy(cfg, xvfb):
+    """Return (rules, default_mode). Rules from BROWSE_SITE_POLICY (a JSON file)
+    are checked before the built-ins, so a user can override any site."""
+    rules, default = [], None
+    pf = cfg.get("BROWSE_SITE_POLICY")
+    if pf and Path(pf).exists():
+        try:
+            data = json.loads(Path(pf).read_text())
+            for r in data.get("rules", []):
+                if r.get("match") and r.get("mode"):
+                    rules.append((r["match"].lower(), r["mode"].lower()))
+            default = (data.get("default") or "").lower() or None
+        except Exception:  # noqa: BLE001
+            pass
+    rules += DEFAULT_SITE_POLICY
+    return rules, (default or ("headful" if xvfb else "headless"))
+
+
+def resolve_mode(args, cfg, start_url, xvfb):
+    """Pick browser mode (headless|headful|browserbase) and why, for this site."""
+    override = (getattr(args, "mode", None) or cfg.get("BROWSE_MODE") or "").strip().lower()
+    if override in ("headless", "headful", "browserbase"):
+        return override, "override"
+    legacy = (cfg.get("BROWSE_HEADFUL") or os.environ.get("BROWSE_HEADFUL") or "").strip().lower()
+    if legacy in ("false", "0", "no"):
+        return "headless", "BROWSE_HEADFUL"
+    if legacy in ("true", "1", "yes"):
+        return "headful", "BROWSE_HEADFUL"
+    rules, default = load_policy(cfg, xvfb)
+    host = _host(start_url)
+    for pat, mode in rules:
+        if pat and pat in host:
+            return mode, f"policy:{pat}"
+    return default, "default"
+
+
 def read_result(output_dir, stdout):
     """Return (status, answer, steps) from the trajectory, falling back to stdout."""
     status = answer = None
@@ -122,6 +180,10 @@ def main():
                         "the agent starts (e.g. a site's delivery location or login) "
                         "so it need not click through that setup. Overrides "
                         "BROWSE_COOKIES from config.")
+    p.add_argument("--mode", choices=["auto", "headless", "headful", "browserbase"],
+                   default="auto",
+                   help="browser mode; 'auto' (default) picks the optimal one per "
+                        "site (see README's site policy).")
     args = p.parse_args()
 
     cfg = load_config()
@@ -145,13 +207,15 @@ def main():
     if not args.confirm:
         task = task + READONLY_DIRECTIVE
 
-    # Run a real (headful) browser under a virtual display when possible: many
-    # sites reject a headless browser, and headful+xvfb loads them. Falls back to
-    # headless if xvfb is unavailable. Force with BROWSE_HEADFUL=true|false|auto.
-    headful_cfg = (cfg.get("BROWSE_HEADFUL")
-                   or os.environ.get("BROWSE_HEADFUL") or "auto").lower()
+    # Pick the browser mode per-site (headless is lightest; headful-under-xvfb
+    # loads sites that reject headless; browserbase is a managed browser for
+    # bot-hardened sites). See resolve_mode / DEFAULT_SITE_POLICY.
     xvfb = shutil.which("xvfb-run")
-    use_headful = bool(xvfb) and headful_cfg in ("auto", "true", "1", "yes")
+    mode, why = resolve_mode(args, cfg, args.start_url, xvfb)
+    if mode == "headful" and not xvfb:
+        log("WARN: headful needs xvfb-run (not found); falling back to headless")
+        mode = "headless"
+    log(f"browser mode={mode} ({why})")
 
     # Pre-seed cookies (delivery location, login, consent) so the agent doesn't
     # have to click through that setup. Cookies are domain-scoped, so a Costco
@@ -170,12 +234,23 @@ def main():
                 "--output_folder", tmp, "--base_url", base_url,
                 "--api_key", api_key, "--model", model,
                 "--max_rounds", str(args.max_steps)]
-        if use_headful:
+        if mode == "browserbase":
+            bb_key = cfg.get("BROWSERBASE_API_KEY")
+            bb_proj = cfg.get("BROWSERBASE_PROJECT_ID")
+            if not (bb_key and bb_proj):
+                fail("this site needs BrowserBase (a managed browser that gets past "
+                     "heavy bot protection), but it isn't configured. Set "
+                     "BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in config "
+                     "(see README).")
+            env["BROWSERBASE_API_KEY"] = bb_key
+            env["BROWSERBASE_PROJECT_ID"] = bb_proj
+            fara.insert(1, "--browserbase")
+            cmd = fara
+        elif mode == "headful":
             fara.insert(1, "--headful")
             cmd = [xvfb, "-a"] + fara
-        else:
+        else:  # headless
             cmd = fara
-        log("mode=" + ("headful-xvfb" if use_headful else "headless"))
         redacted, skip = [], False
         for a in cmd:
             redacted.append("<redacted>" if skip else a)
