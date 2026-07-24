@@ -28,10 +28,24 @@ from urllib.parse import urlparse
 HERE = Path(__file__).resolve().parent
 # Config path; overridable via env for testing.
 CONFIG = Path(os.environ.get("BROWSE_TASK_CONFIG", str(HERE / "config.env")))
+
+
+def _default_log():
+    """A per-day log file under the OS temp dir. Old days get auto-cleaned by the
+    OS (e.g. systemd-tmpfiles ages /tmp) instead of one file growing forever."""
+    d = Path(tempfile.gettempdir()) / "browse-task"
+    try:
+        d.mkdir(mode=0o700, exist_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+    return d / f"browse-task-{datetime.date.today().isoformat()}.log"
+
+
 # Every run appends the command and the FULL agent output here so failures are
-# diagnosable. Overridable via config (BROWSE_LOG) or env (BROWSE_TASK_LOG).
-LOG = Path(os.environ.get("BROWSE_TASK_LOG",
-                          str(Path.home() / ".hermes" / "logs" / "browse-task.log")))
+# diagnosable. Overridable via config (BROWSE_LOG) or env (BROWSE_TASK_LOG); set
+# one of those to a persistent path if you don't want the OS to age it out.
+LOG = (Path(os.environ["BROWSE_TASK_LOG"]) if os.environ.get("BROWSE_TASK_LOG")
+       else _default_log())
 
 
 def log(msg):

@@ -169,6 +169,12 @@ wasting a run.
 
 ## Notes
 
+- **Logging.** Every run appends the command (API key redacted), the resolved
+  browser mode, and the full agent stdout+stderr to a diagnostic log — by default
+  a **per-day file in the OS temp dir** (`<tmp>/browse-task/browse-task-<date>.log`)
+  so old days are auto-cleaned by the OS (e.g. `systemd-tmpfiles` ages `/tmp`)
+  instead of one file growing forever. Set `BROWSE_LOG` (or `BROWSE_TASK_LOG`) to
+  a persistent path if you want to keep logs indefinitely.
 - Fara1.5-27B on a P40 is **slow** — each step processes a full screenshot; a task
   can take minutes. `--max-steps` (default 25) bounds cost; the script also caps a
   run at 30 minutes and, on timeout, kills the **whole** browser process group
