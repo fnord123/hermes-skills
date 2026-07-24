@@ -60,6 +60,7 @@ class BrowseTaskTest(unittest.TestCase):
         cli = binp / "fara-cli"
         cli.write_text(FAKE_CLI)
         cli.chmod(cli.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
+        (binp / "python").write_text("#!/bin/sh\n")   # stub; probe uses BROWSE_PROBE_MAP hook
         cls.record = cls.tmp / "record.json"
         cls.config = cls.tmp / "config.env"
         cls.config.write_text(
@@ -167,6 +168,37 @@ class BrowseTaskTest(unittest.TestCase):
                              "--mode", "headless", BROWSE_HEADFUL="", FAKE_STATUS="complete")
         self.assertEqual(rc, 0)
         self.assertIn("browser mode=headless (override)", self.__class__.log.read_text())
+
+    # ── auto-probe for unknown sites ─────────────────────────────────────────
+    def test_autoprobe_learns_unknown_site(self):
+        learned = self.tmp / "learned1.json"
+        # unknown site; probe says headless loads it
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.example-shop.test/p",
+                             BROWSE_HEADFUL="", BROWSE_PROBE_MAP='{"headless":"OK"}',
+                             BROWSE_LEARNED_POLICY=str(learned), FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        self.assertIn("browser mode=headless (probed)", self.__class__.log.read_text())
+        self.assertIn("example-shop.test", learned.read_text())
+        # a second run reuses the learned cache (no probe needed)
+        rc2, d2 = self.run_cmd("--task", "y", "--start-url", "https://www.example-shop.test/x",
+                               BROWSE_HEADFUL="", BROWSE_LEARNED_POLICY=str(learned),
+                               FAKE_STATUS="complete")
+        self.assertEqual(rc2, 0)
+        self.assertIn("browser mode=headless (learned)", self.__class__.log.read_text())
+
+    def test_autoprobe_escalates_to_browserbase(self):
+        learned = self.tmp / "learned2.json"
+        cfg = self.tmp / "bb2.env"
+        cfg.write_text(f"FARA_HOME={self.fara_home}\nBROWSE_BASE_URL=http://x/v1\n"
+                       "BROWSE_MODEL=fara\nBROWSERBASE_API_KEY=bk\nBROWSERBASE_PROJECT_ID=bp\n")
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.hardsite.test/",
+                             BROWSE_TASK_CONFIG=str(cfg), BROWSE_HEADFUL="",
+                             BROWSE_PROBE_MAP='{"headless":"BLOCKED","headful":"BLOCKED"}',
+                             BROWSE_LEARNED_POLICY=str(learned), FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        self.assertIn("browser mode=browserbase (probed)", self.__class__.log.read_text())
+        rec = json.loads(self.__class__.record.read_text())
+        self.assertTrue(rec["browserbase"])
 
     def test_cookies_passed_through(self):
         cfile = self.tmp / "cookies.json"

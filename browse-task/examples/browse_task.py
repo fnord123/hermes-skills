@@ -129,7 +129,97 @@ def resolve_mode(args, cfg, start_url, xvfb):
     for pat, mode in rules:
         if pat and pat in host:
             return mode, f"policy:{pat}"
+    for pat, mode in load_learned(cfg):   # previously auto-detected sites
+        if pat and pat in host:
+            return mode, "learned"
     return default, "default"
+
+
+# A tiny loadability probe: open the start URL and report OK / BLOCKED. Run via
+# the Fara venv's python (it has Playwright); headful is wrapped in xvfb-run.
+PROBE_SRC = r"""
+import sys, re, asyncio
+from playwright.async_api import async_playwright
+_B = re.compile(r"access denied|robot check|are you a robot|unusual traffic|"
+                r"enter the characters|captcha|verify you are human|"
+                r"pardon our interruption|not a robot|something went wrong", re.I)
+_url = sys.argv[1]
+_headful = len(sys.argv) > 2 and sys.argv[2] == "headful"
+async def _main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(headless=not _headful)
+        try:
+            pg = await (await b.new_context()).new_page()
+            r = await pg.goto(_url, wait_until="domcontentloaded", timeout=25000)
+            await pg.wait_for_timeout(3000)
+            body = (await pg.inner_text("body"))[:4000]
+            blocked = (r is not None and r.status in (403, 503, 429)) \
+                or bool(_B.search(body)) or bool(_B.search(await pg.title()))
+            print("BLOCKED" if blocked else "OK")
+        except Exception as e:
+            print("ERR " + str(e).splitlines()[0][:80])
+        finally:
+            await b.close()
+asyncio.run(_main())
+"""
+
+
+def _learned_path(cfg):
+    return (cfg.get("BROWSE_LEARNED_POLICY") or os.environ.get("BROWSE_LEARNED_POLICY")
+            or str(Path.home() / ".config" / "browse-task" / "learned.json"))
+
+
+def load_learned(cfg):
+    p = Path(_learned_path(cfg))
+    if p.exists():
+        try:
+            return [(k.lower(), v.lower()) for k, v in json.loads(p.read_text()).items()]
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+def save_learned(cfg, host, mode):
+    if not host:
+        return
+    p = Path(_learned_path(cfg))
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        data = json.loads(p.read_text()) if p.exists() else {}
+        data[host] = mode
+        p.write_text(json.dumps(data, indent=2))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def run_probe(url, mode, xvfb, fara_python):
+    hook = os.environ.get("BROWSE_PROBE_MAP")  # test hook
+    if hook:
+        try:
+            return json.loads(hook).get(mode, "BLOCKED")
+        except Exception:  # noqa: BLE001
+            return "BLOCKED"
+    base = [str(fara_python), "-c", PROBE_SRC, url] + (["headful"] if mode == "headful" else [])
+    cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=70)
+        lines = [ln for ln in (r.stdout or "").splitlines() if ln.strip()]
+        return lines[-1].strip() if lines else "ERR"
+    except Exception:  # noqa: BLE001
+        return "ERR"
+
+
+def probe_ladder(url, xvfb, has_bb, fara_python):
+    """Try headless, then headful; fall to browserbase if both are blocked."""
+    for m in ("headless", "headful"):
+        if m == "headful" and not xvfb:
+            continue
+        res = run_probe(url, m, xvfb, fara_python)
+        log(f"probe {m}: {res}")
+        if res == "OK":
+            return m
+    return "browserbase" if has_bb else ("headful" if xvfb else "headless")
 
 
 def read_result(output_dir, stdout):
@@ -212,6 +302,17 @@ def main():
     # bot-hardened sites). See resolve_mode / DEFAULT_SITE_POLICY.
     xvfb = shutil.which("xvfb-run")
     mode, why = resolve_mode(args, cfg, args.start_url, xvfb)
+    # Unknown site (no override / policy / learned rule): probe headless ->
+    # headful -> browserbase to auto-detect what it needs, then remember it.
+    autoprobe = (cfg.get("BROWSE_AUTOPROBE") or "true").strip().lower() not in ("false", "0", "no")
+    if why == "default" and autoprobe:
+        fara_python = Path(fara_home) / ".venv" / "bin" / "python"
+        if fara_python.exists():
+            has_bb = bool(cfg.get("BROWSERBASE_API_KEY") and cfg.get("BROWSERBASE_PROJECT_ID"))
+            log(f"unknown site {_host(args.start_url)} — probing browser modes")
+            mode = probe_ladder(args.start_url, xvfb, has_bb, fara_python)
+            save_learned(cfg, _host(args.start_url), mode)
+            why = "probed"
     if mode == "headful" and not xvfb:
         log("WARN: headful needs xvfb-run (not found); falling back to headless")
         mode = "headless"

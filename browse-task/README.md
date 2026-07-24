@@ -148,6 +148,18 @@ Override precedence: `--mode` / `BROWSE_MODE` → legacy `BROWSE_HEADFUL=true|fa
 ```
 User rules are checked before the built-ins, so you can override any site.
 
+### Auto-detect for unknown sites
+
+For a site with **no** rule (not in the table, learned cache, or an override), the
+wrapper runs a quick pre-flight **probe** of the start URL — load it headless; if
+that's blocked (403/503/429 or a bot-wall page), try headful; if that's blocked
+too, use browserbase (when configured). It then **remembers** the winning mode
+per-domain in the learned cache (`BROWSE_LEARNED_POLICY`), so later runs skip
+straight to it. This grows the policy automatically. Disable with
+`BROWSE_AUTOPROBE=false`. (Caveat: the probe checks the *start URL*; a site whose
+homepage loads but whose deeper pages are blocked — like Costco — still needs an
+explicit rule, which is why Costco is in the built-in table.)
+
 **BrowserBase** (for `browserbase` mode) is a paid service with a small free tier
 (1 browser-hour/month). Sign up at [browserbase.com](https://www.browserbase.com),
 then set `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` in config; the
