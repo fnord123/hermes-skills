@@ -231,19 +231,24 @@ def read_result(output_dir, stdout):
         key=os.path.getmtime,
     )
     if files:
+        dp = Path(files[-1])
         try:
-            data = json.loads(Path(files[-1]).read_text())
-            status = data.get("status")
-            outcome = data.get("outcome") or {}
+            # status + final answer live under solver_log (SolverLog / Outcome).
+            sl = json.loads(dp.read_text()).get("solver_log") or {}
+            status = sl.get("status")
+            outcome = sl.get("outcome") or {}
             if isinstance(outcome, dict):
                 answer = outcome.get("answer")
-            for key in ("actions", "steps", "observations"):
-                if isinstance(data.get(key), list):
-                    steps = len(data[key])
-                    break
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
-    if answer is None:
+        try:  # steps = count of action events in the sibling log (best-effort)
+            ev = dp.parent / "solver_log" / "events.jsonl"
+            if ev.exists():
+                steps = sum(1 for ln in ev.read_text().splitlines()
+                            if '"type": "action"' in ln or '"type":"action"' in ln)
+        except Exception:  # noqa: BLE001
+            pass
+    if not answer:
         for marker, st in (("Final Answer:", "complete"), ("Fara asks:", "waiting_for_user")):
             i = stdout.rfind(marker)
             if i != -1:
@@ -410,7 +415,7 @@ def main():
     elif answer:
         out({"ok": True, "status": "complete", "answer": answer, **base})
     else:
-        tail = (proc.stderr or "").strip()[-300:]
+        tail = (stderr or "").strip()[-300:]
         fail("the browser agent returned no result; try again or narrow the task."
              + (f" [{tail}]" if tail else ""))
 

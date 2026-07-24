@@ -48,14 +48,16 @@ One script at `~/.hermes/skills/browse-task/examples/browse_task.py`, invoked as
 | `browse_task.py --task "<what to find/do>" [--start-url <url>] [--max-steps N]` | Carries out a **read-only** web task (look up / read / compare) and returns the answer. The agent is told not to change anything. |
 | `browse_task.py --task "<what to do>" --confirm [...]` | Carries out a task that must **act** on a site (sign in, submit, buy, book, post, send). Use only **after the user approved this exact task**. |
 
-Defaults: opens a search engine first (`--start-url` to start elsewhere), up to
-25 steps (`--max-steps` to raise or lower).
+Defaults: opens a search engine first; up to 25 steps. **If the task is about a
+specific site, pass `--start-url` for that site** (e.g. `--start-url
+https://www.rei.com/`) so the agent starts on it and handles it best — don't rely
+on it finding the site from a search. Raise `--max-steps` for longer flows.
 
 ## Turning the user's words into calls
 
 | User said | Call |
 |---|---|
-| "check REI for the price of the X jacket in medium" | `browse_task.py --task "On rei.com, find the price and availability of the <X> jacket in size medium"` |
+| "check REI for the price of the X jacket in medium" | `browse_task.py --task "Find the price and availability of the <X> jacket in size medium" --start-url https://www.rei.com/` |
 | "what times is the Ferry Building open on Sunday" | `browse_task.py --task "Find the Ferry Building Marketplace hours for Sunday"` |
 | "find the cheapest nonstop SFO→JFK on Aug 1 and tell me" | `browse_task.py --task "Find the cheapest nonstop flight from SFO to JFK on 2026-08-01 and report the airline, time, and price" --max-steps 40` |
 | "book that flight" (after you showed it and they approved) | `browse_task.py --task "Book the 9am United nonstop SFO→JFK on 2026-08-01" --confirm` |

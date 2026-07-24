@@ -42,10 +42,11 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps(rec))
 status = os.environ.get("FAKE_STATUS", "complete")
 answer = os.environ.get("FAKE_ANSWER", "the answer")
 d = Path(out_folder) / "run-1"
-d.mkdir(parents=True, exist_ok=True)
+(d / "solver_log").mkdir(parents=True, exist_ok=True)
 (d / "data_point.json").write_text(json.dumps(
-    {"status": status, "outcome": {"answer": answer},
-     "actions": [1, 2, 3]}))
+    {"solver_log": {"status": status, "outcome": {"answer": answer}}}))
+(d / "solver_log" / "events.jsonl").write_text(
+    '{"type": "action"}\n{"type": "action"}\n{"type": "action"}\n')
 print("Final Answer:", answer)
 '''
 
