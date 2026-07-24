@@ -90,6 +90,34 @@ python3 examples/browse_task.py --task "Find the current time in Tokyo and repor
   accounts, an acting run can take real actions as the user. Keep the profile
   logged out of anything you don't want an agent touching.
 
+## Pre-seeding cookies (skip location / login setup)
+
+Sites like Costco geo-default the delivery ZIP (and reject deep-links/search),
+so the agent otherwise burns many slow steps clicking the location into place —
+and can get it wrong. Instead, pre-seed the cookies deterministically:
+
+- `--cookies <file.json>` (or `BROWSE_COOKIES=<file>` in config) — a JSON list of
+  Playwright cookies loaded into the browser **before** the agent's first
+  navigation. Cookies are domain-scoped, so a Costco location file is inert on
+  other sites. Example (`costco-97219.json`):
+  ```json
+  [{"name":"client-zip-short","value":"97219","domain":".costco.com","path":"/"},
+   {"name":"invCheckPostalCode","value":"97219","domain":".costco.com","path":"/"},
+   {"name":"invCheckCity","value":"Portland","domain":".costco.com","path":"/"},
+   {"name":"invCheckStateCode","value":"OR","domain":".costco.com","path":"/"}]
+  ```
+
+This needs a one-line hook in the scaffold (fara-cli has no cookie flag). In
+`~/fara/src/fara/environments/playwright/environment.py`, just before the initial
+`await self._page.goto(self.config.start_page, ...)` in `_setup_browser`, add:
+```python
+import os as _os, json as _json
+if _os.environ.get("FARA_INIT_COOKIES"):
+    with open(_os.environ["FARA_INIT_COOKIES"]) as _f:
+        await self._context.add_cookies(_json.load(_f))
+```
+The wrapper sets `FARA_INIT_COOKIES` when `--cookies`/`BROWSE_COOKIES` is given.
+
 ## Headful vs headless
 
 Many sites reject a *headless* browser (bot detection). By default the wrapper

@@ -35,7 +35,8 @@ task = val("--task") or ""
 out_folder = val("--output_folder") or "."
 stdin_data = sys.stdin.read()   # should be empty (/dev/null)
 rec = {"task": task, "stdin_empty": stdin_data == "", "model": val("--model"),
-       "base_url": val("--base_url"), "max_rounds": val("--max_rounds")}
+       "base_url": val("--base_url"), "max_rounds": val("--max_rounds"),
+       "init_cookies": os.environ.get("FARA_INIT_COOKIES")}
 Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps(rec))
 status = os.environ.get("FAKE_STATUS", "complete")
 answer = os.environ.get("FAKE_ANSWER", "the answer")
@@ -124,6 +125,20 @@ class BrowseTaskTest(unittest.TestCase):
         self.assertIn("mode=headful-xvfb", text)
         self.assertIn("xvfb-run", text)
         self.assertIn("--headful", text)
+
+    def test_cookies_passed_through(self):
+        cfile = self.tmp / "cookies.json"
+        cfile.write_text('[{"name":"z","value":"97219","domain":".x.com","path":"/"}]')
+        self.run_cmd("--task", "check stock", "--cookies", str(cfile), FAKE_STATUS="complete")
+        rec = json.loads(self.__class__.record.read_text())
+        self.assertEqual(rec["init_cookies"], str(cfile))   # FARA_INIT_COOKIES set for agent
+
+    def test_missing_cookies_file_ignored(self):
+        rc, d = self.run_cmd("--task", "x", "--cookies", str(self.tmp / "nope.json"),
+                             FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)                              # not fatal
+        rec = json.loads(self.__class__.record.read_text())
+        self.assertIsNone(rec["init_cookies"])              # not passed when absent
 
     # ── other statuses ───────────────────────────────────────────────────────
     def test_waiting_for_user_is_needs_input(self):

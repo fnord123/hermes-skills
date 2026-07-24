@@ -117,6 +117,11 @@ def main():
                    help="allow the agent to ACT (sign in, submit, buy, book, post, "
                         "send). Required for any state-changing task and only after "
                         "the user approved this exact task. Omit for read-only lookups.")
+    p.add_argument("--cookies", default=None,
+                   help="path to a JSON list of browser cookies to pre-seed before "
+                        "the agent starts (e.g. a site's delivery location or login) "
+                        "so it need not click through that setup. Overrides "
+                        "BROWSE_COOKIES from config.")
     args = p.parse_args()
 
     cfg = load_config()
@@ -148,6 +153,18 @@ def main():
     xvfb = shutil.which("xvfb-run")
     use_headful = bool(xvfb) and headful_cfg in ("auto", "true", "1", "yes")
 
+    # Pre-seed cookies (delivery location, login, consent) so the agent doesn't
+    # have to click through that setup. Cookies are domain-scoped, so a Costco
+    # location file has no effect on other sites.
+    cookies_file = args.cookies or cfg.get("BROWSE_COOKIES") or ""
+    env = dict(os.environ)
+    if cookies_file:
+        if Path(cookies_file).exists():
+            env["FARA_INIT_COOKIES"] = cookies_file
+            log(f"pre-seed cookies: {cookies_file}")
+        else:
+            log(f"WARN: cookies file not found, ignoring: {cookies_file}")
+
     with tempfile.TemporaryDirectory(prefix="browse_task_") as tmp:
         fara = [str(cli), "--task", task, "--start_page", args.start_url,
                 "--output_folder", tmp, "--base_url", base_url,
@@ -170,7 +187,7 @@ def main():
             # the agent's post-task interactive prompt gets EOF instead of blocking.
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, start_new_session=True)
+                                    text=True, start_new_session=True, env=env)
         except Exception as e:  # noqa: BLE001
             log(f"fara-cli launch error: {e}")
             fail(f"could not start the browser agent: {e}")
