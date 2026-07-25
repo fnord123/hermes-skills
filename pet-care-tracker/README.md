@@ -13,7 +13,7 @@ One-time setup for the [pet-care-tracker](./SKILL.md) Hermes skill. The agent ne
 
 ### 1. Configure Home Assistant
 
-The skill needs a specific set of helpers, scripts, and a webhook dispatcher in HA. The reference YAML for the entire setup is at [`examples/setup.yaml`](./examples/setup.yaml) — paste each section into the matching HA config file (or use a `packages/` include) and reload helpers, scripts, and automations.
+The skill needs a specific set of helpers, scripts, and a webhook dispatcher in HA. The reference YAML for the entire setup is at [`templates/setup.yaml`](./templates/setup.yaml) — paste each section into the matching HA config file (or use a `packages/` include) and reload helpers, scripts, and automations.
 
 What gets created:
 
@@ -23,9 +23,9 @@ What gets created:
 - 2 scripts (`dog_mark_walked`, `dog_mark_fed`)
 - 1 webhook automation that dispatches the two write ops to those scripts
 
-Entity IDs are namespaced as `dog_*` (literal — not the actual dog's name), so [`examples/setup.yaml`](./examples/setup.yaml) is drop-in: no search-and-replace required except for the webhook ID.
+Entity IDs are namespaced as `dog_*` (literal — not the actual dog's name), so [`templates/setup.yaml`](./templates/setup.yaml) is drop-in: no search-and-replace required except for the webhook ID.
 
-The wider state machine (auto-flipping status to `Due` at the start of each window, to `Overdue` if it passes, daily resets) is documented as optional add-ons at the bottom of [`examples/setup.yaml`](./examples/setup.yaml).
+The wider state machine (auto-flipping status to `Due` at the start of each window, to `Overdue` if it passes, daily resets) is documented as optional add-ons at the bottom of [`templates/setup.yaml`](./templates/setup.yaml).
 
 ### 2. Add secrets to `~/.hermes/.env`
 
@@ -40,7 +40,7 @@ HA_WEBHOOK_DOG_CARE=<webhook ID from step 1>
 The `HA_WEBHOOK_DOG_CARE` value depends on how you created the dispatcher automation:
 
 - **HA UI route** (Settings → Automations → Create → Webhook trigger): HA generates the webhook ID for you and shows it in the trigger config — copy that value here.
-- **YAML route** (paste from [`examples/setup.yaml`](./examples/setup.yaml)): pick your own unique string (`uuidgen` works well) and use the same value in both the YAML and `.env`.
+- **YAML route** (paste from [`templates/setup.yaml`](./templates/setup.yaml)): pick your own unique string (`uuidgen` works well) and use the same value in both the YAML and `.env`.
 
 ### 3. Set the dog's display name
 
@@ -56,4 +56,4 @@ hermes gateway restart
 
 ## Caveats
 
-**Localized HA labels won't work** without adjusting [`examples/setup.yaml`](./examples/setup.yaml). The skill assumes `input_select` option lists are exactly `[Walked, Due, Overdue]` and `[Fed, Due, Overdue]` in English.
+**Localized HA labels won't work** without adjusting [`templates/setup.yaml`](./templates/setup.yaml). The skill assumes `input_select` option lists are exactly `[Walked, Due, Overdue]` and `[Fed, Due, Overdue]` in English.

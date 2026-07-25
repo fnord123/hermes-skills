@@ -52,7 +52,7 @@ Hermes sees the post in the channel (via `DISCORD_ALLOW_BOTS=all` plus a per-cha
 
 Most "today's briefing didn't show up" failures are shell-debuggable from `/var/tmp/daily-briefing*.log` — not a context-window problem inside the agent.
 
-See [`scripts/overview.md`](./scripts/overview.md) for the full architecture deep-dive (debugging tips, log file locations, memory-system integration, etc.).
+See [`references/overview.md`](./references/overview.md) for the full architecture deep-dive (debugging tips, log file locations, memory-system integration, etc.).
 
 ## Prerequisites
 
@@ -208,6 +208,8 @@ The agent edits the JSON files; the next briefing reflects the change.
 daily-briefing/
 ├── SKILL.md                         model-facing companion (Hermes uses this)
 ├── README.md                        this file
+├── references/
+│   └── overview.md                  full architecture / debugging guide
 └── scripts/
     ├── morning-briefing.sh          orchestrator (entry point for cron)
     ├── fetch-calendar.sh            Google Calendar iCal → today's events
@@ -221,8 +223,7 @@ daily-briefing/
     ├── news-source-prefs.json       {"trusted": [...], "untrusted": [...]}
     ├── tickers.json                 [{"ticker": "..."}]
     ├── calendar-people.json         {"default": ..., "organizers": {...}}
-    ├── .env.example                 template — copy to .env, fill in keys
-    └── overview.md                  full architecture / debugging guide
+    └── .env.example                 template — copy to .env, fill in keys
 ```
 
 ## Roadmap

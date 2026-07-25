@@ -36,7 +36,7 @@ You can also tell the agent in plain English:
 - "what's the most recent github repo I saved"
 - "show me entries similar to that vector DB one"
 
-All of these are part of the agent's behavior defined in [`scripts/SOUL.md`](./scripts/SOUL.md), and operate against the same vault.
+All of these are part of the agent's behavior defined in [`templates/SOUL.md`](./templates/SOUL.md), and operate against the same vault.
 
 ## Why a separate Hermes profile
 
@@ -177,7 +177,7 @@ Everything else is automated:
 | 4 | Creates `~/.hermes/profiles/archivist/vault/` + stub `INDEX.md` |
 | 5 | Writes profile `.env` with bot token, vault path, channel ID |
 | 6 | Writes profile `config.yaml` (Discord-only, channel allowlist, all skills disabled) |
-| 7 | Copies `scripts/SOUL.md` to the profile dir — this is the agent's behavior spec |
+| 7 | Copies `templates/SOUL.md` to the profile dir — this is the agent's behavior spec |
 | 8 | Copies pipeline scripts to `~/archivist-digest/` and writes pipeline `.env` |
 | 9 | Adds Saturday 09:00 cron line to user crontab |
 | 10 | Installs and starts the per-profile gateway |
@@ -212,10 +212,10 @@ EOF
 
 ### 3. Place SOUL.md in the profile
 
-The Archivist's full behavior (URL archiving + forget + search) lives in `scripts/SOUL.md`. Copy it directly to the profile dir:
+The Archivist's full behavior (URL archiving + forget + search) lives in `templates/SOUL.md`. Copy it directly to the profile dir:
 
 ```bash
-cp ~/hermes-skills/archivist/scripts/SOUL.md ~/.hermes/profiles/archivist/SOUL.md
+cp ~/hermes-skills/archivist/templates/SOUL.md ~/.hermes/profiles/archivist/SOUL.md
 ```
 
 There is no `hermes skills install` step. Archivist is a dedicated profile — its full behavior (URL archiving, forget, search) lives in the SOUL.md you just copied.

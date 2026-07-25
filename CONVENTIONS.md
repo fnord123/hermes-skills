@@ -31,6 +31,19 @@ exact local files it references," and **unreferenced files are not copied**.
 Runtime code filed under a name that implies it is optional is a real install
 hazard, not just a naming quibble.
 
+File it by **what it is**, not by what it sits next to:
+
+- A YAML/config the user deploys and fills in → `templates/`, even if its header
+  says "example" (placeholders make it a template, not a sample output).
+- An architecture/debugging write-up → `references/`.
+- Data a script loads at runtime (`SCRIPT_DIR / "topics.json"`) → stays in
+  `scripts/`. It is part of the runtime, not a demo.
+- A `*.example` credential stub → stays beside the real file the user creates
+  from it, i.e. in `scripts/`. Splitting the pair is more confusing than useful.
+
+`examples/` should be *empty of anything the skill needs*. If nothing qualifies
+as a referenced example output, the skill simply has no `examples/`.
+
 ## Frontmatter
 
 ```yaml
