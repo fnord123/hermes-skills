@@ -38,8 +38,12 @@ So a file outside those four is invisible to supporting-file discovery and
 unwritable by the agent. **Do not invent directory names** (`bin/`, `data/`,
 `lib/`) — the cost is silent, not a warning.
 
-**There is no `examples/`.** Some documentation lists it; no code path honors
-it. Never create one.
+**Do not create `examples/`.** It is a half-supported bucket: the hub fetcher
+accepts it (`tools/skills_hub.py` — `_ALLOWED_SUPPORT_DIRS` includes
+`"examples"`, so an install *will* copy files from it), but it is absent from
+`ALLOWED_SUBDIRS` and from the supporting-file discovery scan. So content there
+installs and then sits invisible to the model, and the agent cannot write to it
+— the worst of both. Put example outputs in `assets/` if you ever have any.
 
 Separately, `hermes skills install` copies "SKILL.md plus the exact local files
 it references" and does **not** copy unreferenced files — so anything a skill
