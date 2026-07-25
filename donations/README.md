@@ -93,7 +93,7 @@ echo 'DONATIONS_SHEET_ID=<spreadsheet-id-from-its-URL>' > ~/.config/donations/co
 chmod 600 ~/.config/donations/config.env
 ```
 
-(See `scripts/config.env.example`.)
+(See `templates/config.env.example`.)
 
 ### 4. Wire the skill into Hermes
 
@@ -137,7 +137,7 @@ object; failures are `{"ok": false, "error": "…"}` with exit 1.
 |---|---|
 | `SKILL.md` | Model-facing contract (donation vocabulary only). |
 | `scripts/donations.py` | The CLI. |
-| `scripts/config.env.example` | Template for `~/.config/donations/config.env`. |
+| `templates/config.env.example` | Template for `~/.config/donations/config.env`. |
 | `~/.config/donations/config.env` | `DONATIONS_SHEET_ID` (not in the repo). |
 | `~/.config/donations/active.txt` | The active-donation pointer (runtime state). |
 | `~/.hermes/creds/hermes-sheets.json`, `~/.hermes/.env` | Service-account key + ADC path (not in the repo). |

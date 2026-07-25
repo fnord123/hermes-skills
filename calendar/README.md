@@ -112,7 +112,7 @@ The scripts and library are stdlib-only — no `pip install` step required.
 
 ```bash
 cd ~/.hermes/skills/calendar/scripts
-cp .env.example .env
+cp ../templates/.env.example .env
 $EDITOR .env
 ```
 
@@ -241,8 +241,9 @@ JSON. Example response style:
 calendar/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
+├── templates/
+│   └── .env.example
 └── scripts/
-    ├── .env.example
     ├── .gitignore
     ├── ical_lib.py                # shared iCal parser (stdlib-only)
     ├── calendar-today.py

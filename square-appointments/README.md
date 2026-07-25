@@ -67,10 +67,10 @@ truth and Playwright as the executor:
 ### Skill config
 ```
 cd ~/.hermes/skills/square-appointments/scripts
-cp .env.example .env
+cp ../templates/.env.example .env
 $EDITOR .env                       # paste your AGENTMAIL_API_KEY (same as Hermes uses)
 mkdir -p ~/.config/square-appointments
-cp merchants.example.json ~/.config/square-appointments/merchants.json
+cp ../templates/merchants.example.json ~/.config/square-appointments/merchants.json
 $EDITOR ~/.config/square-appointments/merchants.json
 ```
 
@@ -173,10 +173,11 @@ footguns." That informs three load-bearing choices here:
 square-appointments/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
+├── templates/
+│   ├── .env.example
+│   └── merchants.example.json
 └── scripts/
     ├── requirements.txt           # playwright, playwright-stealth
-    ├── .env.example
-    ├── merchants.example.json
     ├── list-merchants.py
     ├── square-list.py             # CUJ #1
     ├── square-find-slot.py        # CUJ #2 (planned, post-validate)

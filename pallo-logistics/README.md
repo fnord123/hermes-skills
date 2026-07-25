@@ -91,7 +91,7 @@ faster, and the per-day loop is the slow/fragile part on long stays.
 ### Config
 ```
 mkdir -p ~/.config/pallo-logistics && chmod 700 ~/.config/pallo-logistics
-cp ~/.hermes/skills/pallo-logistics/scripts/secrets.env.example \
+cp ~/.hermes/skills/pallo-logistics/templates/secrets.env.example \
    ~/.config/pallo-logistics/secrets.env
 $EDITOR ~/.config/pallo-logistics/secrets.env     # portal login + Discord webhook/IDs
 chmod 600 ~/.config/pallo-logistics/secrets.env
@@ -184,9 +184,10 @@ submitting.
 pallo-logistics/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
+├── templates/
+│   └── secrets.env.example        # portal + Discord config template
 └── scripts/
     ├── requirements.txt           # playwright
-    ├── secrets.env.example        # portal + Discord config template
     ├── .gitignore
     ├── gingr-login.py             # session capture
     ├── gingr_lib.py               # portal helpers (shared)

@@ -86,8 +86,8 @@ This places `SKILL.md` and `scripts/` under `~/.hermes/skills/daily-briefing/`. 
 ```bash
 mkdir -p ~/daily-briefing
 cp -r ~/.hermes/skills/daily-briefing/scripts/. ~/daily-briefing/
+cp ~/.hermes/skills/daily-briefing/templates/.env.example ~/daily-briefing/.env
 chmod +x ~/daily-briefing/*.sh ~/daily-briefing/*.py
-mv ~/daily-briefing/.env.example ~/daily-briefing/.env
 ```
 
 (The skill assumes the pipeline lives at `~/daily-briefing/`. If you put it somewhere else, update the path references in `SKILL.md` accordingly — but the path convention is what makes natural-language edits like "add NVDA to my watchlist" land in the right place.)
@@ -210,6 +210,8 @@ daily-briefing/
 ├── README.md                        this file
 ├── references/
 │   └── overview.md                  full architecture / debugging guide
+├── templates/
+│   └── .env.example                 copy to .env, fill in keys
 └── scripts/
     ├── morning-briefing.sh          orchestrator (entry point for cron)
     ├── fetch-calendar.sh            Google Calendar iCal → today's events
@@ -222,8 +224,7 @@ daily-briefing/
     ├── news-topics.json             {"topics": [...]}
     ├── news-source-prefs.json       {"trusted": [...], "untrusted": [...]}
     ├── tickers.json                 [{"ticker": "..."}]
-    ├── calendar-people.json         {"default": ..., "organizers": {...}}
-    └── .env.example                 template — copy to .env, fill in keys
+    └── calendar-people.json         {"default": ..., "organizers": {...}}
 ```
 
 ## Roadmap

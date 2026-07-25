@@ -62,7 +62,7 @@ This provides `~/fara/.venv/bin/fara-cli`. Also install **xvfb** for headful mod
 ### 3. Configure the skill
 ```bash
 cd ~/.hermes/skills/browse-task/scripts
-cp config.env.example config.env
+cp ../templates/config.env.example config.env
 # edit config.env:
 #   FARA_HOME=/home/<you>/fara
 #   BROWSE_BASE_URL=http://192.168.1.226:4000/v1   (your LiteLLM)

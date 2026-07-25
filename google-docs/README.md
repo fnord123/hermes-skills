@@ -103,7 +103,7 @@ echo 'GOOGLE_DOCS_FOLDER_ID=<folder-id-from-its-URL>' > ~/.config/google-docs/co
 chmod 600 ~/.config/google-docs/config.env
 ```
 
-(See `scripts/config.env.example`.) To let the agent edit an **existing**
+(See `templates/config.env.example`.) To let the agent edit an **existing**
 document, share it (as Editor) with the service account's address, or drop it in
 that folder.
 
@@ -183,7 +183,7 @@ never breaks the tool (failures to write are swallowed).
 |---|---|
 | `SKILL.md` | Model-facing contract (document vocabulary only). |
 | `scripts/docs.py` | The CLI. |
-| `scripts/config.env.example` | Template for `~/.config/google-docs/config.env`. |
+| `templates/config.env.example` | Template for `~/.config/google-docs/config.env`. |
 | `~/.config/google-docs/config.env` | `GOOGLE_DOCS_FOLDER_ID` (not in the repo). |
 | `~/.hermes/creds/<key>.json`, `~/.hermes/.env` | Service-account key + ADC path (not in the repo). |
 

@@ -9,7 +9,7 @@ report — never to sign in, submit a form, buy, book, post, send, or change any
 account or site state. Pass --confirm (only after the user approved that exact
 task) when the task must ACT on a site.
 
-Configuration is read from config.env beside this script (see config.env.example).
+Configuration is read from config.env beside this script (see templates/config.env.example).
 """
 
 import argparse
@@ -330,7 +330,7 @@ def main():
     model = cfg.get("BROWSE_MODEL") or ""
     api_key = cfg.get("BROWSE_API_KEY") or "none"
     if not (fara_home and base_url and model):
-        fail("browse-task is not configured. Copy config.env.example to config.env "
+        fail("browse-task is not configured. Copy templates/config.env.example to scripts/config.env "
              "and set FARA_HOME, BROWSE_BASE_URL, and BROWSE_MODEL (see README).")
     cli = Path(fara_home) / ".venv" / "bin" / "fara-cli"
     if not cli.exists():

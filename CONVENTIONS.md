@@ -16,33 +16,52 @@ A good template to copy from is [`calendar`](./calendar/).
   README.md            # optional: human docs — setup, rationale, "why this exists"
 ```
 
-Use the directory names Hermes prescribes, and pick by *role*, not by habit:
+### Tier 1 — the four directory names are a Hermes requirement
 
-| Dir | Holds |
-|---|---|
-| `scripts/` | code the skill calls at runtime — **required to function** |
-| `references/` | additional docs the model may read |
-| `templates/` | output formats |
-| `examples/` | **referenced example outputs only** — never runtime code |
-| `assets/` | supplementary files |
+Exactly four subdirectories exist as far as Hermes is concerned:
 
-This matters beyond tidiness: `hermes skills install` copies "SKILL.md plus the
-exact local files it references," and **unreferenced files are not copied**.
-Runtime code filed under a name that implies it is optional is a real install
-hazard, not just a naming quibble.
+```
+references/   templates/   scripts/   assets/
+```
 
-File it by **what it is**, not by what it sits next to:
+This is enforced in code, not style advice:
 
-- A YAML/config the user deploys and fills in → `templates/`, even if its header
-  says "example" (placeholders make it a template, not a sample output).
-- An architecture/debugging write-up → `references/`.
-- Data a script loads at runtime (`SCRIPT_DIR / "topics.json"`) → stays in
-  `scripts/`. It is part of the runtime, not a demo.
-- A `*.example` credential stub → stays beside the real file the user creates
-  from it, i.e. in `scripts/`. Splitting the pair is more confusing than useful.
+- `tools/skill_manager_tool.py` — `ALLOWED_SUBDIRS = {"references", "templates",
+  "scripts", "assets"}` gates `write_file`/`remove_file`. **The agent cannot
+  author a file anywhere else in a skill.**
+- `agent/skill_commands.py` — when a skill has no explicit `linked_files`,
+  Hermes discovers its supporting files by scanning *those four directories* and
+  announcing "[This skill has supporting files:]" to the model. `skill_view`
+  buckets results the same way, with everything else dumped into `other`.
 
-`examples/` should be *empty of anything the skill needs*. If nothing qualifies
-as a referenced example output, the skill simply has no `examples/`.
+So a file outside those four is invisible to supporting-file discovery and
+unwritable by the agent. **Do not invent directory names** (`bin/`, `data/`,
+`lib/`) — the cost is silent, not a warning.
+
+**There is no `examples/`.** Some documentation lists it; no code path honors
+it. Never create one.
+
+Separately, `hermes skills install` copies "SKILL.md plus the exact local files
+it references" and does **not** copy unreferenced files — so anything a skill
+needs must be referenced from `SKILL.md` or `README.md` to survive an install.
+
+### Tier 2 — our house rule for choosing among the four
+
+Hermes does not care which of the four a file lands in; nothing treats them
+differently. That freedom is what produces bikeshedding, so pick by **who
+consumes the file**:
+
+| Dir | Consumer | Contents |
+|---|---|---|
+| `scripts/` | the machine, at runtime | executable code, `requirements.txt`, and data the code loads by default (`SCRIPT_DIR / "topics.json"`) |
+| `templates/` | the human, at setup | anything copied or instantiated elsewhere: every `*.env.example`, sample config JSON, deployable YAML, `SOUL.md` |
+| `references/` | the model or human, on demand | architecture notes, debugging guides, API dumps |
+| `assets/` | the skill | static resources that are not code and not loaded as config (seed data, images) |
+
+The rule that settles the recurring argument: **a template lives in
+`templates/`; the instance created from it lives wherever the code reads it.**
+So `templates/config.env.example` is copied to `scripts/config.env` (or to
+`~/.config/<skill>/`), and the two do not need to sit side by side.
 
 ## Frontmatter
 

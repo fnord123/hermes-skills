@@ -258,7 +258,7 @@ mkdir -p ~/archivist-digest
 cp ~/hermes-skills/archivist/scripts/rank.py ~/archivist-digest/
 cp ~/hermes-skills/archivist/scripts/post-digest.sh ~/archivist-digest/
 chmod +x ~/archivist-digest/post-digest.sh
-cp ~/hermes-skills/archivist/scripts/.env.example ~/archivist-digest/.env
+cp ~/hermes-skills/archivist/templates/.env.example ~/archivist-digest/.env
 ```
 
 Edit `~/archivist-digest/.env` with the webhook URL and vault path.
@@ -305,11 +305,12 @@ Edit `~/archivist-digest/rank.py` to adjust. Changes take effect on the next cro
 archivist/
 ├── README.md                    this file
 ├── install.sh                   interactive Ubuntu installer
+├── templates/
+│   ├── SOUL.md                  agent behavior — single source of truth
+│   └── .env.example             pipeline env template
 └── scripts/
-    ├── SOUL.md                  agent behavior — single source of truth
     ├── rank.py                  digest ranking script
-    ├── post-digest.sh           cron entry point
-    └── .env.example             pipeline env template
+    └── post-digest.sh           cron entry point
 ```
 
 ## Troubleshooting
