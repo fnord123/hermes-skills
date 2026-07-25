@@ -78,9 +78,9 @@ faster, and the per-day loop is the slow/fragile part on long stays.
 - The `calendar` skill, configured with the merged feeds (personal +
   `TWOHOUSES_ICAL_URL` + `KAYAK_TRIPS_ICAL_URL`). `pallo-trip-*` and `gina-where`
   compose it as subprocesses.
-- Python 3.10+ and Playwright + Chromium in a venv inside `examples/`:
+- Python 3.10+ and Playwright + Chromium in a venv inside `scripts/`:
   ```
-  cd ~/.hermes/skills/pallo-logistics/examples
+  cd ~/.hermes/skills/pallo-logistics/scripts
   python3 -m venv .venv
   .venv/bin/pip install -r requirements.txt
   .venv/bin/playwright install chromium
@@ -91,7 +91,7 @@ faster, and the per-day loop is the slow/fragile part on long stays.
 ### Config
 ```
 mkdir -p ~/.config/pallo-logistics && chmod 700 ~/.config/pallo-logistics
-cp ~/.hermes/skills/pallo-logistics/examples/secrets.env.example \
+cp ~/.hermes/skills/pallo-logistics/scripts/secrets.env.example \
    ~/.config/pallo-logistics/secrets.env
 $EDITOR ~/.config/pallo-logistics/secrets.env     # portal login + Discord webhook/IDs
 chmod 600 ~/.config/pallo-logistics/secrets.env
@@ -184,7 +184,7 @@ submitting.
 pallo-logistics/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
-└── examples/
+└── scripts/
     ├── requirements.txt           # playwright
     ├── secrets.env.example        # portal + Discord config template
     ├── .gitignore

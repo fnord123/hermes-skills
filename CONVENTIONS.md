@@ -11,10 +11,25 @@ A good template to copy from is [`calendar`](./calendar/).
 ```
 <skill-name>/          # folder name == skill name, lowercase
   SKILL.md             # the model-facing contract (see below)
-  examples/            # the scripts (NOT scripts/ — this repo uses examples/)
+  scripts/             # code the skill INVOKES — the runtime, not demos
     <tool>.py          # invoked as `python3 <path> …`, one JSON object per call
   README.md            # optional: human docs — setup, rationale, "why this exists"
 ```
+
+Use the directory names Hermes prescribes, and pick by *role*, not by habit:
+
+| Dir | Holds |
+|---|---|
+| `scripts/` | code the skill calls at runtime — **required to function** |
+| `references/` | additional docs the model may read |
+| `templates/` | output formats |
+| `examples/` | **referenced example outputs only** — never runtime code |
+| `assets/` | supplementary files |
+
+This matters beyond tidiness: `hermes skills install` copies "SKILL.md plus the
+exact local files it references," and **unreferenced files are not copied**.
+Runtime code filed under a name that implies it is optional is a real install
+hazard, not just a naming quibble.
 
 ## Frontmatter
 
@@ -94,7 +109,7 @@ Local models hallucinate dangerous calls; this is the standard guard.
 
 ## Scripts
 
-- Live under `examples/`, invoked as `python3 <path> …`.
+- Live under `scripts/`, invoked as `python3 <path> …`.
 - Print **one JSON object** on stdout: success `{"ok": true, …}`, failure
   `{"ok": false, "error": "…"}` with **exit 1**.
 - `hermes skills install` over HTTP drops the executable bit, so always document

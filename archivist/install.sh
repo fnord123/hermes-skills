@@ -373,7 +373,7 @@ configure_profile_config() {
 
 # ── Step 7: SOUL.md ─────────────────────────────────────────────────────
 place_soul() {
-    local src="$SCRIPT_DIR/examples/SOUL.md"
+    local src="$SCRIPT_DIR/scripts/SOUL.md"
     [[ -f "$src" ]] || die "SOUL.md template missing at $src — run install.sh from a clone of hermes-skills."
 
     local dst="$PROFILE_DIR/SOUL.md"
@@ -395,7 +395,7 @@ place_soul() {
 
 # ── Step 8: Pipeline runtime ────────────────────────────────────────────
 setup_pipeline() {
-    local src="$SCRIPT_DIR/examples"
+    local src="$SCRIPT_DIR/scripts"
 
     mkdir -p "$PIPELINE_DIR"
     cp "$src/rank.py" "$PIPELINE_DIR/"

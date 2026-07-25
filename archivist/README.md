@@ -36,7 +36,7 @@ You can also tell the agent in plain English:
 - "what's the most recent github repo I saved"
 - "show me entries similar to that vector DB one"
 
-All of these are part of the agent's behavior defined in [`examples/SOUL.md`](./examples/SOUL.md), and operate against the same vault.
+All of these are part of the agent's behavior defined in [`scripts/SOUL.md`](./scripts/SOUL.md), and operate against the same vault.
 
 ## Why a separate Hermes profile
 
@@ -177,7 +177,7 @@ Everything else is automated:
 | 4 | Creates `~/.hermes/profiles/archivist/vault/` + stub `INDEX.md` |
 | 5 | Writes profile `.env` with bot token, vault path, channel ID |
 | 6 | Writes profile `config.yaml` (Discord-only, channel allowlist, all skills disabled) |
-| 7 | Copies `examples/SOUL.md` to the profile dir — this is the agent's behavior spec |
+| 7 | Copies `scripts/SOUL.md` to the profile dir — this is the agent's behavior spec |
 | 8 | Copies pipeline scripts to `~/archivist-digest/` and writes pipeline `.env` |
 | 9 | Adds Saturday 09:00 cron line to user crontab |
 | 10 | Installs and starts the per-profile gateway |
@@ -212,10 +212,10 @@ EOF
 
 ### 3. Place SOUL.md in the profile
 
-The Archivist's full behavior (URL archiving + forget + search) lives in `examples/SOUL.md`. Copy it directly to the profile dir:
+The Archivist's full behavior (URL archiving + forget + search) lives in `scripts/SOUL.md`. Copy it directly to the profile dir:
 
 ```bash
-cp ~/hermes-skills/archivist/examples/SOUL.md ~/.hermes/profiles/archivist/SOUL.md
+cp ~/hermes-skills/archivist/scripts/SOUL.md ~/.hermes/profiles/archivist/SOUL.md
 ```
 
 There is no `hermes skills install` step. Archivist is a dedicated profile — its full behavior (URL archiving, forget, search) lives in the SOUL.md you just copied.
@@ -255,10 +255,10 @@ These are part of the manual Discord prep section above (steps 7–9), and apply
 
 ```bash
 mkdir -p ~/archivist-digest
-cp ~/hermes-skills/archivist/examples/rank.py ~/archivist-digest/
-cp ~/hermes-skills/archivist/examples/post-digest.sh ~/archivist-digest/
+cp ~/hermes-skills/archivist/scripts/rank.py ~/archivist-digest/
+cp ~/hermes-skills/archivist/scripts/post-digest.sh ~/archivist-digest/
 chmod +x ~/archivist-digest/post-digest.sh
-cp ~/hermes-skills/archivist/examples/.env.example ~/archivist-digest/.env
+cp ~/hermes-skills/archivist/scripts/.env.example ~/archivist-digest/.env
 ```
 
 Edit `~/archivist-digest/.env` with the webhook URL and vault path.
@@ -288,7 +288,7 @@ Should post a sample digest to `#archivist` (or "Archive is empty" if you have n
 
 ## Tuning the digest ranking
 
-Ranking weights live in `examples/rank.py`'s `score_entry` function:
+Ranking weights live in `scripts/rank.py`'s `score_entry` function:
 
 | Component | Default | Rationale |
 |---|---|---|
@@ -305,7 +305,7 @@ Edit `~/archivist-digest/rank.py` to adjust. Changes take effect on the next cro
 archivist/
 ├── README.md                    this file
 ├── install.sh                   interactive Ubuntu installer
-└── examples/
+└── scripts/
     ├── SOUL.md                  agent behavior — single source of truth
     ├── rank.py                  digest ranking script
     ├── post-digest.sh           cron entry point

@@ -44,7 +44,7 @@ List of Event dataclasses, filtered to the script's date window
 stdout (small structured payload the agent reads directly)
 ```
 
-The parser (`examples/ical_lib.py`) is **stdlib-only** — no
+The parser (`scripts/ical_lib.py`) is **stdlib-only** — no
 `icalendar`/`recurring-ical-events` pip dependencies. This is a deliberate
 choice: it sidesteps EXTERNALLY-MANAGED Python issues that pip-install
 skills hit, and the user already has a battle-tested parser of this shape
@@ -111,7 +111,7 @@ The scripts and library are stdlib-only — no `pip install` step required.
 ### 2. Configure the iCal feed
 
 ```bash
-cd ~/.hermes/skills/calendar/examples
+cd ~/.hermes/skills/calendar/scripts
 cp .env.example .env
 $EDITOR .env
 ```
@@ -241,7 +241,7 @@ JSON. Example response style:
 calendar/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
-└── examples/
+└── scripts/
     ├── .env.example
     ├── .gitignore
     ├── ical_lib.py                # shared iCal parser (stdlib-only)

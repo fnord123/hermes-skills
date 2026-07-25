@@ -56,9 +56,9 @@ truth and Playwright as the executor:
   `noreply@messaging.squareup.com` and similar `*.squareup.com` addresses; a
   filter that matches any of those is the right shape.
 - Python 3.10+ with `pip`. (Hermes' default.)
-- Playwright + Chromium, installed in a venv inside `examples/`:
+- Playwright + Chromium, installed in a venv inside `scripts/`:
   ```
-  cd ~/.hermes/skills/square-appointments/examples
+  cd ~/.hermes/skills/square-appointments/scripts
   python3 -m venv .venv
   .venv/bin/pip install -r requirements.txt
   .venv/bin/playwright install chromium
@@ -66,7 +66,7 @@ truth and Playwright as the executor:
 
 ### Skill config
 ```
-cd ~/.hermes/skills/square-appointments/examples
+cd ~/.hermes/skills/square-appointments/scripts
 cp .env.example .env
 $EDITOR .env                       # paste your AGENTMAIL_API_KEY (same as Hermes uses)
 mkdir -p ~/.config/square-appointments
@@ -173,7 +173,7 @@ footguns." That informs three load-bearing choices here:
 square-appointments/
 ├── SKILL.md                       # agent-facing model context
 ├── README.md                      # this file
-└── examples/
+└── scripts/
     ├── requirements.txt           # playwright, playwright-stealth
     ├── .env.example
     ├── merchants.example.json

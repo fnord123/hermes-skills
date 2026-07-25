@@ -95,7 +95,7 @@ wiring. Override with `--bank` if you want a separate bank.
 
 ```bash
 PY=~/.hermes/hermes-agent/venv/bin/python
-WA=~/.hermes/skills/whatsapp-backfill/examples/wa_backfill.py
+WA=~/.hermes/skills/whatsapp-backfill/scripts/wa_backfill.py
 
 # 1) sanity-check the parse (no memory written)
 $PY $WA preview --file ~/Downloads/"WhatsApp Chat with Sailing Group.txt"
@@ -127,7 +127,7 @@ the regatta and which berth?"*
 | Path | What |
 |---|---|
 | `SKILL.md` | Model-facing contract. |
-| `examples/wa_backfill.py` | The CLI. |
+| `scripts/wa_backfill.py` | The CLI. |
 | `~/.hermes/hindsight/config.json` | Hindsight `api_url` + `bank_id` (read, not in repo). |
 
 ## License

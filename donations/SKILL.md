@@ -46,7 +46,7 @@ Activate when the user wants to:
 
 ## The tool
 
-One script at `~/.hermes/skills/donations/examples/donations.py`, invoked as
+One script at `~/.hermes/skills/donations/scripts/donations.py`, invoked as
 `python3 <path> <verb> [args]`. Each call prints ONE JSON object on stdout
 (`{"ok": true, ...}`; failures are `{"ok": false, "error": "..."}` with exit 1).
 

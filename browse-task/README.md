@@ -25,7 +25,7 @@ Three layers — the model-facing skill never sees the lower two:
 2. **Scaffold** — Microsoft's [`microsoft/fara`](https://github.com/microsoft/fara)
    Playwright harness (`fara-cli`) runs the screenshot→action loop against that
    endpoint.
-3. **This skill** — `examples/browse_task.py` wraps `fara-cli`: it feeds the task,
+3. **This skill** — `scripts/browse_task.py` wraps `fara-cli`: it feeds the task,
    runs it in the per-site browser mode (below) with `/dev/null` stdin (so the agent's interactive prompt can't
    block), reads the trajectory's `data_point.json` (`status` + `outcome.answer`),
    and emits one domain-shaped JSON object. `SKILL.md` is the model contract and
@@ -61,7 +61,7 @@ This provides `~/fara/.venv/bin/fara-cli`. Also install **xvfb** for headful mod
 
 ### 3. Configure the skill
 ```bash
-cd ~/.hermes/skills/browse-task/examples
+cd ~/.hermes/skills/browse-task/scripts
 cp config.env.example config.env
 # edit config.env:
 #   FARA_HOME=/home/<you>/fara
@@ -72,7 +72,7 @@ cp config.env.example config.env
 
 Smoke test:
 ```bash
-python3 examples/browse_task.py --task "Find the current time in Tokyo and report it"
+python3 scripts/browse_task.py --task "Find the current time in Tokyo and report it"
 ```
 
 ## Safety model

@@ -103,7 +103,7 @@ echo 'GOOGLE_DOCS_FOLDER_ID=<folder-id-from-its-URL>' > ~/.config/google-docs/co
 chmod 600 ~/.config/google-docs/config.env
 ```
 
-(See `examples/config.env.example`.) To let the agent edit an **existing**
+(See `scripts/config.env.example`.) To let the agent edit an **existing**
 document, share it (as Editor) with the service account's address, or drop it in
 that folder.
 
@@ -118,7 +118,7 @@ hermes skills list        # confirm it's discovered
 
 ```bash
 PY=~/.hermes/hermes-agent/venv/bin/python
-D=~/.hermes/skills/google-docs/examples/docs.py
+D=~/.hermes/skills/google-docs/scripts/docs.py
 ID=$($PY $D create --title "Docs skill test" --text "Rome trip" | python3 -c 'import sys,json;print(json.load(sys.stdin)["document_id"])')
 $PY $D append  $ID --text "Day 1: fly to Rome"
 $PY $D replace $ID --find Rome --with Milan          # expect occurrences: 2
@@ -182,8 +182,8 @@ never breaks the tool (failures to write are swallowed).
 | Path | What |
 |---|---|
 | `SKILL.md` | Model-facing contract (document vocabulary only). |
-| `examples/docs.py` | The CLI. |
-| `examples/config.env.example` | Template for `~/.config/google-docs/config.env`. |
+| `scripts/docs.py` | The CLI. |
+| `scripts/config.env.example` | Template for `~/.config/google-docs/config.env`. |
 | `~/.config/google-docs/config.env` | `GOOGLE_DOCS_FOLDER_ID` (not in the repo). |
 | `~/.hermes/creds/<key>.json`, `~/.hermes/.env` | Service-account key + ADC path (not in the repo). |
 

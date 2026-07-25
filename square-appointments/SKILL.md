@@ -77,7 +77,7 @@ every configured alias.
 
 ## The four tools
 
-All scripts live at `~/.hermes/skills/square-appointments/examples/`. Invoke
+All scripts live at `~/.hermes/skills/square-appointments/scripts/`. Invoke
 each via `python3 <path> <args>`. Each returns small structured output (JSON
 lines or plain text) the agent can relay to the user directly.
 
@@ -95,7 +95,7 @@ lines or plain text) the agent can relay to the user directly.
 
 | Path | Reason |
 |---|---|
-| `~/.hermes/skills/square-appointments/examples/.env` | Holds `AGENTMAIL_API_KEY`. The scripts read it; the agent must not. |
+| `~/.hermes/skills/square-appointments/scripts/.env` | Holds `AGENTMAIL_API_KEY`. The scripts read it; the agent must not. |
 | `~/.config/square-appointments/merchants.json` | User-edited merchant config. Read indirectly via `list-merchants.py`. |
 | `~/.config/square-appointments/customer.json` | User's name / phone / email used to fill checkout forms. Read indirectly via `customer-info.py show`. |
 | `~/.config/square-appointments/*.log` | Operational logs may contain bearer tokens. |

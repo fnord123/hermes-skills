@@ -93,7 +93,7 @@ echo 'DONATIONS_SHEET_ID=<spreadsheet-id-from-its-URL>' > ~/.config/donations/co
 chmod 600 ~/.config/donations/config.env
 ```
 
-(See `examples/config.env.example`.)
+(See `scripts/config.env.example`.)
 
 ### 4. Wire the skill into Hermes
 
@@ -106,7 +106,7 @@ hermes skills list        # confirm it's discovered
 
 ```bash
 PY=~/.hermes/hermes-agent/venv/bin/python
-$PY ~/.hermes/skills/donations/examples/donations.py new --charity "Test" --date 2099-01-01
+$PY ~/.hermes/skills/donations/scripts/donations.py new --charity "Test" --date 2099-01-01
 $PY .../donations.py add --item pants --quantity 3 --value 5
 $PY .../donations.py total       # expect {"ok": true, ... "total": "$15.00"}
 # then delete the test tab in the sheet
@@ -136,8 +136,8 @@ object; failures are `{"ok": false, "error": "…"}` with exit 1.
 | Path | What |
 |---|---|
 | `SKILL.md` | Model-facing contract (donation vocabulary only). |
-| `examples/donations.py` | The CLI. |
-| `examples/config.env.example` | Template for `~/.config/donations/config.env`. |
+| `scripts/donations.py` | The CLI. |
+| `scripts/config.env.example` | Template for `~/.config/donations/config.env`. |
 | `~/.config/donations/config.env` | `DONATIONS_SHEET_ID` (not in the repo). |
 | `~/.config/donations/active.txt` | The active-donation pointer (runtime state). |
 | `~/.hermes/creds/hermes-sheets.json`, `~/.hermes/.env` | Service-account key + ADC path (not in the repo). |

@@ -25,8 +25,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 CALENDAR_DIRS = [
-    Path.home() / ".hermes" / "skills" / "calendar" / "examples",
-    Path.home() / "hermes-skills" / "calendar" / "examples",
+    Path.home() / ".hermes" / "skills" / "calendar" / "scripts",
+    Path.home() / "hermes-skills" / "calendar" / "scripts",
 ]
 
 USER_PARENT = "David"       # Gina/Sky "with David" => at the user's house

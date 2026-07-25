@@ -24,7 +24,7 @@ metadata:
 
 # pallo-logistics — Pallo's boarding + Model-X coordination
 
-All scripts live in `~/.hermes/skills/pallo-logistics/examples/`. Invoke each as
+All scripts live in `~/.hermes/skills/pallo-logistics/scripts/`. Invoke each as
 `python3 <path> <args>`; every script re-execs into its own `.venv` and prints
 small JSON the agent relays to the user. Scope: **Pallo only, Laurel Acres
 (Hillsboro) only.**

@@ -52,7 +52,7 @@ Hermes sees the post in the channel (via `DISCORD_ALLOW_BOTS=all` plus a per-cha
 
 Most "today's briefing didn't show up" failures are shell-debuggable from `/var/tmp/daily-briefing*.log` — not a context-window problem inside the agent.
 
-See [`examples/overview.md`](./examples/overview.md) for the full architecture deep-dive (debugging tips, log file locations, memory-system integration, etc.).
+See [`scripts/overview.md`](./scripts/overview.md) for the full architecture deep-dive (debugging tips, log file locations, memory-system integration, etc.).
 
 ## Prerequisites
 
@@ -79,13 +79,13 @@ API keys you'll need (all free tiers are sufficient):
 hermes skills install fnord123/hermes-skills/daily-briefing
 ```
 
-This places `SKILL.md` and `examples/` under `~/.hermes/skills/daily-briefing/`. The skill is now active in Hermes; the rest of these steps stand up the cron pipeline that the skill talks about.
+This places `SKILL.md` and `scripts/` under `~/.hermes/skills/daily-briefing/`. The skill is now active in Hermes; the rest of these steps stand up the cron pipeline that the skill talks about.
 
 ### 2. Copy the pipeline scripts to your home dir
 
 ```bash
 mkdir -p ~/daily-briefing
-cp -r ~/.hermes/skills/daily-briefing/examples/. ~/daily-briefing/
+cp -r ~/.hermes/skills/daily-briefing/scripts/. ~/daily-briefing/
 chmod +x ~/daily-briefing/*.sh ~/daily-briefing/*.py
 mv ~/daily-briefing/.env.example ~/daily-briefing/.env
 ```
@@ -208,7 +208,7 @@ The agent edits the JSON files; the next briefing reflects the change.
 daily-briefing/
 ├── SKILL.md                         model-facing companion (Hermes uses this)
 ├── README.md                        this file
-└── examples/
+└── scripts/
     ├── morning-briefing.sh          orchestrator (entry point for cron)
     ├── fetch-calendar.sh            Google Calendar iCal → today's events
     ├── fetch-news.sh                Brave News API → 1 story per topic

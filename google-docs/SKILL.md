@@ -48,7 +48,7 @@ Activate when the user wants to:
 
 ## The tool
 
-One script at `~/.hermes/skills/google-docs/examples/docs.py`, invoked as
+One script at `~/.hermes/skills/google-docs/scripts/docs.py`, invoked as
 `python3 <path> <verb> [args]`. Each call prints ONE JSON object on stdout
 (`{"ok": true, ...}`; failures are `{"ok": false, "error": "..."}` with exit 1).
 
