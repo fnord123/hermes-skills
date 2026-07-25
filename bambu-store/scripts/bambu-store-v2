@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""bambu-store (v2) - reads against Bambu's REAL US store commerce API
+(us-store-api.bambulab.com), the store the user actually shops on.
+Accurate price/sale/stock. Cart/checkout are separate (need auth) - TBD.
+"""
+import sys, os, json, argparse, urllib.request
+
+API = "https://us-store-api.bambulab.com"
+STORE_GID = "178182358546347218"
+HEADERS = {
+    "content-type": "application/json",
+    "accept": "application/json, text/plain, */*",
+    "bbl-locale": "en-US",
+    "bbl-trace-id": "hermes-bambu-store",
+    "x-bbl-store-gid": STORE_GID,
+    "x-bbl-store-region": "US",
+    "x-bbl-account-access": "DEFAULT_C",
+    "x-bbl-time-zone": "America/Los_Angeles",
+    "referer": "https://us.store.bambulab.com/",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0 Safari/537.36",
+}
+
+def api_post(path, body):
+    req = urllib.request.Request(API + path, data=json.dumps(body).encode(),
+                                 headers=HEADERS, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+def search(query, size=10):
+    d = api_post("/mall-goods/product/globalSearchV2",
+                 {"content": query, "current": 1, "size": size})
+    recs = (((d.get("data") or {}).get("page") or {}).get("records")) or []
+    out = []
+    for p in recs:
+        list_price = p.get("price")
+        lower = p.get("lowerPrice")
+        oos = (p.get("outOfStockMsg") or "").strip()
+        on_sale = lower is not None and list_price is not None and round(lower, 2) < round(list_price, 2)
+        now_price = lower if lower is not None else list_price
+        colors = p.get("colorList") or []
+        in_stock_colors = sum(1 for c in colors if not (c.get("outOfStockMsg") or "").strip())
+        out.append({
+            "name": p.get("name"),
+            "seoCode": p.get("seoCode"),
+            "highlight_sku_id": p.get("highlightProductSkuId"),
+            "price": (round(now_price,2) if now_price is not None else None),
+            "was": (round(list_price,2) if on_sale else None),
+            "on_sale": on_sale,
+            "currency": p.get("currency"),
+            "in_stock": (oos == ""),
+            "out_of_stock_msg": oos or None,
+            "eta": p.get("eta"),
+            "discount_label": p.get("discountLabel"),
+            "colors_total": len(colors),
+            "colors_in_stock": in_stock_colors,
+        })
+    return out
+
+def _fmt(p):
+    money = ("$%.2f" % p["price"]) if p.get("price") is not None else "n/a"
+    sale = (" (was $%.2f)" % p["was"]) if p.get("on_sale") and p.get("was") else ""
+    stock = "in stock" if p["in_stock"] else ("OUT OF STOCK" + (": " + p["out_of_stock_msg"] if p.get("out_of_stock_msg") else ""))
+    return "%s — %s%s — %s [%d/%d colors in stock] sku:%s" % (
+        p["name"], money, sale, stock, p["colors_in_stock"], p["colors_total"], p.get("highlight_sku_id"))
+
+def cmd_search(a):
+    res = search(a.query, a.limit)
+    if a.json:
+        print(json.dumps({"query": a.query, "results": res}, indent=2)); return
+    if not res:
+        print(json.dumps({"status": "no_match", "query": a.query})); return
+    for p in res:
+        print(_fmt(p))
+
+def cmd_price(a):
+    res = search(a.query, 5)
+    print(json.dumps(res[0] if res else {"status": "no_match", "query": a.query}, indent=2))
+
+def main():
+    ap = argparse.ArgumentParser(prog="bambu-store")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("search"); s.add_argument("query"); s.add_argument("--limit", type=int, default=10); s.add_argument("--json", action="store_true")
+    s = sub.add_parser("price"); s.add_argument("query")
+    a = ap.parse_args()
+    {"search": cmd_search, "price": cmd_price}[a.cmd](a)
+
+if __name__ == "__main__":
+    main()
