@@ -1,7 +1,7 @@
 ---
 name: rx-review
-description: "Review the user's medications and supplements against their blood tests. Takes lab PDFs and a regimen — typed in chat, or from a source you resolve first (a Google Doc via the google-docs skill, a local file) — then researches each substance, looks up doses for branded products, screens interactions and timing, adversarially verifies every claim, and produces a discussion brief for their prescriber. Use when the user asks to review their meds, supplements, or labs, add new lab results, or check on a review already running."
-version: 1.0.0
+description: "Review the user's medications and supplements against their blood tests. Takes lab PDFs and a regimen — typed in chat, or from a source you resolve first (a Google Doc via the google-docs skill, a local file) — then a kanban pipeline transcribes, looks up product doses, researches each substance, screens interactions and timing, adversarially verifies every claim, and produces a discussion brief for their prescriber. Use when the user asks to review their meds, supplements, or labs, add new lab results, answer a question the review is waiting on, or check on a review already running."
+version: 2.0.0
 license: MIT
 metadata:
   hermes:
@@ -10,169 +10,146 @@ metadata:
 
 # Medication and supplement review
 
-You collect the user's labs and regimen through conversation, then run a review pipeline that
-researches each substance, checks interactions and timing, and adversarially verifies every
-claim before writing a brief for their prescriber.
+A kanban pipeline does the work. **You are the human interface, not the engine.**
 
-The user never edits files. You do all of that for them.
+Your whole job is four things:
 
-Everything runs through one command:
+1. Collect the labs and the regimen.
+2. Start it.
+3. Answer the questions it blocks on — labs to confirm, product doses it could not pin down.
+4. Deliver the brief.
 
-    python3 ~/.hermes/rx-review/rx.py <regimen|intake|verify-labs|confirm|status|analyze|reset>
+The pipeline advances itself: each card creates the work its completion makes possible. You do
+NOT run it step by step, poll it, or nudge it along. If you find yourself wondering whether to
+re-run something to move things forward — don't. It already did.
+
+Everything is one command:
+
+    python3 ~/.hermes/rx-review/rx.py <regimen|intake|status|verify-labs|confirm|analyze|reset>
+
+You only ever need `regimen`, `intake`, and `status`. The rest are run BY the pipeline.
 
 ## 1. Collect the labs
 
-Ask the user to attach their lab result PDFs. Attachments arrive as local file paths — copy
-each one into the intake folder, keeping its original name:
+Ask for the lab PDFs. Attachments arrive as local paths — copy each into the intake folder,
+keeping its name:
 
     cp "<attached path>" ~/.hermes/rx-review/inputs/raw/
 
-If a path does not exist or the copy fails, tell the user which file failed and ask them to
-send it again. Do not continue with a missing lab.
+If a copy fails, say which file and ask for it again. Never continue with a missing lab.
 
 ## 2. Collect the regimen
 
-The regimen can come from three places. Take whichever the user offers.
+Take whichever the user offers:
 
-**They point you at a source they already keep** — "it's in my regimen doc", "search my docs",
-"it's in ~/notes/meds.md". Resolve the pointer YOURSELF with whatever skill fits — the
-`google-docs` skill finds and reads a Google Doc, the file tools read a local file — then save
-the text to a file and hand the path over:
+**A source they already keep** — "it's in my regimen doc", "search my docs", "~/notes/meds.md".
+Resolve it yourself with whatever skill fits (`google-docs` finds and reads a Google Doc; file
+tools read a file), save the text, and hand over the path:
 
     python3 ~/.hermes/rx-review/rx.py regimen --from /tmp/regimen-source.txt
 
-Or pipe it straight in:
+or pipe it: `... | python3 ~/.hermes/rx-review/rx.py regimen --stdin`
 
-    ... | python3 ~/.hermes/rx-review/rx.py regimen --stdin
+Finding the source is your job. That command only accepts a path or stdin.
 
-This step only accepts a path or stdin. Locating the source is your job, not its.
+**Typed in chat** — write their words to a file, pass it the same way.
 
-**They type it in chat** — write their words to a file and pass that same way.
+**Not written down** — ask. Per item: product, dose with unit, time of day. Prescriptions
+matter as much as supplements; drug-supplement interactions are the most valuable finding.
 
-**They have not written it down** — ask. For each item: product name, dose with its unit, and
-what time of day. Tell them prescriptions matter as much as supplements, because
-drug-supplement interactions are the most valuable thing this review finds.
+Record it VERBATIM. Never correct a spelling, convert a unit, or invent a dose. The pipeline
+looks products up and asks about the rest.
 
-Whatever the source, record it VERBATIM. Do not correct spellings, convert units, or fill in a
-dose that is not there. Later steps look products up and ask about anything still unclear.
-
-## 3. Run intake
+## 3. Start it
 
     python3 ~/.hermes/rx-review/rx.py intake
 
-This creates transcription work for each new lab PDF and for the regimen. Tell the user it is
-running and roughly how many items it is processing.
+That is the only time you push. Tell the user what it created and that it runs on its own —
+transcription takes a while, a large panel can take an hour.
 
-Check progress with:
+From here the pipeline transcribes each lab, builds the regimen inventory, looks up product
+Supplement Facts, and posts its own checkpoints. **Nothing below is something you trigger.**
+
+## 4. Answer what it blocks on
+
+The pipeline posts blocked cards when it needs a human. Each one notifies Discord, but the
+notification is only a one-line signal — **read the card for the detail**:
 
     python3 ~/.hermes/rx-review/rx.py status
+    hermes kanban --board rx-review show <card-id>
 
-Intake is finished when no card is `running` or `ready`. A large panel can take an hour.
+### "CONFIRM YOUR LABS"
 
-## 4. Show the user their labs and get a yes
-
-    python3 ~/.hermes/rx-review/rx.py verify-labs
-
-This re-opens every source PDF and confirms each transcribed value appears in it verbatim, so
-you are not asking the user to proofread arithmetic. Report what it says:
+Run `rx.py verify-labs` to get the full picture, then tell the user:
 
 - how many markers were read, from how many PDFs
-- **the out-of-range list, in full** — those drive the research
-- anything it could not verify
+- **every out-of-range marker, with its value and reference range** — quote them, do not
+  summarize as "several are high"
+- anything it could not verify against the source PDF
 
-Then ask the user to confirm the out-of-range list looks like their results. Use `clarify` with
-"yes, that's right" / "something's wrong". The check catches invented or mistyped values; it
-cannot catch a correct number attached to the wrong marker, which is what their eyes are for.
+Send this as normal chat messages. Long output is fine — your messages are split
+automatically; it is only the card notifications that are one-liners.
 
-If they say something is wrong, ask which marker, and re-run that lab's card rather than
-editing the file yourself.
+Then ask whether that matches their results (`clarify`: "yes" / "something's wrong"). The
+machine already checked every value appears verbatim in the PDF; what it cannot catch is a
+correct number attached to the wrong marker. That is what their eyes are for.
 
-## 5. Look up the products you can
+If they confirm, unblock the card. If not, ask which marker and re-run that lab's card.
 
-Run `intake` again once the regimen inventory is built:
+### "Confirm N item(s) before research"
 
-    python3 ~/.hermes/rx-review/rx.py intake
+Run `rx.py confirm --json`. Each entry carries what you need for a real question:
 
-For any item where the user gave a product name but no dose, this creates a lookup that
-fetches the manufacturer's published Supplement Facts, then rebuilds the inventory with them.
-Tell the user which products are being looked up. Wait for those to finish before step 6 —
-most missing doses resolve here without asking them anything.
+- `item`, `why` — what is missing
+- `note` — what intake found ambiguous
+- `known` — brand, dose, unit, serving size, times taken
+- `lookup` — the manufacturer's Supplement Facts if found: `serving_size`, panel `excerpt`,
+  and `ambiguous` / `not_found`
 
-## 6. Ask about anything still unclear
+**Spell it out.** Never ask a bare "X needs confirmation" — they cannot answer that without
+hunting for the bottle. State what is known, state what the manufacturer says, ask the one
+undetermined thing:
 
-    python3 ~/.hermes/rx-review/rx.py confirm --json
+- panel found → *"Thorne Super EPA: the manufacturer lists EPA 425 mg + DHA 270 mg per
+  serving, and a serving is 2 gelcaps — your 1 pill would be half that. Is that your product,
+  and do you take 1 or 2?"*
+- `ambiguous` → name the variants, ask which they have
+- name looks misspelled → *"You wrote Prevastatin 20 mg at 9pm — did you mean Pravastatin?"*
+- implausible dose → give both their number and the plausible one, ask which
+- nothing found → ask for the amount per serving from the label
 
-This returns `unresolved` — items whose dose, unit, or identity could not be established even
-after the lookups.
+Apply their answers by rewriting `~/.hermes/rx-review/inputs/regimen.txt`, then run
+`rx.py intake` once so the corrected text is picked up. If they genuinely do not know a value,
+add that product name on its own line to `~/.hermes/rx-review/inputs/CONFIRMED.txt` and tell
+them it will be researched with the gap noted.
 
-Each entry carries everything you need to ask a good question — USE ALL OF IT:
+Then unblock the card.
 
-- `item` — the product
-- `why` — which field is missing
-- `note` — intake's own words about what was ambiguous
-- `known` — what IS established: brand, dose, unit, serving size, time(s) taken
-- `lookup` — the manufacturer's Supplement Facts if a lookup ran: `serving_size`, an
-  `excerpt` of the panel, and `ambiguous` / `not_found` flags
+### "Start the research stage" is blocked
 
-**Spell the details out in the question.** Never ask a bare "X needs confirmation" — the user
-cannot answer that without going to find the bottle. State what you already know, state what
-the manufacturer says, and ask the one thing that is actually undetermined:
+It tried to start and something was still outstanding. Its block reason says what. Deal with
+that, then unblock it — it retries itself. Never use `--force`.
 
-- lookup found a panel → *"Thorne Super EPA: the manufacturer lists EPA 425 mg + DHA 270 mg per
-  serving, and a serving is 2 gelcaps — so your 1 pill would be half that. Is that your
-  product, and do you take 1 gelcap or 2?"*
-- lookup was `ambiguous` → name the variants and ask which one they have
-- a name looks misspelled → *"You wrote Prevastatin 20 mg at 9pm. Did you mean Pravastatin?"*,
-  offering "yes" / "keep as written"
-- a dose looks implausible → give the number they wrote AND the plausible one, and ask which
-- nothing found at all → ask for the amount per serving from the label
-
-For labs, quote the actual values and ranges from `verify-labs` — "LDL 127 H, ref <100" — not
-just the marker names.
-
-Use `clarify` with choices whenever you can offer sensible ones.
-
-When the user answers, rewrite `~/.hermes/rx-review/inputs/regimen.txt` with their corrections
-and run `rx.py intake` again, then `rx.py confirm --json` again.
-
-If the user does not know a value, tell them you will record it as unknown and it will be
-researched with that gap noted. Add that product name on its own line to:
-
-    ~/.hermes/rx-review/inputs/CONFIRMED.txt
-
-Repeat until `confirm --json` reports `"clear": true`.
-
-## 7. Start the analysis
-
-    python3 ~/.hermes/rx-review/rx.py analyze
-
-This builds the research graph: one investigation per substance, one per out-of-range lab
-marker, an interaction and timing screen, four independent adversarial reviews, and a final
-brief. Tell the user how many pieces of work it created and that it runs unattended — a full
-review usually takes overnight.
-
-It refuses to start while the labs are unverified or a regimen item is unconfirmed. If it
-refuses, it prints exactly what is outstanding — go back to step 4 or 6.
-
-## 8. Report progress and deliver
-
-When the user asks how it is going, run `rx.py status` and describe it in plain language: what
-has finished, what is running, what is waiting.
+## 5. Deliver
 
 Reports land in `~/.hermes/reports/rx-review/`. When `BRIEF.md` and `CRITIQUE.md` both exist,
-the review is done. Send the user `CRITIQUE.md` first — it lists what the final reviewer
-challenged — then `BRIEF.md`.
+it is done. Send `CRITIQUE.md` first — what the final reviewer challenged — then `BRIEF.md`.
 
-Tell the user plainly that the brief is evidence and questions for their prescriber or
-pharmacist to confirm, not medical advice, and that no part of it recommends a dose.
+Say plainly that this is evidence and questions for their prescriber or pharmacist to confirm,
+not medical advice, and that nothing in it recommends a dose.
+
+## Progress
+
+When asked how it is going, run `rx.py status` and describe it plainly: finished, running,
+waiting. Do not run anything else to "help it along".
 
 ## Adding labs later
 
-The user can send new lab PDFs at any time. Copy them in, run `rx.py intake`, then `analyze`
-again. Only the new work is created; finished work is not repeated.
+Copy the new PDFs into `inputs/raw/` and run `rx.py intake` once. Only the new work is
+created; finished work is never repeated.
 
 ## If something fails
 
-Report the exact error to the user and ask how they want to proceed. Do not edit files under
-`~/.hermes/rx-review/` other than `regimen.txt`, `CONFIRMED.txt`, and copying PDFs into
-`inputs/raw/`, and do not create or modify kanban cards by hand.
+Report the exact error and ask how they want to proceed. Do not edit files under
+`~/.hermes/rx-review/` other than `regimen.txt` and `CONFIRMED.txt`, and never create, edit or
+complete a kanban card by hand — unblocking a card the pipeline blocked is the one exception.
