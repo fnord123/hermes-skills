@@ -18,7 +18,7 @@ The user never edits files. You do all of that for them.
 
 Everything runs through one command:
 
-    python3 ~/.hermes/rx-review/rx.py <regimen|intake|confirm|status|analyze|reset>
+    python3 ~/.hermes/rx-review/rx.py <regimen|intake|verify-labs|confirm|status|analyze|reset>
 
 ## 1. Collect the labs
 
@@ -69,7 +69,25 @@ Check progress with:
 
 Intake is finished when no card is `running` or `ready`. A large panel can take an hour.
 
-## 4. Look up the products you can
+## 4. Show the user their labs and get a yes
+
+    python3 ~/.hermes/rx-review/rx.py verify-labs
+
+This re-opens every source PDF and confirms each transcribed value appears in it verbatim, so
+you are not asking the user to proofread arithmetic. Report what it says:
+
+- how many markers were read, from how many PDFs
+- **the out-of-range list, in full** — those drive the research
+- anything it could not verify
+
+Then ask the user to confirm the out-of-range list looks like their results. Use `clarify` with
+"yes, that's right" / "something's wrong". The check catches invented or mistyped values; it
+cannot catch a correct number attached to the wrong marker, which is what their eyes are for.
+
+If they say something is wrong, ask which marker, and re-run that lab's card rather than
+editing the file yourself.
+
+## 5. Look up the products you can
 
 Run `intake` again once the regimen inventory is built:
 
@@ -77,10 +95,10 @@ Run `intake` again once the regimen inventory is built:
 
 For any item where the user gave a product name but no dose, this creates a lookup that
 fetches the manufacturer's published Supplement Facts, then rebuilds the inventory with them.
-Tell the user which products are being looked up. Wait for those to finish before step 5 —
+Tell the user which products are being looked up. Wait for those to finish before step 6 —
 most missing doses resolve here without asking them anything.
 
-## 5. Ask about anything still unclear
+## 6. Ask about anything still unclear
 
     python3 ~/.hermes/rx-review/rx.py confirm --json
 
@@ -106,7 +124,7 @@ researched with that gap noted. Add that product name on its own line to:
 
 Repeat until `confirm --json` reports `"clear": true`.
 
-## 6. Start the analysis
+## 7. Start the analysis
 
     python3 ~/.hermes/rx-review/rx.py analyze
 
@@ -115,9 +133,10 @@ marker, an interaction and timing screen, four independent adversarial reviews, 
 brief. Tell the user how many pieces of work it created and that it runs unattended — a full
 review usually takes overnight.
 
-It refuses to start while anything is unconfirmed. If it refuses, go back to step 5.
+It refuses to start while the labs are unverified or a regimen item is unconfirmed. If it
+refuses, it prints exactly what is outstanding — go back to step 4 or 6.
 
-## 7. Report progress and deliver
+## 8. Report progress and deliver
 
 When the user asks how it is going, run `rx.py status` and describe it in plain language: what
 has finished, what is running, what is waiting.
