@@ -105,14 +105,32 @@ most missing doses resolve here without asking them anything.
 This returns `unresolved` — items whose dose, unit, or identity could not be established even
 after the lookups.
 
-For EACH unresolved item, use the `clarify` tool to ask the user one specific question, with
-choices when you can offer sensible ones. Ask about the actual ambiguity. Examples of the
-shape:
+Each entry carries everything you need to ask a good question — USE ALL OF IT:
 
-- a drug name that looks misspelled → offer the likely correct spelling and "keep as written"
-- a dose that looks implausible for that substance → offer the plausible value and "it is correct"
-- a product with no dose → ask for the amount per serving from the label
-- a product name that is not a real product → ask which product they actually have
+- `item` — the product
+- `why` — which field is missing
+- `note` — intake's own words about what was ambiguous
+- `known` — what IS established: brand, dose, unit, serving size, time(s) taken
+- `lookup` — the manufacturer's Supplement Facts if a lookup ran: `serving_size`, an
+  `excerpt` of the panel, and `ambiguous` / `not_found` flags
+
+**Spell the details out in the question.** Never ask a bare "X needs confirmation" — the user
+cannot answer that without going to find the bottle. State what you already know, state what
+the manufacturer says, and ask the one thing that is actually undetermined:
+
+- lookup found a panel → *"Thorne Super EPA: the manufacturer lists EPA 425 mg + DHA 270 mg per
+  serving, and a serving is 2 gelcaps — so your 1 pill would be half that. Is that your
+  product, and do you take 1 gelcap or 2?"*
+- lookup was `ambiguous` → name the variants and ask which one they have
+- a name looks misspelled → *"You wrote Prevastatin 20 mg at 9pm. Did you mean Pravastatin?"*,
+  offering "yes" / "keep as written"
+- a dose looks implausible → give the number they wrote AND the plausible one, and ask which
+- nothing found at all → ask for the amount per serving from the label
+
+For labs, quote the actual values and ranges from `verify-labs` — "LDL 127 H, ref <100" — not
+just the marker names.
+
+Use `clarify` with choices whenever you can offer sensible ones.
 
 When the user answers, rewrite `~/.hermes/rx-review/inputs/regimen.txt` with their corrections
 and run `rx.py intake` again, then `rx.py confirm --json` again.
