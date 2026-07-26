@@ -18,7 +18,7 @@ The user never edits files. You do all of that for them.
 
 Everything runs through one command:
 
-    python3 ~/.hermes/rx-review/rx.py <intake|confirm|status|analyze>
+    python3 ~/.hermes/rx-review/rx.py <regimen|intake|confirm|status|analyze|reset>
 
 ## 1. Collect the labs
 
@@ -106,7 +106,7 @@ researched with that gap noted. Add that product name on its own line to:
 
 Repeat until `confirm --json` reports `"clear": true`.
 
-## 5. Start the analysis
+## 6. Start the analysis
 
     python3 ~/.hermes/rx-review/rx.py analyze
 
@@ -115,9 +115,9 @@ marker, an interaction and timing screen, four independent adversarial reviews, 
 brief. Tell the user how many pieces of work it created and that it runs unattended — a full
 review usually takes overnight.
 
-It refuses to start while anything is unconfirmed. If it refuses, go back to step 4.
+It refuses to start while anything is unconfirmed. If it refuses, go back to step 5.
 
-## 6. Report progress and deliver
+## 7. Report progress and deliver
 
 When the user asks how it is going, run `rx.py status` and describe it in plain language: what
 has finished, what is running, what is waiting.
