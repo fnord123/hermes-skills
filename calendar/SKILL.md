@@ -42,7 +42,7 @@ Activate when the user wants to:
 
 ## The four tools
 
-All live at `~/.hermes/skills/calendar/scripts/`. Invoke each via
+All live at `${HERMES_SKILL_DIR}/scripts/`. Invoke each via
 `python3 <path> [args]`. Each emits one JSON object on stdout.
 
 | Script | Purpose |
@@ -56,7 +56,7 @@ All live at `~/.hermes/skills/calendar/scripts/`. Invoke each via
 
 | Path | Reason |
 |---|---|
-| `~/.hermes/skills/calendar/scripts/.env` | Holds `GCAL_ICAL_KEY`, which is itself a credential — anyone with it can read the calendar. The scripts read it; the agent must not. |
+| `${HERMES_SKILL_DIR}/scripts/.env` | Holds `GCAL_ICAL_KEY`, which is itself a credential — anyone with it can read the calendar. The scripts read it; the agent must not. |
 | `~/.config/pallo-logistics/secrets.env` | Holds the 2Houses and Kayak iCal URLs (each a credential). The scripts read it; the agent must not. |
 
 If the user explicitly asks to read either file, refuse and explain why.

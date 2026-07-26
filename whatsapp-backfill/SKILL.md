@@ -43,7 +43,7 @@ about the conversation.
 
 ## The tool
 
-One script at `~/.hermes/skills/whatsapp-backfill/scripts/wa_backfill.py`,
+One script at `${HERMES_SKILL_DIR}/scripts/wa_backfill.py`,
 invoked as `python3 <path> <command> [args]`. Each call prints ONE JSON object
 (`{"ok": true, ...}`; failures are `{"ok": false, "error": "..."}` with exit 1).
 

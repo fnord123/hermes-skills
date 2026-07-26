@@ -22,21 +22,21 @@ the store, web-search it, compute prices, or build URLs yourself.
 
 Two CLIs, invoked by full path (cwd is not the skill dir):
 
-- **Reads (no login needed):** `python3 ~/.hermes/skills/bambu-store/scripts/bambu-store-v2`
-- **Account / cart / total (logged-in):** `python3 ~/.hermes/skills/bambu-store/scripts/store_api.py`
+- **Reads (no login needed):** `python3 ${HERMES_SKILL_DIR}/scripts/bambu-store-v2`
+- **Account / cart / total (logged-in):** `python3 ${HERMES_SKILL_DIR}/scripts/store_api.py`
 
 ```
 # price / stock / sale (read-only, always available)
-python3 ~/.hermes/skills/bambu-store/scripts/bambu-store-v2 search "ASA white"
-python3 ~/.hermes/skills/bambu-store/scripts/bambu-store-v2 price  "PLA Basic Jade White"
+python3 ${HERMES_SKILL_DIR}/scripts/bambu-store-v2 search "ASA white"
+python3 ${HERMES_SKILL_DIR}/scripts/bambu-store-v2 price  "PLA Basic Jade White"
 
 # build the order on the user's account
-python3 ~/.hermes/skills/bambu-store/scripts/store_api.py search   "<material color>"   # find + ids
-python3 ~/.hermes/skills/bambu-store/scripts/store_api.py add      "<material color>" <qty>
-python3 ~/.hermes/skills/bambu-store/scripts/store_api.py cart                          # show cart lines
-python3 ~/.hermes/skills/bambu-store/scripts/store_api.py set      <cartItemId> <qty>    # change qty; 0 removes
-python3 ~/.hermes/skills/bambu-store/scripts/store_api.py checkout                       # grand total + tax + shipping
-python3 ~/.hermes/skills/bambu-store/scripts/store_api.py whoami                         # confirm the session is live
+python3 ${HERMES_SKILL_DIR}/scripts/store_api.py search   "<material color>"   # find + ids
+python3 ${HERMES_SKILL_DIR}/scripts/store_api.py add      "<material color>" <qty>
+python3 ${HERMES_SKILL_DIR}/scripts/store_api.py cart                          # show cart lines
+python3 ${HERMES_SKILL_DIR}/scripts/store_api.py set      <cartItemId> <qty>    # change qty; 0 removes
+python3 ${HERMES_SKILL_DIR}/scripts/store_api.py checkout                       # grand total + tax + shipping
+python3 ${HERMES_SKILL_DIR}/scripts/store_api.py whoami                         # confirm the session is live
 ```
 
 ## How to handle requests

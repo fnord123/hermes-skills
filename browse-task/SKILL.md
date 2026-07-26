@@ -40,7 +40,7 @@ metadata:
 
 ## The tool
 
-One script at `~/.hermes/skills/browse-task/scripts/browse_task.py`, invoked as
+One script at `${HERMES_SKILL_DIR}/scripts/browse_task.py`, invoked as
 `python3 <path> [args]`. It prints ONE JSON object on stdout.
 
 | Command | Purpose |
