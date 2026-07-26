@@ -8,10 +8,12 @@ description: >
   are reachable once shared with the agent. PREFER THIS SKILL for anything about
   a Google Doc / document's contents. It is a different, self-contained setup
   from `google-workspace` (which is OAuth-based) — reach for this one for Docs.
-  Activate on any of: "google doc", "doc", "document", "write a doc", "create a
-  document", "add to the doc", "insert into the document", "edit the doc",
-  "find and replace in the doc", "make this a heading", "bold this in the doc",
-  "read the doc", "what does the document say".
+  Finds documents by name or content, so the user never needs a document ID or
+  URL. Activate on any of: "google doc", "doc", "document", "write a doc",
+  "create a document", "add to the doc", "insert into the document", "edit the
+  doc", "find and replace in the doc", "make this a heading", "bold this in the
+  doc", "read the doc", "what does the document say", "find my doc", "search my
+  docs", "which docs do I have", "it's in my docs".
 version: 0.1.0
 license: MIT
 metadata:
@@ -58,6 +60,7 @@ and url; keep them to edit the same document afterward.
 
 | Verb | Purpose |
 |---|---|
+| `find [query] [--title-only] [--anywhere] [--limit N]` | **Finds documents without an id.** No query lists everything in the folder, newest first. A query matches the title *and* the body text. `--anywhere` looks beyond the folder at everything shared with the agent. Returns `document_id`, `title`, `url`, `modified` for each. |
 | `create --title "<t>" [--text "<initial>"]` | Creates a new document in the shared folder. Returns its `document_id` and `url`. |
 | `read <doc_id>` | Gets a document's title and full plain text. |
 | `append <doc_id> --text "<t>"` | Adds text as a new paragraph at the end. |
@@ -130,6 +133,26 @@ edit, confirm what changed (e.g. "Replaced 3 occurrences of 'Rome' with
 
 When a `replace` or `delete` returns `"occurrences": 0` with a `note`, relay the
 note — the text wasn't in the document, so nothing changed.
+
+## The user rarely knows a document id
+
+Assume they don't. When they refer to a document by what it *is* rather than by id or URL —
+"my regimen doc", "the trip plan", "search my docs, it's in there", "the one I made yesterday"
+— start with `find`, then use the id it returns.
+
+    # "the regimen is in my docs somewhere"
+    python3 ${HERMES_SKILL_DIR}/scripts/docs.py find regimen
+    # -> {"count": 1, "documents": [{"document_id": "1B6l…", "title": "David's Supplement & Medication Regimen", …}]}
+    python3 ${HERMES_SKILL_DIR}/scripts/docs.py read 1B6l…
+
+Pick a search word from what the user said — a distinctive noun beats their full phrasing.
+`find` matches body text too, so a doc whose title never says "regimen" is still found.
+
+- **Exactly one match** → use it.
+- **Several matches** → show the titles and ask which one. Do not guess.
+- **No matches** → try a different word, or `--anywhere` to look outside the folder, before
+  telling the user it isn't there. Bare `find` lists everything, which is the fastest way to
+  see what exists.
 
 ## Common flows
 

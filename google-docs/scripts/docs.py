@@ -13,6 +13,8 @@ account is shared as Editor on it (directly or via that folder). No user OAuth.
 
 Verbs (each prints ONE JSON object on stdout; exit 1 on error):
   create  --title <t> [--text <initial>]        new document in the shared folder
+  find    [query] [--title-only] [--anywhere] [--limit N]
+                                                find docs by name/content — no id needed
   read    <doc_id>                              title + plain-text body
   append  <doc_id> --text <t>                    add text as a new paragraph at the end
   insert  <doc_id> --text <t> (--after "<anchor>" | --at-start)
@@ -381,6 +383,47 @@ def cmd_create(args):
         fail(e)
 
 
+def _esc(s):
+    """Escape a Drive query literal (single quotes and backslashes)."""
+    return s.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def cmd_find(args):
+    """List/search documents so a caller never needs to know an id.
+
+    Without --query: every doc in the shared folder, newest first. With --query: matches on
+    title, and on body text too unless --title-only. --anywhere widens past the folder to
+    everything the service account can see.
+    """
+    drive = _drive()
+    try:
+        clauses = ["mimeType = '%s'" % DOC_MIME, "trashed = false"]
+        if not args.anywhere:
+            clauses.append("'%s' in parents" % _esc(_folder_id()))
+        if args.query:
+            q = _esc(args.query)
+            if args.title_only:
+                clauses.append("name contains '%s'" % q)
+            else:
+                clauses.append("(name contains '%s' or fullText contains '%s')" % (q, q))
+        res = drive.files().list(
+            q=" and ".join(clauses),
+            orderBy="modifiedTime desc",
+            pageSize=max(1, min(int(args.limit), 100)),
+            fields="files(id, name, webViewLink, modifiedTime)",
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        docs = [{"document_id": f["id"], "title": f.get("name", ""),
+                 "url": f.get("webViewLink") or
+                        "https://docs.google.com/document/d/%s/edit" % f["id"],
+                 "modified": f.get("modifiedTime", "")}
+                for f in res.get("files", [])]
+        out({"ok": True, "count": len(docs), "query": args.query or "",
+             "scope": "all" if args.anywhere else "folder", "documents": docs})
+    except Exception as e:  # noqa: BLE001
+        fail(e)
+
+
 def cmd_read(args):
     docs = _docs()
     try:
@@ -625,6 +668,15 @@ def main():
     g.add_argument("--title", required=True)
     g.add_argument("--text", help="initial body text (optional)")
     g.set_defaults(func=cmd_create)
+
+    g = sub.add_parser("find", help="list/search documents (no id needed)")
+    g.add_argument("query", nargs="?", default="",
+                   help="match on title and body text; omit to list everything")
+    g.add_argument("--title-only", action="store_true", help="match titles only")
+    g.add_argument("--anywhere", action="store_true",
+                   help="search everything the service account can see, not just the folder")
+    g.add_argument("--limit", default=20)
+    g.set_defaults(func=cmd_find)
 
     g = sub.add_parser("read", help="read a document's title and text")
     g.add_argument("doc_id")
