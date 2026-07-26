@@ -1,6 +1,6 @@
 ---
 name: rx-review
-description: "Review the user's medications and supplements against their blood tests. Collects lab PDFs and the regimen by conversation, researches each substance, adversarially verifies every claim, and produces a discussion brief for their prescriber. Use when the user asks to review their meds, supplements, or labs, add new lab results, or check on a review already running."
+description: "Review the user's medications and supplements against their blood tests. Takes lab PDFs and a regimen — typed in chat, or from a source you resolve first (a Google Doc via the google-docs skill, a local file) — then researches each substance, looks up doses for branded products, screens interactions and timing, adversarially verifies every claim, and produces a discussion brief for their prescriber. Use when the user asks to review their meds, supplements, or labs, add new lab results, or check on a review already running."
 version: 1.0.0
 license: MIT
 metadata:
@@ -32,16 +32,29 @@ send it again. Do not continue with a missing lab.
 
 ## 2. Collect the regimen
 
-Ask the user what they take. Request, for each item: the product name, the dose with its unit,
-and what time of day they take it. Tell them prescriptions matter as much as supplements,
-because drug-supplement interactions are the most valuable thing this review finds.
+The regimen can come from three places. Take whichever the user offers.
 
-Write exactly what they say — one item per line, their words — to:
+**They point you at a source they already keep** — "it's in my regimen doc", "search my docs",
+"it's in ~/notes/meds.md". Resolve the pointer YOURSELF with whatever skill fits — the
+`google-docs` skill finds and reads a Google Doc, the file tools read a local file — then save
+the text to a file and hand the path over:
 
-    ~/.hermes/rx-review/inputs/regimen.txt
+    python3 ~/.hermes/rx-review/rx.py regimen --from /tmp/regimen-source.txt
 
-Do not correct spellings, convert units, or fill in a dose they did not give. A later step
-asks them about anything unclear.
+Or pipe it straight in:
+
+    ... | python3 ~/.hermes/rx-review/rx.py regimen --stdin
+
+This step only accepts a path or stdin. Locating the source is your job, not its.
+
+**They type it in chat** — write their words to a file and pass that same way.
+
+**They have not written it down** — ask. For each item: product name, dose with its unit, and
+what time of day. Tell them prescriptions matter as much as supplements, because
+drug-supplement interactions are the most valuable thing this review finds.
+
+Whatever the source, record it VERBATIM. Do not correct spellings, convert units, or fill in a
+dose that is not there. Later steps look products up and ask about anything still unclear.
 
 ## 3. Run intake
 
