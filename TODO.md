@@ -1,6 +1,6 @@
 # Outstanding conventions work
 
-Snapshot: **126 findings — 0 critical, 86 major, 40 minor** across 16 skills.
+Snapshot: **113 findings — 0 critical, 73 major, 40 minor** across 16 skills.
 CI is green; it gates on criticals only, so everything below is non-blocking.
 
 Regenerate this picture at any time:
@@ -55,18 +55,18 @@ assuming it did. That is how a booking script reports success it never achieved.
 - [ ] `daily-briefing` — 3 scripts
 - [ ] `browse-task`, `whatsapp-backfill`, `google-docs` — 1-2 each
 
-### Known false positives — fix the linter, not the skills
+### Linter accuracy — fixed
 
-`lint_skills.py` greps each entry point's own source for `"ok"`, `exit(1)` and
-`except Exception`. Those now live in the imported `skill_json.py`, and **the linter does not
-follow imports** — so it penalises the exact vendoring pattern CONVENTIONS.md prescribes.
+The linter used to grep each entry point's own source for `"ok"`, `exit(1)` and
+`except Exception` without following imports, so it penalised the vendoring pattern
+CONVENTIONS.md prescribes. It now resolves a local `skill_json` import and exempts a script
+that genuinely calls `ok()`/`fail()` and is decorated with `@guard` — an unused import still
+gets no pass. `calendar` went 14 findings -> 2, both real.
 
-- [ ] Teach the linter to resolve a local `skill_json` import and treat the contract as
-      satisfied. Verified by hand: `calendar-range.py --bogus` emits
-      `{"ok": false, "error": "bad arguments..."}` on stdout with exit 1 — correct, and
-      reported as three separate findings.
-
-Until then, treat `scripts/*` findings in `calendar` (14) and `donations` as noise.
+Leak detection also now scans prose only (fenced code, inline literals and URLs excluded) and
+knows this repo's named backends, so `gingr`, `hindsight`, `agentmail`, `home assistant` and
+`twelve data` are caught by rule rather than by reading. `cell` and `formula` were dropped as
+ordinary English.
 
 ---
 

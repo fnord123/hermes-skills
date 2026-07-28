@@ -33,11 +33,24 @@ ERROR_SENTENCE = ("Always ask the user for guidance when there is an error; "
 # backend-out: the model reasons about whatever words are literally in front of it, and a
 # stray backend term drags it off the domain (CONVENTIONS.md, "Leak-free domain abstraction").
 BACKEND_TERMS = [
-    "spreadsheet", "worksheet", "cell", "formula", "batchupdate", "mime type",
+    "spreadsheet", "worksheet", "batchupdate", "mime type",
     "oauth", "service account", "bearer token", "endpoint", "webhook",
     "selector", "dom ", "playwright", "session cookie", "har file",
     "sqlite", "schema", "primary key", "vector", "embedding",
+    # Named backends. Generic terms alone miss the most common real leak: the vendor's own
+    # product name. The audit found "Gingr", "Hindsight", "AgentMail", "bank" and "retain" in
+    # model context and none were catchable, because a rule of generic nouns cannot know what
+    # a given skill sits on top of. These are the ones this repo actually uses.
+    "gingr", "hindsight", "agentmail", "camoufox", "browserbase", "firecrawl",
+    "myshopify", "home assistant", "litellm", "twelve data",
 ]
+
+# Words a specific skill may legitimately use because they ARE its domain. Keyed by skill.
+# "Square" is the merchant platform AND the word a user says; "bank" is a Hindsight collection
+# AND an ordinary English word. Judgement, not pattern-matching - so it stays reviewable.
+LEAK_ALLOW = {
+    "bambu-store": {"myshopify"},          # named in setup docs the human follows
+}
 
 # Files under scripts/ that are not entry points and so carry no JSON contract.
 def _is_library(path):
@@ -156,7 +169,18 @@ def lint_skill(name):
                 lineno(re.escape(m.group(0)[:30])))
 
     # ── domain leakage ─────────────────────────────────────────────────────
-    leaked = sorted({t.strip() for t in BACKEND_TERMS if t in text.lower()})
+    # Scan PROSE only. A term inside a fenced code block, an inline literal or a URL is not
+    # leaking into the model's vocabulary - it is part of a command the model must copy
+    # verbatim. Without this the rule fired on "webhook" inside a literal Home Assistant URL
+    # and on "formula" meaning show-your-math, which trains authors to ignore it.
+    prose = re.sub(r"```.*?```", " ", text, flags=re.S)
+    prose = re.sub(r"`[^`\n]*`", " ", prose)
+    prose = re.sub(r"https?://\S+", " ", prose)
+    prose = prose.lower()
+    allow = LEAK_ALLOW.get(name, set())
+    leaked = sorted({t.strip() for t in BACKEND_TERMS
+                     if t.strip() not in allow
+                     and re.search(r"\b" + re.escape(t.strip()) + r"\b", prose)})
     if leaked:
         add("major", "body/domain-leak",
             "backend vocabulary in model context: %s" % ", ".join(leaked),
@@ -204,6 +228,28 @@ def lint_skill(name):
                 imports.add(node.module.split(".")[0])
         if _is_library(f):
             continue
+
+        # A script that vendors skill_json.py and uses its helpers satisfies the whole
+        # contract - the markers just live in the imported module. Grepping the entry point's
+        # own text and not following the import means penalising the exact vendoring pattern
+        # CONVENTIONS.md prescribes, which is worse than missing a violation: it tells authors
+        # the right answer is wrong. Verified by hand that `calendar-range.py --bogus` emits
+        # {"ok": false, ...} on stdout with exit 1 while being reported as three findings.
+        vendored = os.path.exists(os.path.join(sdir, "skill_json.py"))
+        uses_helpers = re.search(r"\b(from\s+skill_json\s+import|import\s+skill_json)\b", src)
+        if vendored and uses_helpers:
+            # Confirm it actually CALLS them rather than merely importing - an unused import
+            # would otherwise buy a free pass on all three checks.
+            has_emit = re.search(r"\b(ok|fail)\s*\(", src)
+            has_guard = re.search(r"@guard\b", src)
+            if has_emit and has_guard:
+                continue
+            if has_emit and not has_guard:
+                add("major", "scripts/top-level-guard",
+                    "imports skill_json but main() is not decorated with @guard, so an "
+                    "unexpected exception still escapes as a traceback with no JSON", rel)
+                continue
+
         if '"ok"' not in src and "'ok'" not in src:
             add("major", "scripts/json-contract",
                 "prints no 'ok' field; the model cannot tell success from failure by a "
