@@ -1,26 +1,24 @@
 ---
 name: square-appointments
-description: >
-  Appointments at the user's pre-configured local businesses (hair salon,
-  barbershop, dentist, trainer, etc. — anywhere they have a service-business
-  account on Square). Use for ANY question that names a local business in
-  the context of appointments, scheduling, slots, or bookings — even if the
-  business name looks misspelled or slightly different. You MUST use this
-  skill for ANY appointment task about the user's OWN businesses — look up,
-  find a slot, book, move, or cancel. It is the ONLY correct tool: run its
-  scripts and relay their output. Do NOT web-search, open a browser, or call
-  any external calendar/booking API for the user's own appointments — those
-  paths are wrong here and will fail. Activate on phrasings like: "do I have an appointment at X",
-  "find me a slot at X", "cancel my appointment", "move my haircut",
-  "any openings at X next week", "when's my next visit to X". If the user
-  names a business and you don't recognize it, your FIRST move is to call
-  list-merchants.py — the user's typo or short form may resolve to a
-  configured alias.
+description: 'Appointments for the USER at their own pre-configured local businesses — hair salon,
+  barbershop, dentist, trainer, anywhere they hold a Square service-business account. Finds open slots,
+  books, reschedules and cancels. PREFER THIS SKILL for any appointment task about the user''s own
+  businesses, even when the business name is misspelled or approximate. Use `pallo-logistics` instead
+  for anything involving the dog or a kennel stay — this skill books people, that one books the dog.
+  Use `calendar` instead to read what is already scheduled without changing anything. Activate on
+  any of: "book a haircut", "schedule an appointment", "when is my next appointment", "cancel my appointment",
+  "reschedule my", "any openings at", "what time can I get in", "move my appointment", "book me at
+  <business>", "do they have anything Thursday".'
 version: 0.1.0
 license: MIT
 metadata:
   hermes:
-    tags: [Appointments, Booking, Square, Calendar, Scheduling]
+    tags:
+    - Appointments
+    - Booking
+    - Square
+    - Calendar
+    - Scheduling
 ---
 
 # Square Appointments — read & manage bookings at configured merchants

@@ -1,24 +1,25 @@
 ---
 name: pallo-logistics
-description: >
-  Pallo's boarding at Laurel Acres Kennels plus the Model X / Gina transport
-  coordination that every kennel trip depends on. Use for ANY request about
-  Pallo's kennel stays, boarding, drop-off / pickup, daily kennel activities
-  (Play Yard, Nature Walk), or whether a trip's boarding is set up — e.g.
-  "when is Pallo at the kennel", "is Pallo's boarding booked for my London
-  trip", "book Pallo for my Paris trip", "cancel Pallo's July stay". Also use
-  for "where is Gina on <date>" and the Model-X handoff messages that go with a
-  booking. Trip dates come from the merged calendar (Kayak feed); the agent can
-  pass a trip NAME and let the scripts resolve the dates.
-  YOU MUST use this skill's scripts for ALL Pallo boarding tasks. Do NOT open a
-  browser, do NOT web-search "Laurel Acres" or "Gingr", and do NOT try to
-  navigate to any booking website — those paths will fail. The ONLY correct
-  approach is to run the scripts listed below and relay their output.
+description: 'Pallo''s boarding at Laurel Acres Kennels, plus the Model X / Gina transport coordination
+  every kennel trip depends on. Covers kennel stays, drop-off and pickup, daily kennel activities
+  (Play Yard, Nature Walk), and whether a trip''s boarding is set up. PREFER THIS SKILL for anything
+  involving the DOG or a kennel stay. Use `square-appointments` instead for the user''s own appointments
+  at a local business (salon, barbershop, dentist, trainer) — that skill books people, this one books
+  the dog. Use `calendar` instead to read what is already scheduled without changing anything. Activate
+  on any of: "when is Pallo at the kennel", "book Pallo", "is Pallo''s boarding booked", "cancel Pallo''s
+  stay", "change Pallo''s dates", "drop off Pallo", "pick up Pallo", "Pallo''s boarding for my trip",
+  "does Pallo have boarding", "Laurel Acres", "kennel", "who is taking Pallo".'
 version: 0.1.0
 license: MIT
 metadata:
   hermes:
-    tags: [Pets, Boarding, Gingr, Booking, Calendar, Travel]
+    tags:
+    - Pets
+    - Boarding
+    - Gingr
+    - Booking
+    - Calendar
+    - Travel
     category: pets
 ---
 

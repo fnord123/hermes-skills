@@ -1,23 +1,27 @@
 ---
 name: daily-briefing
-description: >
-  Companion for an externally-generated daily briefing pipeline. The
-  briefing itself is produced by a cron-driven shell pipeline outside
-  Hermes (typically at ~/daily-briefing/) and posted to a Discord
-  channel by a webhook. This skill activates when the user wants to
-  manage the configuration files that drive the briefing — adjusting
-  the trusted/untrusted news sources, the watched news topics, the
-  tracked stock tickers, or the calendar-organizer name mappings.
-  Activate on phrasings like "add Reuters to my trusted list", "untrust
-  newsmax", "stop following the AI capex topic", "add my coworker's
-  email to the calendar mapping", "add NVDA to my watchlist", "stop
-  tracking GLW", "what tickers am I watching", "what news sources do
-  I trust", or "what topics do I follow".
+description: 'Manages the configuration behind the user''s daily briefing — which news sources are
+  trusted or blocked, which topics are watched, and which stock tickers are tracked. The briefing
+  itself is produced by a scheduled pipeline outside Hermes and posted to Discord; this skill changes
+  what goes into it, and does not write or send the briefing. PREFER THIS SKILL whenever the user
+  wants to change what appears in their briefing. Use `stock-investment- analysis` instead to actually
+  analyse a ticker rather than add it to the list. Activate on any of: "add <source> to my briefing",
+  "stop showing me <source>", "block <publisher>", "trust <publisher>", "follow <topic>", "track <ticker>",
+  "add <ticker> to my briefing", "remove <ticker>", "what''s in my briefing", "change my news sources",
+  "my morning briefing".'
 version: 1.0.0
 license: MIT
 metadata:
   hermes:
-    tags: [Daily, Briefing, News, Calendar, Tickers, Markets, Productivity, Config]
+    tags:
+    - Daily
+    - Briefing
+    - News
+    - Calendar
+    - Tickers
+    - Markets
+    - Productivity
+    - Config
 ---
 
 # Daily Briefing — Configuration Companion
