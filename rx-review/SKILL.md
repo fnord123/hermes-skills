@@ -58,6 +58,7 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
 | `intake` | Starts the pipeline over whatever is in the inputs folder. Run it once to begin, and once again after you apply the user's answers. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
+| `labs-confirm` | Records that the user confirmed the labs and closes the gate card. Use this instead of unblocking. |
 | `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
 | `confirm --json` | Lists the items the "Confirm N item(s) before research" card is waiting on, with what intake already knows about each. |
 
@@ -138,7 +139,16 @@ Then ask whether that matches their results (`clarify`: "yes" / "something's wro
 machine already checked every value appears verbatim in the PDF; what it cannot catch is a
 correct number attached to the wrong marker. That is what their eyes are for.
 
-If they confirm, unblock the card. If not, ask which marker and re-run that lab's card.
+If they confirm, run:
+
+    python3 ~/.hermes/rx-review/rx.py labs-confirm
+
+That records the answer and closes the card. Do NOT unblock this card instead - unblocking
+re-runs it, the card asks for confirmation again, and Hermes treats the second block as a
+loop and moves the card to triage, where it satisfies nothing and the research stage waits
+forever.
+
+If they do not confirm, ask which marker looks wrong and re-run that lab's card.
 
 ### "Confirm N item(s) before research"
 
