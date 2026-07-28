@@ -3,8 +3,7 @@
 
 CONVENTIONS.md requires each script to print exactly ONE JSON object: `{"ok": true, ...}` on
 success, `{"ok": false, "error": "..."}` with exit 1 on failure. An audit found almost no
-script doing this. `calendar` - the skill the conventions nominate as the template - emits no
-`ok` field at all and exits 2, so anything copied from it inherits the defect.
+script doing this.
 
 Why it matters more than it looks: the model has to tell success from failure by a rule it can
 rely on. When one skill signals failure with a missing key, another with exit 2, and a third

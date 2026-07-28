@@ -1,8 +1,15 @@
+# ---------------------------------------------------------------------------
+# GENERATED COPY - do not edit here.
+# Source: tools/skill_json.py
+# Edit the source, then run: python3 tools/vendor.py sync
+# CI fails if this file diverges (tools/vendor.py check).
+# ---------------------------------------------------------------------------
 #!/usr/bin/env python3
 """The house JSON contract, in one place, so every skill's scripts obey it identically.
 
 CONVENTIONS.md requires each script to print exactly ONE JSON object: `{"ok": true, ...}` on
-success, `{"ok": false, "error": "..."}` with exit 1 on failure.
+success, `{"ok": false, "error": "..."}` with exit 1 on failure. An audit found almost no
+script doing this.
 
 Why it matters more than it looks: the model has to tell success from failure by a rule it can
 rely on. When one skill signals failure with a missing key, another with exit 2, and a third

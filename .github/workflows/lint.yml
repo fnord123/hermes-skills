@@ -21,3 +21,8 @@ jobs:
         # routing (no PREFER clause / trigger list). Majors and minors are reported but do
         # not fail the build yet - see the baseline in tools/lint_skills.py's commit message.
         run: python3 tools/lint_skills.py
+      - name: Vendored copies match their source
+        # A skill must be self-contained for `hermes skills install`, so shared modules are
+        # copied into each scripts/ dir rather than symlinked. Copies drift - one did within
+        # hours of being created - so the build fails when they do.
+        run: python3 tools/vendor.py check
