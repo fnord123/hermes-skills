@@ -1,0 +1,6 @@
+# Third-party packages the browser-driven helper scripts import.
+# store_api.py and bambu-store-v2 (the two the skill actually invokes) need
+# none of these - they are stdlib-only.
+playwright
+playwright-stealth
+camoufox

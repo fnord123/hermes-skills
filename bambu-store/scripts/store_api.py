@@ -4,27 +4,49 @@
 no browser. Contracts verified against live DevTools captures (2026-06-20).
 
 Auth: header `authorization: Bearer TC <storeJWT>` + `x-bbl-account-identity: PERSONAL`.
-Token from $BBL_STORE_TOKEN or ~/.hermes/cache/bambu-store/store_token.txt
-(fallback /tmp/bbl_store_token.txt). Token is a live secret - never printed.
+Token from $BBL_STORE_TOKEN or ~/.hermes/cache/bambu-store/store_token.txt.
+The token is a live account secret - never printed.
 
-CLI:
-  store_api.py whoami            # account identity (read)
-  store_api.py cart              # show cart (read)
+Output contract (via the vendored scripts/skill_json.py): every command prints
+exactly one JSON object - {"ok": true, ...} and exit 0 on success, or
+{"ok": false, "error": "..."} and sys.exit(1) on any failure. `add` and `set`
+change the user's real cart and refuse to run without --confirm.
 """
-import os, sys, json, urllib.request, urllib.error
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from skill_json import ArgumentParser, fail, guard, ok  # noqa: E402
 
 API = "https://us-store-api.bambulab.com"
 GID = "178181257136532676"          # authenticated store-gid (from live capture)
+SEARCH_GID = "178182358546347218"   # search uses a different store-gid than cart/checkout
+TOKEN_FILE = "~/.hermes/cache/bambu-store/store_token.txt"
+
+CONFIRM_HINT = ("Re-run with --confirm ONLY after the user has explicitly approved "
+                "this exact change.")
+
+
+class StoreError(Exception):
+    """A failure talking to the store, already phrased for the user."""
+
 
 def load_token():
     t = os.environ.get("BBL_STORE_TOKEN")
-    if t:
+    if t and t.strip():
         return t.strip()
-    for p in ("~/.hermes/cache/bambu-store/store_token.txt", "/tmp/bbl_store_token.txt"):
-        p = os.path.expanduser(p)
-        if os.path.exists(p):
-            return open(p).read().strip()
-    raise SystemExit("no store token (set BBL_STORE_TOKEN or write the token file)")
+    p = os.path.expanduser(TOKEN_FILE)
+    if os.path.exists(p):
+        t = open(p).read().strip()
+        if t:
+            return t
+    raise StoreError("the store sign-in has not been set up yet; the account token "
+                     "needs to be saved before cart or order commands can run")
+
 
 def _headers():
     return {
@@ -43,182 +65,267 @@ def _headers():
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0 Safari/537.36",
     }
 
-def call(path, method="GET", body=None):
+
+def _describe_http(code, payload):
+    """Turn a store HTTP failure into one sentence in the user's domain."""
+    if code in (401, 403):
+        return ("the store sign-in has expired; it needs to be refreshed before "
+                "cart or order commands will work")
+    msg = ""
+    if isinstance(payload, dict):
+        msg = str(payload.get("message") or "").strip()
+    if msg:
+        return "the store refused the request: %s" % msg
+    return "the store returned an unexpected error (HTTP %s)" % code
+
+
+def call(path, method="GET", body=None, gid=None):
+    """One store API call. Raises StoreError on any failure - never returns a
+    silent empty result, so an expired sign-in cannot look like 'no results'."""
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(API + path, data=data, headers=_headers(), method=method)
+    headers = _headers()
+    if gid:
+        headers["x-bbl-store-gid"] = gid
+    req = urllib.request.Request(API + path, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=25) as r:
-            return r.status, json.loads(r.read().decode())
+            raw = r.read().decode()
     except urllib.error.HTTPError as e:
         try:
-            return e.code, json.loads(e.read().decode())
-        except Exception:
-            return e.code, None
-
-# ---- search / resolve (bridge a text query -> the ids cart_add needs) ----
-SEARCH_GID = "178182358546347218"  # search uses a different store-gid than cart/checkout
-
-def search(query, size=10):
-    H = dict(_headers()); H["x-bbl-store-gid"] = SEARCH_GID
-    body = {"content": query, "current": 1, "size": size}
-    import urllib.request as u
-    req = u.Request(API + "/mall-goods/product/globalSearchV2",
-                    data=json.dumps(body).encode(), headers=H, method="POST")
+            payload = json.loads(e.read().decode())
+        except Exception:                                      # noqa: BLE001
+            payload = None
+        raise StoreError(_describe_http(e.code, payload))
+    except urllib.error.URLError as e:
+        raise StoreError("could not reach the Bambu store (%s)" % (e.reason,))
+    except OSError as e:
+        raise StoreError("could not reach the Bambu store (%s)" % (e,))
     try:
-        with u.urlopen(req, timeout=20) as r:
-            d = json.loads(r.read().decode())
-    except Exception:
-        return []
-    return (((d.get("data") or {}).get("page") or {}).get("records")) or []
+        payload = json.loads(raw)
+    except ValueError:
+        raise StoreError("the store sent a response this tool could not read")
+    if isinstance(payload, dict) and payload.get("code") not in (None, 1, 0):
+        raise StoreError(_describe_http(200, payload))
+    return payload
+
+
+# ---- search / resolve (bridge a text query -> the ids an add needs) ----
+def search(query, size=10):
+    payload = call("/mall-goods/product/globalSearchV2", "POST",
+                   {"content": query, "current": 1, "size": size}, gid=SEARCH_GID)
+    return (((payload.get("data") or {}).get("page") or {}).get("records")) or []
+
 
 def resolve(query):
-    """Map a text query to what cart_add needs. Returns:
-      {name, productId, productSkuId, seoCode, inStock, fromPrice, needsColor, colors[]}
-    If highlightProductSkuId is null (generic query) -> needsColor=True + color list."""
+    """Map a text query to what an add needs. Returns None only when the store
+    genuinely has no match - any store/auth/network fault raises instead."""
     recs = search(query, 5)
     if not recs:
         return None
     p = recs[0]
     sku = p.get("highlightProductSkuId")
-    colors = [{"name": (c.get("colorName") or c.get("name")),
-               "propertyValueId": c.get("propertyValueId"),
-               "skuId": c.get("discountSkuId") or c.get("skuId"),
-               "inStock": not (c.get("outOfStockMsg") or "").strip()}
+    colors = [{"color": (c.get("colorName") or c.get("name")),
+               "in_stock": not (c.get("outOfStockMsg") or "").strip()}
               for c in (p.get("colorList") or [])]
     return {
-        "name": p.get("name"), "seoCode": p.get("seoCode"),
+        "name": p.get("name"),
         "productId": str(p.get("id")) if p.get("id") is not None else None,
         "productSkuId": str(sku) if sku is not None else None,
-        "inStock": not (p.get("outOfStockMsg") or "").strip(),
-        "fromPrice": p.get("lowerPrice"), "needsColor": sku is None,
+        "in_stock": not (p.get("outOfStockMsg") or "").strip(),
+        "from_price": p.get("lowerPrice"),
+        "needs_color": sku is None,
         "colors": colors,
     }
 
+
 # ---- reads ----
 def user_info():
-    return call("/mall-userms/user/ms/user/info")[1]
+    return call("/mall-userms/user/ms/user/info")
 
-def cart_size():
-    return ((call("/mall-order/v1/cart/size")[1] or {}).get("data") or {}).get("cartSize")
 
 def cart_query():
-    d = (call("/mall-order/v1/cart/query")[1] or {}).get("data") or {}
+    d = (call("/mall-order/v1/cart/query").get("data")) or {}
     lines = []
     for g in d.get("groups") or []:
         for it in g.get("items") or []:
             lines.append({
-                "cartItemId": it.get("cartItemId"), "productId": it.get("productId"),
-                "productSkuId": it.get("productSkuId"), "name": it.get("productName"),
-                "variant": it.get("propertySimpleDesc"), "qty": it.get("quantity"),
-                "price": it.get("price"), "discountedPrice": it.get("discountedPrice"),
-                "total": it.get("total"), "selected": it.get("selected"),
-                "removable": it.get("removable"), "outOfStock": it.get("outOfStock"),
+                "line_id": it.get("cartItemId"),
+                "name": it.get("productName"),
+                "color": it.get("propertySimpleDesc"),
+                "quantity": it.get("quantity"),
+                "price": it.get("discountedPrice"),
+                "line_total": it.get("total"),
+                "included_in_total": it.get("selected"),
+                "in_stock": not it.get("outOfStock"),
             })
-    return {"size": d.get("cartSize"), "total": d.get("totalPrice"),
-            "withoutDiscount": d.get("totalWithoutDiscount"), "lines": lines}
+    return {"item_count": d.get("cartSize"), "total": d.get("totalPrice"),
+            "total_before_discount": d.get("totalWithoutDiscount"), "lines": lines}
+
 
 # ---- writes (verified contract) ----
-def cart_add(sku_id, product_id, quantity=1, sub_items=None):
-    """Add a SKU to cart. Verified body shape from a live browser capture."""
+def cart_add(sku_id, product_id, quantity):
     body = {"addSku": [{"quantity": quantity, "productSkuId": str(sku_id),
-                        "productId": str(product_id), "subItems": sub_items or []}],
+                        "productId": str(product_id), "subItems": []}],
             "giftList": [], "pageType": 0}
     return call("/mall-order/v1/cart/add", "POST", body)
 
-def cart_modify(items):
-    """Set quantities for existing cart lines. items=[(cartItemId, quantity), ...].
-    quantity 0 removes the line. Verified body shape from a live browser capture."""
-    body = {"modifyItems": [{"cartItemId": str(c), "quantity": q} for c, q in items]}
+
+def cart_modify(line_id, quantity):
+    body = {"modifyItems": [{"cartItemId": str(line_id), "quantity": quantity}]}
     return call("/mall-order/v1/cart/modify", "POST", body)
 
+
 # ---- checkout (pre-payment; computes the reviewable total, NO charge) ----
-def checkout_token():
-    d = (call("/mall-order/v1/checkout/token/create", "POST", {})[1] or {}).get("data") or {}
-    return d.get("token")
-
-def addresses():
-    return (call("/mall-userms/user/shippingAddress/queryList?")[1] or {}).get("data") or []
-
-def default_address():
-    a = addresses()
-    return (([x for x in a if x.get("isDefault") == 1] or a) or [None])[0]
-
-def checkout_preview(location=None):
-    """Build the order for the SELECTED cart items at `location` (default address
-    if None). Returns the order summary with grandTotal/tax/shipping/orderCode.
+def checkout_preview():
+    """Build the order for the SELECTED cart items at the default address.
     'temporary' order = preview; does NOT charge. Verified contract."""
-    loc = location or default_address()
-    token = checkout_token()
+    addrs = (call("/mall-userms/user/shippingAddress/queryList?").get("data")) or []
+    loc = (([x for x in addrs if x.get("isDefault") == 1] or addrs) or [None])[0]
+    if not loc:
+        raise StoreError("the account has no shipping address saved, so a total "
+                         "cannot be calculated")
+    token = ((call("/mall-order/v1/checkout/token/create", "POST", {}).get("data")) or {}).get("token")
     body = {"token": token, "isTaxRelatedValid": True, "isOrderValid": True,
             "location": loc, "promotionCodeList": [], "usedPoints": None,
             "insuranceSelected": False}
-    st, j = call("/mall-order/v1/checkout/temporary/one/page/order/create", "POST", body)
-    return (j or {}).get("data") or {}
+    d = (call("/mall-order/v1/checkout/temporary/one/page/order/create", "POST", body).get("data")) or {}
+    if not d:
+        raise StoreError("the store did not return an order total; the cart may be empty")
+    return d
 
+
+# ---- quantity phrasing ----
+_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+             "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_COUNT_RE = re.compile(
+    r"^\s*(\d{1,3}|" + "|".join(_WORD_NUM) + r")\s*"
+    r"(?:x|rolls?|spools?|units?|pcs?|pieces?)?\s*(?:of)?\s+(?=\S)",
+    re.I)
+
+
+def split_count(text):
+    """Pull a leading count out of an item phrase: '2 rolls of PLA Basic' ->
+    (2, 'PLA Basic'). Returns (None, text) when the phrase carries no count."""
+    m = _COUNT_RE.match(text or "")
+    if not m:
+        return None, (text or "").strip()
+    tok = m.group(1).lower()
+    n = _WORD_NUM.get(tok)
+    if n is None:
+        n = int(tok)
+    return n, text[m.end():].strip()
+
+
+# ---- commands ----
+def cmd_whoami(args):
+    d = (user_info().get("data")) or {}
+    ok(account=d.get("userName"), account_type=d.get("userType"))
+
+
+def cmd_cart(args):
+    ok(**cart_query())
+
+
+def cmd_search(args):
+    results = []
+    for p in search(args.item, 8):
+        oos = (p.get("outOfStockMsg") or "").strip()
+        results.append({
+            "name": p.get("name"),
+            "from_price": p.get("lowerPrice"),
+            "in_stock": not oos,
+            "needs_color": p.get("highlightProductSkuId") is None,
+        })
+    ok(query=args.item, count=len(results), results=results)
+
+
+def cmd_add(args):
+    # Changes the user's real cart. Guard first, before any store call.
+    if not args.confirm:
+        fail("add puts items in the user's real Bambu cart. " + CONFIRM_HINT)
+    phrase_qty, item = split_count(args.item)
+    if not item:
+        fail("no product was named; say the material and colour, e.g. 'PLA Basic Jade White'")
+    if phrase_qty is not None and args.qty is not None and phrase_qty != args.qty:
+        fail("the request says %d and --qty says %d; ask the user which quantity they want"
+             % (phrase_qty, args.qty))
+    qty = args.qty if args.qty is not None else (phrase_qty if phrase_qty is not None else 1)
+    if qty < 1:
+        fail("quantity must be 1 or more; use `set --line <id> --qty 0 --confirm` to remove a line")
+    r = resolve(item)
+    if not r:
+        fail("the store has no filament matching %r" % item)
+    if r["needs_color"]:
+        colours = ", ".join(c["color"] for c in r["colors"] if c.get("color"))[:300]
+        fail("%r matched %s, which needs a specific colour. Ask the user which colour%s"
+             % (item, r["name"], (" (available: %s)" % colours) if colours else ""))
+    if not r["in_stock"]:
+        fail("%s is out of stock" % r["name"])
+    cart_add(r["productSkuId"], r["productId"], qty)
+    c = cart_query()
+    ok(added=r["name"], quantity=qty, item_count=c["item_count"], total=c["total"],
+       lines=c["lines"])
+
+
+def cmd_set(args):
+    # Changes the user's real cart; --qty 0 removes the line. Guard first.
+    if not args.confirm:
+        verb = "removes a line from" if args.qty == 0 else "changes"
+        fail("set %s the user's real Bambu cart. " % verb + CONFIRM_HINT)
+    if args.qty < 0:
+        fail("quantity must be 0 or more; 0 removes the line")
+    before = {l["line_id"]: l for l in cart_query()["lines"]}
+    if str(args.line) not in {str(k) for k in before}:
+        fail("there is no cart line %s; run `cart` to list the current lines" % args.line)
+    cart_modify(args.line, args.qty)
+    c = cart_query()
+    ok(action=("removed" if args.qty == 0 else "quantity_changed"),
+       line_id=str(args.line), quantity=args.qty,
+       item_count=c["item_count"], total=c["total"], lines=c["lines"])
+
+
+def cmd_checkout(args):
+    d = checkout_preview()
+    ok(subtotal=d.get("subTotal"), discount=d.get("discountPrice"),
+       shipping=d.get("shipping"), tax=d.get("taxDetail"),
+       grand_total=d.get("grandTotal"), amount_due=d.get("needPay"),
+       charged=False,
+       note="This is a preview only. Nothing has been charged. The user completes "
+            "payment at us.store.bambulab.com/cart.")
+
+
+@guard
 def main():
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "cart"
-    if cmd == "whoami":
-        d = (user_info() or {}).get("data") or {}
-        print(json.dumps({"userType": d.get("userType"), "userName": d.get("userName"),
-                          "userId": d.get("userId")}, indent=2))
-    elif cmd == "cart":
-        c = cart_query()
-        print("cart: %s items, $%s (pre-discount $%s)" % (c["size"], c["total"], c["withoutDiscount"]))
-        for l in c["lines"]:
-            print("  [%s] %s %s  x%s  $%s%s" % (
-                l["cartItemId"], l["name"], (l["variant"] or ""), l["qty"], l["discountedPrice"],
-                "" if l["selected"] else "  (unselected)"))
-    elif cmd == "search":
-        q = " ".join(sys.argv[2:])
-        for p in search(q, 8):
-            sku = p.get("highlightProductSkuId")
-            lower = p.get("lowerPrice"); oos = (p.get("outOfStockMsg") or "").strip()
-            print("  %s — from $%s — %s%s" % (
-                p.get("name"), lower, ("in stock" if not oos else "OUT: " + oos),
-                ("  sku=%s pid=%s" % (sku, p.get("id")) if sku else "  (specify a color)")))
-    elif cmd == "add":
-        # add <query...> [qty]  — last arg may be an integer quantity
-        args = sys.argv[2:]
-        qty = 1
-        if len(args) >= 2 and args[-1].isdigit():
-            qty = int(args[-1]); args = args[:-1]
-        q = " ".join(args)
-        r = resolve(q)
-        if not r:
-            print("no match for %r" % q); return
-        if r["needsColor"]:
-            print("'%s' matched %s but needs a specific color — include the color in the request "
-                  "(e.g. 'add PLA Matte Ash Grey')." % (q, r["name"])); return
-        if not r["inStock"]:
-            print("%s is out of stock." % r["name"]); return
-        st, j = cart_add(r["productSkuId"], r["productId"], qty)
-        if (j or {}).get("code") != 1:
-            print("add failed: %s" % (j or {}).get("message")); return
-        c = cart_query()
-        print("added %dx %s. cart now %s items, $%s." % (qty, r["name"], c["size"], c["total"]))
-    elif cmd == "set":
-        # set <cartItemId> <qty>   (qty 0 removes)
-        cid, q = sys.argv[2], int(sys.argv[3])
-        st, j = cart_modify([(cid, q)])
-        print("modify -> code %s" % (j or {}).get("code"))
-    elif cmd == "checkout":
-        d = checkout_preview()
-        if not d:
-            print("checkout preview failed"); return
-        def g(k):
-            return d.get(k)
-        print("ORDER PREVIEW (selected cart items, no charge):")
-        print("  subtotal     $%s" % g("subTotal"))
-        print("  discount    -$%s" % g("discountPrice"))
-        print("  shipping     $%s" % g("shipping"))
-        td = g("taxDetail")
-        print("  tax          %s" % (td if not isinstance(td, (dict, list)) else json.dumps(td)[:80]))
-        print("  GRAND TOTAL  $%s   (needPay=%s)" % (g("grandTotal"), g("needPay")))
-        sm = g("selectableShippingMethods")
-        if sm:
-            print("  shipping methods: %d available" % (len(sm) if isinstance(sm, list) else 1))
-    else:
-        print("usage: store_api.py [whoami|cart|checkout]")
+    ap = ArgumentParser(prog="store_api.py", description="Bambu US store account, cart and order total.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("whoami").set_defaults(fn=cmd_whoami)
+    sub.add_parser("cart").set_defaults(fn=cmd_cart)
+
+    p = sub.add_parser("search")
+    p.add_argument("--item", required=True, help="material and colour, e.g. 'ASA white'")
+    p.set_defaults(fn=cmd_search)
+
+    p = sub.add_parser("add")
+    p.add_argument("--item", required=True, help="material and colour, e.g. 'PLA Matte Ash Grey'")
+    p.add_argument("--qty", type=int, help="how many rolls (default 1)")
+    p.add_argument("--confirm", action="store_true", help="required; the cart is the user's real cart")
+    p.set_defaults(fn=cmd_add)
+
+    p = sub.add_parser("set")
+    p.add_argument("--line", required=True, help="line_id from `cart`")
+    p.add_argument("--qty", type=int, required=True, help="new quantity; 0 removes the line")
+    p.add_argument("--confirm", action="store_true", help="required; the cart is the user's real cart")
+    p.set_defaults(fn=cmd_set)
+
+    sub.add_parser("checkout").set_defaults(fn=cmd_checkout)
+
+    args = ap.parse_args()
+    try:
+        args.fn(args)
+    except StoreError as e:
+        fail(e)
+
 
 if __name__ == "__main__":
     main()
