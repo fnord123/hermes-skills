@@ -61,12 +61,37 @@ frequency rules dedupes to one. So `pallo-book-trip.py` builds the slate as:
 faster, and the per-day loop is the slow/fragile part on long stays.
 
 ### Safety patterns (carried from `square-appointments`)
+- **`--confirm` footgun guard.** Every script that changes a reservation or
+  messages a third party — `pallo-book-trip.py`, `pallo-cancel.py`,
+  `pallo-modify-stay.py`, `gina-notify.py`, `pallo-calendar-invite.py` — refuses
+  with `{"ok": false, "error": …, "status": "confirm_required"}` and exit 1
+  unless `--confirm` is passed. The refusal happens before any browser launch,
+  HTTP call, or child script, so a hallucinated call changes nothing.
+  `--dry-run` still works without `--confirm` (that's the preview the user is
+  shown *before* approving). `pallo-trip-prep.py --commit` and
+  `pallo-modify-stay.py` forward `--confirm` to the scripts they drive, since
+  their own guard already required the approval.
 - **`--confirm-drop-date` / `--confirm-pickup-date` invariants.** The booking
   script refuses (`confirm_mismatch`) unless these match the plan's dates — the
-  agent can't book the wrong window.
-- **Overlap guard.** Before booking it reads Pallo's existing stays and refuses
-  (`conflict`) if any non-cancelled reservation overlaps the requested dates.
-  `--allow-overlap` bypasses it.
+  agent can't book the wrong window. They must come *from the caller*:
+  `pallo-modify-stay.py` takes its own `--confirm-*` pair, checks it against
+  `--new-*`, and forwards it verbatim. (It used to synthesise the pair from its
+  own `--new-*` arguments, which made the booking script's guard structurally
+  unfireable — a typo in `--new-drop-date` would have been "confirmed" by itself.)
+- **Overlap guard, fail-closed.** Before booking it reads Pallo's existing stays
+  and refuses (`conflict`) if any non-cancelled reservation overlaps the
+  requested dates. A booking card whose dates don't parse is counted as
+  *unreadable* and also refuses (naming the count) rather than being skipped —
+  skipping turned "couldn't read this reservation" into "no conflicting
+  reservation" and would double-book. `--allow-overlap` bypasses the whole check.
+- **Year-aware stay identity.** The portal omits the year from its date labels,
+  so `pallo-cancel.py` locates a stay by its *weekday-bearing* fragment
+  ("Fri, Dec. 11th") and cross-checks the opened detail page for a conflicting
+  weekday and for a printed year. Month/day alone repeats every year and could
+  cancel the wrong stay while the confirm check still passed.
+- **Dialog-scoped confirmation.** The cancel-confirmation click is scoped to the
+  dialog container and only fires once the dialog is actually present; if no
+  dialog appears, nothing else is clicked and the script returns `uncertain`.
 - **`--dry-run`.** Fills the entire wizard and stops at the Review screen,
   returning the estimated total and a screenshot — so the agent can show the
   price before anything is committed.
@@ -122,19 +147,21 @@ submitting.
 | `pallo-stays.py` | List stays. `--include-past` / `--include-canceled` / `--all`. `stay_id` = `"<start>/<end>"`. |
 | `pallo-trip-plan.py` | Build window + slate + proposed Gina messages. `--trip-name` or `--trip-start/--trip-end`. Emits `plan_json`. |
 | `pallo-trip-status.py` | Readiness. Single-trip with an identifier; all-trips sweep with none. |
-| `pallo-book-trip.py` | **Mutating.** Drives the booking wizard. `--plan` or `--drop-date/--pickup-date`; `--confirm-*`; `--drop-time`/`--pickup-time` (default 08:00 AM / 09:00 AM); `--dry-run`; `--simple-slate`; `--allow-overlap`; `--no-gina`. |
-| `pallo-cancel.py` | **Mutating.** Cancel a stay by `--stay-id` + `--confirm-*`. `--dry-run` verifies without cancelling. |
-| `pallo-modify-stay.py` | **Mutating.** `--stay-id` (old) + `--new-drop-date`/`--new-pickup-date` (+ `--simple-slate`, times). Books new then cancels old. `--dry-run` previews both. |
+| `pallo-book-trip.py` | **Mutating; needs `--confirm`.** Drives the booking wizard. `--plan` or `--drop-date/--pickup-date`; `--confirm-drop-date`/`--confirm-pickup-date`; `--drop-time`/`--pickup-time` (default 08:00 AM / 09:00 AM); `--dry-run`; `--simple-slate`; `--allow-overlap`; `--no-gina`; `--no-calendar`. |
+| `pallo-cancel.py` | **Mutating; needs `--confirm`.** Cancel a stay by `--stay-id` + `--confirm-drop-date`/`--confirm-pickup-date`. `--dry-run` verifies without cancelling. |
+| `pallo-modify-stay.py` | **Mutating; needs `--confirm`.** `--stay-id` (old) + `--new-drop-date`/`--new-pickup-date` + a matching `--confirm-drop-date`/`--confirm-pickup-date` pair (+ `--simple-slate`, times). Books new then cancels old. `--dry-run` previews both. |
 | `pallo-trip-prep.py` | **Mutating with `--commit`.** `--trip-name` (or `--trip-start/--trip-end`); no `--commit` = preview; `--commit` + `--confirm-*` books + notifies Gina. |
 | `gina-where.py` | Residency on a date (`user_home`/`gina_mom`/`traveling_with_user`/`unknown`). |
-| `gina-notify.py` | **Mutating.** Posts to the shared Discord channel. `--dry-run` formats without sending. |
+| `gina-notify.py` | **Mutating; needs `--confirm`.** Posts to the shared Discord channel. `--dry-run` formats without sending. |
+| `pallo-calendar-invite.py` | **Mutating; needs `--confirm`.** Emails the drop-off/pickup `.ics` invites via AgentMail. `--dry-run` prints the `.ics`. |
 | `gina-pending.py` | Read/clear the coordination ledger. Call it first when a Gina reply arrives. |
 | `triplib.py` / `coord_lib.py` | Shared helpers (trip/residency resolution; Discord config + ledger). Imported, not run. |
 
 ### Mutating-script statuses
-- `pallo-book-trip.py`: `dry_run_ok` · `booked` · `booked_with_notification_warnings` · `conflict` · `confirm_mismatch` · `session_expired` · `not_logged_in` · `error`.
-- `pallo-cancel.py`: `dry_run_ok` · `cancelled` · `already_canceled` · `not_found` · `confirm_mismatch` · `not_cancellable` · `uncertain` · `session_expired` · `error`.
-- `pallo-modify-stay.py`: `dry_run_ok` · `modified` · `modified_old_not_cancelled` · `book_failed` · `error`.
+- `pallo-book-trip.py`: `dry_run_ok` · `booked` · `booked_with_notification_warnings` · `conflict` · `confirm_required` · `confirm_mismatch` · `session_expired` · `not_logged_in` · `error`.
+- `pallo-cancel.py`: `dry_run_ok` · `cancelled` · `already_canceled` · `not_found` · `confirm_required` · `confirm_mismatch` · `not_cancellable` · `uncertain` · `session_expired` · `error`.
+- `pallo-modify-stay.py`: `dry_run_ok` · `modified` · `modified_old_not_cancelled` · `book_failed` · `confirm_required` · `confirm_mismatch` · `error`.
+- `gina-notify.py` / `pallo-calendar-invite.py`: `confirm_required` on a real send without `--confirm`.
 - `pallo-trip-prep.py`: `all_set` · `planned` · `booked` · `ambiguous_trip` · `no_trip_found` · `confirm_mismatch` · plus any `pallo-book-trip.py` status under `book`.
 
 ## Operational notes & caveats
@@ -175,6 +202,29 @@ submitting.
 - **Session lifetime.** The saved `gingr_ci_session` cookie is long-lived; if the
   server invalidates it, scripts report `session_expired` and `gingr-login.py`
   re-captures it from the stored credentials.
+- **Session expiry is a specific signal, not a catch-all.** `gingr-login.py`
+  should be run *only* when a script's JSON explicitly returns `session_expired`
+  or `not_logged_in`. A booking that timed out, errored, or "felt stuck" is a
+  slow booking (re-run with `timeout=600`), not a dead session; running login
+  needlessly wastes a minute and can trip the portal's rate limiting. This is why
+  SKILL.md's error table binds `gingr-login.py` to exactly those two statuses.
+- **`login_failed` may not be recoverable from here.** The Gingr portal is a
+  React-Native-Web app whose login form resists headless automation (the LOGIN
+  press fires no auth request), so an automated refresh can simply be impossible
+  in this environment — retrying in a loop never helps. The existing saved
+  session usually keeps working for reads and bookings until it truly expires, so
+  a `login_failed` does not necessarily block the task at hand; the session
+  likely needs refreshing another way, or the credentials re-checked.
+- **Why the agent is told the scripts are the only path.** Browser tools, web
+  searches for "Laurel Acres"/"Gingr", and hand-navigated URLs do not reach this
+  portal (it needs the saved `storage_state`), and the local 27B model cannot
+  process screenshots, so any vision-based path fails outright. SKILL.md
+  therefore frames the scripts positively as *the* route rather than enumerating
+  those dead ends.
+- **Credentials the scripts own.** `~/.config/pallo-logistics/secrets.env`
+  (portal password, Discord webhook) and `gingr-storage-state.json` (session
+  cookies) are read by the scripts, never by the agent; the coordination ledger
+  is reached through `gina-pending.py`. Keep them `600` and outside the repo.
 - **ToS gray zone.** Personal-scale automation of one's own portal interactions.
   Stay personal-scale.
 
@@ -198,6 +248,7 @@ pallo-logistics/
     ├── pallo-cancel.py            # CUJ-4 cancel (mutating)
     ├── pallo-modify-stay.py       # CUJ-4 modify = book new + cancel old (mutating)
     ├── pallo-trip-prep.py         # CUJ-6 composite (mutating with --commit)
+    ├── pallo-calendar-invite.py   # drop-off/pickup calendar invites (mutating)
     ├── gina-where.py              # CUJ-5 residency
     ├── gina-notify.py             # Gina coordination send (mutating)
     ├── gina-pending.py            # coordination ledger

@@ -122,7 +122,11 @@ def _parse_one_date(token: str, anchor: date) -> date | None:
 
 def parse_card(text: str, anchor: date) -> dict | None:
     """Turn a booking-card blob into a structured stay dict, or None if it
-    doesn't parse. `anchor` is today's date, used for year inference."""
+    doesn't parse. `anchor` is today's date, used for year inference.
+
+    None means UNKNOWN, not "no such stay". A caller making a safety decision
+    (e.g. "is there a conflicting reservation?") must treat None as an
+    unreadable reservation and refuse — see parse_cards()."""
     parts = [p.strip() for p in text.split("|")]
     parts = [p for p in parts if p]
     status = None
@@ -152,6 +156,8 @@ def parse_card(text: str, anchor: date) -> dict | None:
                     pass
 
     if not (start and end):
+        # Dates unreadable: we know a reservation card is there, we just can't
+        # say WHEN it is. Never report this as "no reservation".
         return None
 
     nights = (end - start).days
@@ -165,3 +171,21 @@ def parse_card(text: str, anchor: date) -> dict | None:
         "nights": nights,
         "status": status,
     }
+
+
+def parse_cards(cards: list[str], anchor: date) -> tuple[list[dict], list[str]]:
+    """Parse every booking-card blob. Returns (stays, unreadable) where
+    `unreadable` holds the raw text of each card that did NOT yield a stay.
+
+    Split out so a safety check can tell "there is no conflicting reservation"
+    apart from "I could not read some reservations". Callers deciding whether it
+    is safe to book MUST refuse while `unreadable` is non-empty."""
+    stays: list[dict] = []
+    unreadable: list[str] = []
+    for text in cards:
+        parsed = parse_card(text, anchor)
+        if parsed is None:
+            unreadable.append(text)
+        else:
+            stays.append(parsed)
+    return stays, unreadable

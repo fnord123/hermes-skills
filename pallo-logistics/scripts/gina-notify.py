@@ -11,8 +11,11 @@ stay is booked. The agent only invokes it directly as an escape hatch for a
 one-off ping.
 
 Usage:
+  # preview the message:
   python3 gina-notify.py --topic "Pallo dropoff" --body "Need the X Sun afternoon" \\
-      [--trip-name Paris] [--handoff-date 2026-07-21] [--dry-run]
+      [--trip-name Paris] [--handoff-date 2026-07-21] --dry-run
+  # actually post it, after the user approves this exact message:
+  python3 gina-notify.py --topic "Pallo dropoff" --body "Need the X Sun afternoon" --confirm
 
 Output: JSON. --dry-run returns the formatted message + would-be ledger entry
 without sending. A real send returns {status: "sent", discord_message_id,
@@ -85,7 +88,19 @@ def main() -> int:
     ap.add_argument("--handoff-date", default=None, help="ISO date of the handoff this is about.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Format the message and ledger entry without sending.")
+    ap.add_argument("--confirm", action="store_true",
+                    help="Required to actually post. Pass it ONLY after the user has "
+                         "explicitly approved sending this exact message.")
     args = ap.parse_args()
+
+    # Footgun guard — refuse BEFORE any side effect (nothing is posted or logged).
+    if not args.confirm and not args.dry_run:
+        msg = ("posting sends a message to Gina in the shared channel. Re-run with "
+               "--confirm ONLY after the user has explicitly approved sending this "
+               "exact message, or use --dry-run to preview it.")
+        print(json.dumps({"ok": False, "status": "confirm_required",
+                          "error": msg, "reason": msg}, indent=2))
+        return 1
 
     cfg = coord_lib.discord_config()
     if "error" in cfg:

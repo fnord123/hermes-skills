@@ -19,15 +19,21 @@ pickup day = 1 Nature Walk. (Two Play Yards get distinct times so Gingr counts
 them as two sessions, per the facility's own instructions.)
 
 Usage:
-  # From a CUJ-1 plan blob (preferred):
+  # Preview (no --confirm needed):
   python3 pallo-book-trip.py --plan '<plan_json>' \\
-      --confirm-drop-date 2026-07-10 --confirm-pickup-date 2026-07-31 [--dry-run]
+      --confirm-drop-date 2026-07-10 --confirm-pickup-date 2026-07-31 --dry-run
+
+  # Real booking, after the user approves these exact dates in this turn:
+  python3 pallo-book-trip.py --plan '<plan_json>' \\
+      --confirm-drop-date 2026-07-10 --confirm-pickup-date 2026-07-31 --confirm
 
   # Or with explicit dates (no plan):
   python3 pallo-book-trip.py --drop-date 2026-07-10 --pickup-date 2026-07-31 \\
       --confirm-drop-date 2026-07-10 --confirm-pickup-date 2026-07-31 --dry-run
 
 Options:
+  --confirm                  REQUIRED for a real booking. Without it (and without
+                             --dry-run) the script refuses before touching the portal.
   --drop-time   "3pm"        drop-off clock time. Accepts loose forms ('3pm',
                              '3:00 PM', '15:00'). Overrides the plan's drop_time;
                              falls back to the plan's, then 08:00 AM.
@@ -38,10 +44,10 @@ Options:
   --no-gina                  do not send the plan's Gina-coordination messages
 
 Output: JSON with a `status` field:
-  dry_run_ok | booked | booked_with_notification_warnings |
-  conflict | confirm_mismatch | session_expired | not_logged_in | error
+  dry_run_ok | booked | booked_with_notification_warnings | conflict |
+  confirm_required | confirm_mismatch | session_expired | not_logged_in | error
 This is a REAL, paid reservation. The agent must echo dates + slate and get an
-explicit in-turn "yes" before calling this without --dry-run.
+explicit in-turn "yes" before calling this with --confirm.
 """
 from __future__ import annotations
 
@@ -728,8 +734,13 @@ def _review_summary(page) -> dict:
 
 # ── overlap guard ────────────────────────────────────────────────────────────
 
-def _overlap_check(drop_date: date, pick_date: date, anchor: date) -> list:
-    """Return active (non-canceled) stays that overlap [drop_date, pick_date]."""
+def _overlap_check(drop_date: date, pick_date: date, anchor: date) -> tuple[list, int]:
+    """Return (overlapping active stays, count of unreadable reservation cards).
+
+    A card whose dates don't parse is an UNKNOWN reservation, not an absent one,
+    so it is counted and reported instead of skipped — skipping it would turn
+    "couldn't read this reservation" into "no conflicting reservation" and
+    double-book Pallo."""
     overlaps = []
     with sync_playwright() as p:
         browser, ctx = gingr_lib.new_logged_in_context(p)
@@ -738,15 +749,15 @@ def _overlap_check(drop_date: date, pick_date: date, anchor: date) -> list:
             cards = gingr_lib.fetch_booking_cards(page)
         finally:
             browser.close()
-    for text in cards:
-        s = gingr_lib.parse_card(text, anchor)
-        if not s or s.get("status") == "Canceled":
+    stays, unreadable = gingr_lib.parse_cards(cards, anchor)
+    for s in stays:
+        if s.get("status") == "Canceled":
             continue
         a = date.fromisoformat(s["start_date"])
         b = date.fromisoformat(s["end_date"])
         if a <= pick_date and b >= drop_date:
             overlaps.append(s)
-    return overlaps
+    return overlaps, len(unreadable)
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -756,7 +767,9 @@ def _send_gina_messages(messages: list, trip_name: str | None) -> tuple[list, li
     for msg in messages:
         topic = msg.get("topic") or f"Pallo {msg.get('handoff', 'handoff')}"
         body = msg.get("body", "")
-        cmd = ["python3", str(SCRIPT_DIR / "gina-notify.py"),
+        # --confirm: these messages are part of the booking the user already
+        # approved, and only run after a real (already --confirm'd) submit.
+        cmd = ["python3", str(SCRIPT_DIR / "gina-notify.py"), "--confirm",
                "--topic", topic, "--body", body]
         if trip_name:
             cmd += ["--trip-name", trip_name]
@@ -787,6 +800,9 @@ def main() -> int:
                     help="Pickup clock time, e.g. '11am' or '11:00 AM'. Overrides the "
                          "plan's time; defaults to the plan's, then 09:00 AM.")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--confirm", action="store_true",
+                    help="Required to place the real reservation. Pass it ONLY after the "
+                         "user has explicitly approved these exact dates in this turn.")
     ap.add_argument("--allow-overlap", action="store_true")
     ap.add_argument("--no-gina", action="store_true")
     ap.add_argument("--no-calendar", action="store_true",
@@ -795,6 +811,16 @@ def main() -> int:
                     help="One Play Yard + one Nature Walk per day (skip the per-day "
                          "second Play Yard). Faster; use for long stays.")
     args = ap.parse_args()
+
+    # Footgun guard — refuse BEFORE any side effect (no browser, no portal write).
+    if not args.confirm and not args.dry_run:
+        return out({"ok": False, "status": "confirm_required",
+                    "error": "booking places a real, paid reservation. Re-run with --confirm "
+                             "ONLY after the user has explicitly approved these exact dates, "
+                             "or use --dry-run to preview.",
+                    "reason": "booking places a real, paid reservation. Re-run with --confirm "
+                              "ONLY after the user has explicitly approved these exact dates, "
+                              "or use --dry-run to preview."}, 1)
 
     if not gingr_lib.state_exists():
         return out({"status": "not_logged_in",
@@ -823,21 +849,37 @@ def main() -> int:
                     "plan_pick_up": pick_date.isoformat(),
                     "confirm_drop_date": args.confirm_drop_date,
                     "confirm_pickup_date": args.confirm_pickup_date}, 1)
+    anchor = datetime.now().astimezone().date()
+    # Date sanity — kept identical to pallo-trip-plan.py so a plan that validates
+    # there cannot be rejected here (or vice versa).
     if pick_date <= drop_date:
         return out({"status": "error", "reason": "pickup must be after drop-off"}, 2)
+    if drop_date < anchor:
+        return out({"status": "error",
+                    "reason": f"drop-off {drop_date.isoformat()} is in the past "
+                              f"(today is {anchor.isoformat()})"}, 2)
 
-    anchor = datetime.now().astimezone().date()
     counts = expected_activity_counts(drop_date, pick_date, args.simple_slate)
 
     # idempotency guard
     if not args.allow_overlap:
         try:
-            overlaps = _overlap_check(drop_date, pick_date, anchor)
+            overlaps, unreadable_count = _overlap_check(drop_date, pick_date, anchor)
         except gingr_lib.SessionExpired:
             return out({"status": "session_expired",
                         "reason": "Saved Gingr session expired. Re-run gingr-login.py."}, 1)
         except Exception as e:  # noqa: BLE001
             return out({"status": "error", "reason": f"overlap check failed: {type(e).__name__}: {e}"}, 1)
+        if unreadable_count:
+            # Fail CLOSED: an unreadable reservation could be the conflicting one.
+            msg = (f"could not read {unreadable_count} existing reservation(s) on the "
+                   "bookings list, so the overlap check is incomplete; refusing to book "
+                   "rather than risk a double booking.")
+            return out({"ok": False, "status": "error",
+                        "unreadable_reservation_count": unreadable_count,
+                        "error": msg, "reason": msg,
+                        "hint": "Check Pallo's stays with pallo-stays.py and ask the user how to "
+                                "proceed."}, 1)
         if overlaps:
             return out({"status": "conflict",
                         "reason": "Pallo already has a non-canceled reservation overlapping these dates.",
@@ -1034,7 +1076,7 @@ def main() -> int:
     # Google-Calendar handoff invites (after a real booking only). Non-fatal:
     # a send failure never undoes the booking, just surfaces a warning.
     if not args.no_calendar and base.get("status", "").startswith("booked"):
-        cmd = ["python3", str(SCRIPT_DIR / "pallo-calendar-invite.py"),
+        cmd = ["python3", str(SCRIPT_DIR / "pallo-calendar-invite.py"), "--confirm",
                "--events", "pickup,dropoff",
                "--drop-date", drop_date.isoformat(), "--drop-time", drop_time,
                "--pickup-date", pick_date.isoformat(), "--pickup-time", pickup_time]

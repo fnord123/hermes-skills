@@ -111,9 +111,11 @@ def main() -> int:
         except ValueError:
             print(json.dumps({"status": "dates_invalid"}, indent=2))
             return 2
-        if explicit_pickup < explicit_drop:
+        # Same rule as pallo-book-trip.py: a stay is at least one night, so
+        # pickup == drop is rejected here rather than at booking time.
+        if explicit_pickup <= explicit_drop:
             print(json.dumps({"status": "dates_invalid",
-                              "reason": "pickup-date before drop-date"}, indent=2))
+                              "reason": "pickup must be after drop-off"}, indent=2))
             return 2
 
     trip_name = args.trip_name
@@ -154,6 +156,24 @@ def main() -> int:
     plan = _build_plan(trip_name, ts, te,
                        drop_off=explicit_drop, pick_up=explicit_pickup,
                        drop_time=drop_time, pickup_time=pickup_time)
+
+    # Validate the window the booking would actually use — the same two rules
+    # pallo-book-trip.py enforces, so a plan that validates here always books.
+    plan_drop = date.fromisoformat(plan["drop_off"])
+    plan_pick = date.fromisoformat(plan["pick_up"])
+    today = date.today()
+    if plan_pick <= plan_drop:
+        print(json.dumps({"status": "dates_invalid",
+                          "reason": "pickup must be after drop-off",
+                          "drop_off": plan["drop_off"], "pick_up": plan["pick_up"]}, indent=2))
+        return 2
+    if plan_drop < today:
+        print(json.dumps({"status": "dates_invalid",
+                          "reason": f"drop-off {plan['drop_off']} is in the past "
+                                    f"(today is {today.isoformat()})",
+                          "drop_off": plan["drop_off"], "pick_up": plan["pick_up"]}, indent=2))
+        return 2
+
     plan["status"] = "ok"
     plan["plan_json"] = json.dumps({k: plan[k] for k in (
         "trip_name", "trip_start", "trip_end", "drop_off", "pick_up",

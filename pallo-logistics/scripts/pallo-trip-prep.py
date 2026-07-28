@@ -112,7 +112,9 @@ def main() -> int:
                     "confirm_drop_date": args.confirm_drop_date,
                     "confirm_pickup_date": args.confirm_pickup_date}, 1)
 
-    book_args = ["--plan", plan["plan_json"],
+    # --confirm is forwarded because --commit + matching --confirm-* dates already
+    # carry the user's explicit approval of this exact booking.
+    book_args = ["--plan", plan["plan_json"], "--confirm",
                  "--confirm-drop-date", drop, "--confirm-pickup-date", pick]
     if args.simple_slate:
         book_args.append("--simple-slate")

@@ -22,6 +22,9 @@ Usage:
   # preview the .ics without sending:
   python3 pallo-calendar-invite.py --plan '<plan_json>' --dry-run
 
+Sending emails the invite to you AND Gina, so a real send requires --confirm;
+without it (and without --dry-run) the script refuses before sending anything.
+
 Config (in ~/.config/pallo-logistics/secrets.env; the agent must NEVER read it):
   USER_EMAIL=you@example.com          # invitee 1
   GINA_EMAIL=gina@example.com         # invitee 2 (omit / use --to to skip)
@@ -243,7 +246,18 @@ def main() -> int:
     ap.add_argument("--sequence", type=int, default=0,
                     help="iCal SEQUENCE; bump when re-sending a changed time.")
     ap.add_argument("--dry-run", action="store_true", help="print the .ics; send nothing.")
+    ap.add_argument("--confirm", action="store_true",
+                    help="Required to actually email the invites. Pass it ONLY after the "
+                         "user has explicitly approved sending them.")
     args = ap.parse_args()
+
+    # Footgun guard — refuse BEFORE any side effect (no mail, no API call).
+    if not args.confirm and not args.dry_run:
+        msg = ("sending emails calendar invites to you and Gina. Re-run with --confirm "
+               "ONLY after the user has explicitly approved sending them, or use "
+               "--dry-run to preview the invite.")
+        return out({"ok": False, "status": "confirm_required",
+                    "error": msg, "reason": msg}, 1)
 
     env = _load_env(SECRETS)
     if args.to:
