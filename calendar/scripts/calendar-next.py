@@ -18,8 +18,9 @@ timezone (SCHEDULE_TZ or BRIEFING_TZ). All-day events are considered to
 start at 00:00 local time of their date — so they count as "upcoming" until
 the day ends, and "in progress" during their day.
 
-Output: JSON `{now, within_hours, timezone, events: [Event, ...]}` with up
-to --limit events, sorted by start time.
+Output: JSON `{ok: true, now, within_hours, timezone, events: [Event, ...]}`
+with up to --limit events, sorted by start time; `{ok: false, error}` with
+exit 1 on failure.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import ical_lib  # noqa: E402
+from skill_json import ok, fail, guard  # noqa: E402
 
 
 def _event_start_dt(event: ical_lib.Event, tz):
@@ -46,7 +48,8 @@ def _event_start_dt(event: ical_lib.Event, tz):
     return dt
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--within", type=float, default=48.0,
@@ -58,8 +61,7 @@ def main() -> int:
     env = ical_lib.load_env(SCRIPT_DIR / ".env")
     feeds = ical_lib.resolve_feeds(env)
     if not feeds:
-        ical_lib.emit_json({"error": "No calendar feeds configured (set GCAL_ICAL_KEY in .env)."})
-        return 2
+        fail("No calendar feeds configured (set GCAL_ICAL_KEY in .env).")
 
     tz = ical_lib.resolve_tz(env)
     now = datetime.now(tz=tz)
@@ -86,17 +88,16 @@ def main() -> int:
     upcoming.sort(key=lambda e: e["start"])
     upcoming = upcoming[: max(0, args.limit)]
 
-    ical_lib.emit_json({
-        "now": now.isoformat(),
-        "within_hours": args.within,
-        "limit": args.limit,
-        "timezone": str(tz),
-        "count": len(upcoming),
-        "events": upcoming,
-        "feed_errors": feed_errors,
-    })
-    return 0
+    ok(
+        now=now.isoformat(),
+        within_hours=args.within,
+        limit=args.limit,
+        timezone=str(tz),
+        count=len(upcoming),
+        events=upcoming,
+        feed_errors=feed_errors,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

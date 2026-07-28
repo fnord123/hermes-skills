@@ -224,7 +224,10 @@ def cmd_add(args):
                            f"kept that value and merged the quantity. You said "
                            f"${float(args.value):.2f} — the row's value was NOT changed.")
         else:  # new row, with the =B*C product formula
-            row = 2 + len(items)
+            # Append after the LAST occupied row, not after the count of
+            # occupied rows: one blanked-out entry would otherwise make the
+            # next add land on top of a row that still holds an item.
+            row = max((r for r, *_ in items), default=1) + 1
             svc.spreadsheets().values().update(
                 spreadsheetId=sid, range=f"{_q(title)}!A{row}:D{row}",
                 valueInputOption="USER_ENTERED",

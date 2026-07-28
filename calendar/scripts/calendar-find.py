@@ -18,8 +18,9 @@ small lookback is useful because the agent often asks about events that
 happened recently ("when did I meet with so-and-so?") and a too-tight
 window would miss them.
 
-Output: JSON `{query, days_back, days_ahead, timezone, matches: [Event, ...]}`,
-sorted by start time ascending (so past matches come first, then upcoming).
+Output: JSON `{ok: true, query, days_back, days_ahead, timezone, matches:
+[Event, ...]}`, sorted by start time ascending (so past matches come first,
+then upcoming); `{ok: false, error}` with exit 1 on failure.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import ical_lib  # noqa: E402
+from skill_json import ok, fail, guard  # noqa: E402
 
 
 def _matches(event: ical_lib.Event, q: str) -> bool:
@@ -43,7 +45,8 @@ def _matches(event: ical_lib.Event, q: str) -> bool:
     return False
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--query", required=True, help="Search term (case-insensitive substring).")
@@ -54,8 +57,7 @@ def main() -> int:
     env = ical_lib.load_env(SCRIPT_DIR / ".env")
     feeds = ical_lib.resolve_feeds(env)
     if not feeds:
-        ical_lib.emit_json({"error": "No calendar feeds configured (set GCAL_ICAL_KEY in .env)."})
-        return 2
+        fail("No calendar feeds configured (set GCAL_ICAL_KEY in .env).")
 
     tz = ical_lib.resolve_tz(env)
     today = datetime.now(tz=tz).date()
@@ -69,19 +71,18 @@ def main() -> int:
 
     matches = [e.to_dict() for e in events if _matches(e, args.query)]
 
-    ical_lib.emit_json({
-        "query": args.query,
-        "days_back": args.days_back,
-        "days_ahead": args.days_ahead,
-        "timezone": str(tz),
-        "search_start": start.isoformat(),
-        "search_end": end.isoformat(),
-        "count": len(matches),
-        "matches": matches,
-        "feed_errors": feed_errors,
-    })
-    return 0
+    ok(
+        query=args.query,
+        days_back=args.days_back,
+        days_ahead=args.days_ahead,
+        timezone=str(tz),
+        search_start=start.isoformat(),
+        search_end=end.isoformat(),
+        count=len(matches),
+        matches=matches,
+        feed_errors=feed_errors,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

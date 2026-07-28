@@ -1,0 +1,4 @@
+# Third-party packages the donations script imports.
+# Install with: python3 -m pip install -r requirements.txt
+google-api-python-client
+google-auth

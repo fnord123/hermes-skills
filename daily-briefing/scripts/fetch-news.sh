@@ -75,7 +75,7 @@ while IFS= read -r TOPIC; do
 
   ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$TOPIC")
 
-  RESPONSE=$(curl -sf \
+  RESPONSE=$(curl -sf -m 15 \
     "https://api.search.brave.com/res/v1/news/search?q=${ENCODED}&freshness=${FRESHNESS}&count=5" \
     -H "X-Subscription-Token: $BRAVE_API_KEY" \
     -H "Accept: application/json" \

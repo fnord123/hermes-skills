@@ -20,6 +20,7 @@ Options:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -30,7 +31,10 @@ SEEN_MAX = 500
 def get_domain(url):
     try:
         netloc = urllib.parse.urlparse(url).netloc
-        return netloc.lstrip("www.")
+        # str.lstrip() strips a CHARACTER SET, not a prefix: "wsj.com".lstrip("www.")
+        # is "sj.com". A mangled domain never matches the trusted/untrusted lists,
+        # so the blocklist silently stops working. Strip the literal prefix instead.
+        return re.sub(r"^www\.", "", netloc)
     except Exception:
         return ""
 
@@ -43,6 +47,24 @@ def load_json_file(path, default):
         except Exception:
             pass
     return default
+
+
+def load_prefs_file(path):
+    """Load the source preferences, refusing to run on a corrupt file.
+
+    Falling back to {} here would empty the untrusted blocklist while the
+    briefing kept publishing, so a bad edit would silently reinstate blocked
+    sources. Fail loudly instead.
+    """
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: {path} is not valid JSON ({e}). Refusing to run without "
+              f"the trusted/untrusted source lists.", file=sys.stderr)
+        sys.exit(1)
 
 
 def save_json_file(path, data):
@@ -145,7 +167,7 @@ def main():
 
     # Load state
     seen_urls = set(load_json_file(args.seen_file, []))
-    prefs_data = load_json_file(args.prefs_file, {})
+    prefs_data = load_prefs_file(args.prefs_file)
     trusted = prefs_data.get("trusted", [])
     untrusted = set(prefs_data.get("untrusted", []))
 
@@ -205,7 +227,7 @@ def main():
             check=False,
         )
         # Reload prefs after TUI (note: picks were already computed above)
-        prefs_data = load_json_file(args.prefs_file, {})
+        prefs_data = load_prefs_file(args.prefs_file)
         trusted = prefs_data.get("trusted", [])
         untrusted = set(prefs_data.get("untrusted", []))
 
@@ -215,7 +237,11 @@ def main():
     for topic in topics:
         if topic in picked_map:
             story = picked_map[topic]
-            print(f"- [{story['title']}]({story['url']})")
+            url = story.get("url", "")
+            if not url:
+                continue
+            title = story.get("title") or url
+            print(f"- [{title}]({url})")
 
     # Update seen file with all new URLs from this run (not just picked ones,
     # so non-picked stories don't resurface on the next run)

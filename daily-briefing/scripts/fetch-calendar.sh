@@ -39,7 +39,7 @@ log "GCAL_ICAL_KEY set (${#GCAL_ICAL_KEY} chars)"
 ICAL_FILE=$(mktemp --suffix=.ics)
 trap 'rm -f "$ICAL_FILE"' EXIT
 
-if curl -sf "$GCAL_ICAL_KEY" -o "$ICAL_FILE" 2>/dev/null; then
+if curl -sf -m 15 "$GCAL_ICAL_KEY" -o "$ICAL_FILE" 2>/dev/null; then
   log "curl ok ical_bytes=$(wc -c < "$ICAL_FILE")"
 else
   log "ERROR: curl failed"

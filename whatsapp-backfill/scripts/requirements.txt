@@ -1,0 +1,4 @@
+# Third-party packages the whatsapp-backfill script imports.
+# Install with: python3 -m pip install -r requirements.txt
+hindsight-client-api
+python-dateutil

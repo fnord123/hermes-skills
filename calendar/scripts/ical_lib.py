@@ -437,14 +437,23 @@ def _rrule_dates(
             byday_wd = {base.weekday()}
         days_from_wkst = (base.weekday() - wkst_day) % 7
         week_epoch = base - timedelta(days=days_from_wkst)
-        d = max(min_d, base)
+        # With COUNT, occurrences before min_d still consume the limit, so
+        # enumeration has to start at the series start; emit() filters the
+        # stream down to [min_d, max_d]. Skipping ahead to min_d would leave
+        # `seen` undercounting and the series would keep emitting past its
+        # true end. Without COUNT there is nothing to accumulate, so start at
+        # the first week the caller actually asked about.
+        d = base if count_lim else max(min_d, base)
         weeks_from_epoch = (d - week_epoch).days // 7
         aligned_week = weeks_from_epoch - (weeks_from_epoch % interval)
         d = week_epoch + timedelta(weeks=aligned_week)
         while d <= end_d:
             if count_lim and seen >= count_lim:
                 break
-            for offset in range(7 * interval):
+            # Scan only the 7 days of THIS week; `d` then jumps `interval`
+            # weeks. Scanning 7*interval days here would sweep the skipped
+            # weeks too and silently ignore INTERVAL.
+            for offset in range(7):
                 candidate = d + timedelta(days=offset)
                 if candidate < base:
                     continue
@@ -661,5 +670,5 @@ def resolve_tz(env: dict[str, str], default: str = "America/New_York") -> ZoneIn
         return ZoneInfo(default)
 
 
-def emit_json(payload) -> None:
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+# JSON output is not this library's job: the entry-point scripts emit the house
+# contract via `skill_json.ok()` / `skill_json.fail()`.

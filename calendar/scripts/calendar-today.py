@@ -7,8 +7,9 @@ Read-only. Sources data from the user's Google Calendar iCal URL
 Usage:
   python3 calendar-today.py
 
-Output: JSON `{date, timezone, events: [Event, ...]}`. Events are sorted by
-start time. Each Event has the same shape as `ical_lib.Event.to_dict()`.
+Output: JSON `{ok: true, date, timezone, events: [Event, ...]}` on success,
+`{ok: false, error}` with exit 1 on failure. Events are sorted by start time.
+Each Event has the same shape as `ical_lib.Event.to_dict()`.
 
 Used to answer questions like:
   - "What's on my calendar today?"
@@ -25,14 +26,15 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import ical_lib  # noqa: E402
+from skill_json import ok, fail, guard  # noqa: E402
 
 
-def main() -> int:
+@guard
+def main() -> None:
     env = ical_lib.load_env(SCRIPT_DIR / ".env")
     feeds = ical_lib.resolve_feeds(env)
     if not feeds:
-        ical_lib.emit_json({"error": "No calendar feeds configured (set GCAL_ICAL_KEY in .env)."})
-        return 2
+        fail("No calendar feeds configured (set GCAL_ICAL_KEY in .env).")
 
     tz = ical_lib.resolve_tz(env)
     today = datetime.now(tz=tz).date()
@@ -42,15 +44,14 @@ def main() -> int:
         feeds, tz, min_date=today, max_date=today, people_file=people_file
     )
 
-    ical_lib.emit_json({
-        "date": today.isoformat(),
-        "timezone": str(tz),
-        "count": len(events),
-        "events": [e.to_dict() for e in events],
-        "feed_errors": feed_errors,
-    })
-    return 0
+    ok(
+        date=today.isoformat(),
+        timezone=str(tz),
+        count=len(events),
+        events=[e.to_dict() for e in events],
+        feed_errors=feed_errors,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -1,0 +1,3 @@
+# Third-party packages the daily-briefing scripts import.
+# Install with: python3 -m pip install -r requirements.txt
+yfinance

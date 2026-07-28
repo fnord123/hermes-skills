@@ -23,6 +23,7 @@ import argparse
 import curses
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -186,7 +187,10 @@ def main():
     args = parser.parse_args()
 
     preferred, non_preferred = load_prefs(args.prefs_file)
-    new_domains = [d.strip().lstrip("www.") for d in args.add_domains.split(",") if d.strip()]
+    # re.sub, not str.lstrip: lstrip("www.") strips a character SET, turning
+    # "wsj.com" into "sj.com" — a domain that matches nothing in either list.
+    new_domains = [re.sub(r"^www\.", "", d.strip())
+                   for d in args.add_domains.split(",") if d.strip()]
 
     items = build_item_list(preferred, non_preferred, new_domains)
 
