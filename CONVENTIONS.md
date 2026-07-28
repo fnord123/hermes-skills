@@ -4,7 +4,16 @@ These are the conventions every skill in this repo follows. They exist because
 the target is a **local small model** (see [README](./README.md) for the *why*);
 the rules all trace back to "give the model fewer ways to go wrong."
 
-A good template to copy from is [`calendar`](./calendar/).
+A good template to copy from is [`donations`](./donations/) — it is the one skill
+verified to satisfy every rule below: long-form description with a PREFER clause and an
+`Activate on any of:` list, the exact eight-section flow, verb-leading Purposes, a leak-free
+domain surface, the mandated error sentence verbatim, and all rationale in its README.
+
+(This used to name `calendar`. An audit found `calendar` carried the "Files this skill must
+NEVER read" section this document forbids, omitted the mandated error sentence, and emitted
+no `ok` field while exiting 2 instead of 1 — so anything copied from it inherited four
+violations. Check with `python3 tools/lint_skills.py --skill <name>` rather than trusting
+any exemplar, including this one.)
 
 ## Layout
 
@@ -151,3 +160,21 @@ Local models hallucinate dangerous calls; this is the standard guard.
 - `hermes skills install` over HTTP drops the executable bit, so always document
   invocation as `python3 <path>`, never `./<path>`.
 - Read credentials/config from files the scripts own; keep keys out of the repo.
+
+
+## Checking your work
+
+```
+python3 tools/lint_skills.py                 # whole repo
+python3 tools/lint_skills.py --skill donations
+python3 tools/lint_skills.py --severity critical
+```
+
+`critical` means a broken install (undeclared third-party imports) or broken routing (no
+PREFER clause, no trigger list) — the two failures a user actually notices. CI runs this on
+every push and fails the build on any critical finding.
+
+`tools/skill_json.py` implements the JSON contract in the Scripts section above. Vendor it
+into a skill as `scripts/skill_json.py` and use `ok()` / `fail()` / `@guard` rather than
+hand-rolling the envelope — `@guard` in particular turns an uncaught exception into a proper
+`{"ok": false, ...}` instead of a traceback on stderr with nothing on stdout.

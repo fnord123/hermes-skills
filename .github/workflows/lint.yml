@@ -1,0 +1,23 @@
+name: conventions
+
+# A convention nobody checks is a convention that decays. The first audit of this repo found
+# 16 of 16 skills non-conformant, including the skill CONVENTIONS.md nominates as the template
+# to copy. Nothing had ever looked.
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyyaml
+      - name: Lint skills against CONVENTIONS.md
+        # Exits 1 on any critical finding: a broken install (undeclared imports) or broken
+        # routing (no PREFER clause / trigger list). Majors and minors are reported but do
+        # not fail the build yet - see the baseline in tools/lint_skills.py's commit message.
+        run: python3 tools/lint_skills.py
