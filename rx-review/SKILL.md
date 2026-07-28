@@ -173,12 +173,17 @@ undetermined thing:
 - implausible dose → give both their number and the plausible one, ask which
 - nothing found → ask for the amount per serving from the label
 
-Apply their answers by rewriting `~/.hermes/rx-review/inputs/regimen.txt`, then run
-`rx.py intake` once so the corrected text is picked up. If they genuinely do not know a value,
-add that product name on its own line to `~/.hermes/rx-review/inputs/CONFIRMED.txt` and tell
-them it will be researched with the gap noted.
+Record each answer with:
 
-Then unblock the card.
+    python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "<product>" --answer "<what they said>"
+
+If they genuinely do not know a value, use `--accept-all` and tell them it will be researched
+with the gap noted.
+
+That records the answer and closes the card, which is what the pipeline is waiting on. Do NOT
+unblock this card: unblocking re-runs it, the card asks the same question again, and Hermes
+treats the second block as a loop and moves it to triage - where it satisfies nothing and the
+research stage waits forever.
 
 ### "Start the research stage" is blocked
 
