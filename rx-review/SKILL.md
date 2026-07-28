@@ -58,6 +58,7 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
 | `intake` | Starts the pipeline over whatever is in the inputs folder. Run it once to begin, and once again after you apply the user's answers. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
+| `regimen-confirm` | Records an answer to a regimen question and closes the gate card. Use this instead of unblocking. |
 | `labs-confirm` | Records that the user confirmed the labs and closes the gate card. Use this instead of unblocking. |
 | `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
 | `confirm --json` | Lists the items the "Confirm N item(s) before research" card is waiting on, with what intake already knows about each. |
