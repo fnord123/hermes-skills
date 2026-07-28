@@ -32,6 +32,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # scripts/ is a generated copy of it.
 SOURCES = {
     "skill_json.py": "tools/skill_json.py",
+    "pipeline.py": "analysis-engine/pipeline.py",
 }
 
 HEADER = (
