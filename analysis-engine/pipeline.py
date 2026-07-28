@@ -461,6 +461,12 @@ class Pipeline:
             return ""
         text = open(path, encoding="utf-8", errors="ignore").read()
         text = re.split(r"\n#+\s*(?:References|Endnotes|Sources)\b", text)[0]
+        # Drop footnote DEFINITIONS. GFM puts them at the bottom with no heading, so a split on
+        # "References" misses them, and the definition line contains the citation marker - it
+        # would be picked up as though it were the claim, handing the judge the quote it is
+        # supposed to be checking the claim against.
+        text = "\n".join(l for l in text.split("\n")
+                         if not re.match(r"^\s*\[\^?\d+\]:", l))
         hits = []
         for para in re.split(r"\n\s*\n", text):
             if "[%d]" % number not in para and "[^%d]" % number not in para:
