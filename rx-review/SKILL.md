@@ -78,12 +78,19 @@ If a copy fails, say which file and ask for it again. Never continue with a miss
 Take whichever the user offers:
 
 **A source they already keep** — "it's in my regimen doc", "search my docs", "~/notes/meds.md".
-Resolve it yourself with whatever skill fits (`google-docs` finds and reads a Google Doc; file
-tools read a file), save the text, and hand over the path:
+Resolve it with whatever skill fits, then pipe it straight in. `regimen --stdin` accepts either
+plain text or a skill's JSON output, so no unwrapping step is needed.
 
-    python3 ~/.hermes/rx-review/rx.py regimen --from /tmp/regimen-source.txt
+For a Google Doc, that is one command:
 
-or pipe it: `... | python3 ~/.hermes/rx-review/rx.py regimen --stdin`
+    python3 ${HERMES_SKILL_DIR}/../google-docs/scripts/docs.py read <doc-id> \
+      | python3 ~/.hermes/rx-review/rx.py regimen --stdin
+
+For a local file:
+
+    python3 ~/.hermes/rx-review/rx.py regimen --from ~/notes/meds.md
+
+Pipe the source directly. Do not write an inline `python3 -c` to reshape it in between.
 
 Finding the source is your job. That command only accepts a path or stdin.
 
