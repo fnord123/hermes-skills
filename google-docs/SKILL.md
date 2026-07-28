@@ -213,8 +213,7 @@ insert-image <id> --url "https://…/desert.jpg" --replace "[IMAGE:Desert]" --wi
   failed`, `GOOGLE_DOCS_FOLDER_ID not set`) → the skill isn't configured. Point
   the user to `README.md`.
 
-Always ask the user for guidance when there is an error; do not proactively try
-to resolve errors yourself.
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Empty results
 

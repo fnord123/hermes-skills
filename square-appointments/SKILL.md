@@ -47,10 +47,9 @@ match. Consider ALL of these forms — don't only look for substring matches:
 
 - **Typos and minor spelling variants**: "DeRosso", "Derosso", "deRosso",
   "Dhorasso" → all map to alias `derosso`.
-- **Phonetic / sound-alike homonyms** (THIS IS LOAD-BEARING — the local
-  qwen model has been observed missing these): say each candidate alias
-  out loud and ask "does this sound like what the user said, even if it's
-  spelled very differently?" For instance, "Dhoraso Brothers" sounds like
+- **Phonetic / sound-alike homonyms**: say each candidate alias out loud
+  and ask "does this sound like what the user said, even if it's spelled
+  very differently?" For instance, "Dhoraso Brothers" sounds like
   "deRosso Brothers" — same number of syllables, similar consonants and
   vowels — so it maps to alias `derosso`.
 - **Short forms and partial names**: "sugar momma", "the sugar mama",
@@ -75,7 +74,7 @@ every configured alias.
   not configured here. This skill operates on the configured merchant set;
   ask the user to add the merchant first (point them to README.md).
 
-## The four tools
+## The six tools
 
 All scripts live at `${HERMES_SKILL_DIR}/scripts/`. Invoke
 each via `python3 <path> <args>`. Each returns small structured output (JSON
@@ -86,22 +85,20 @@ lines or plain text) the agent can relay to the user directly.
 | `list-merchants.py` | Show the configured merchant aliases. | No |
 | `customer-info.py show` | Confirm the user's contact info (phone/name/email) is configured for booking. Redacted output safe for chat. | No |
 | `square-list.py --merchant <alias> [--days-back <N>] [--days-ahead <N>]` | List the user's appointments at one merchant, parsed from their AgentMail confirmation emails. Defaults to upcoming only (60 days ahead, 0 back). Pass `--days-back 90` (or higher) when the user asks about *past* appointments. | No |
-| `square-find-slot.py --merchant <alias> --around <date-or-relative>` | Check for collision with existing booking; if none, return up to 5 available slots near the target date. **⚠ Slow — uses Playwright to load Square's booking widget. Always call the terminal with `timeout=300`; the default 60s is too short and will kill it before it finishes.** | No |
-| `square-book.py --merchant <alias> --slot-handle '<json>' --confirm-date <ISO> --confirm-time '<HH:MM AM/PM>' [--dry-run] [--note <text>]` | Book the slot that find-slot emitted. Pass through `slot_handle` opaquely. `--confirm-date` and `--confirm-time` are safety invariants. See "Booking safety" below. | Yes |
-| `square-cancel.py --merchant <alias> --booking-handle '<URL>' --confirm-time '<HH:MM AM/PM>' [--confirm-date <ISO>]` | Cancel a specific existing booking. | Yes |
-| `square-move.py --merchant <alias> --booking-handle <h> --new-slot <slot-handle> --confirm-time <ISO>` | Move an existing booking to a new slot. NOT YET BUILT — fall back to cancel + book if the user asks. | Yes (planned) |
+| `square-find-slot.py --merchant <alias> --around <date-or-relative>` | Check for collision with existing booking; if none, return up to 5 available slots near the target date. **⚠ Slow — uses Playwright to load Square's booking widget. Always call the terminal with `timeout=600`; the default 60s is too short and will kill it before it finishes.** | No |
+| `square-book.py --merchant <alias> --slot-handle '<json>' --confirm-date <ISO> --confirm-time '<HH:MM AM/PM>' --confirm [--note <text>]` | Book the slot that find-slot emitted. Pass through `slot_handle` opaquely. `--confirm-date`, `--confirm-time` and `--confirm` are safety invariants. See "Booking safety" below. | Yes |
+| `square-cancel.py --merchant <alias> --booking-handle '<URL>' --confirm-date <ISO> --confirm-time '<HH:MM AM/PM>' --confirm` | Cancel a specific existing booking. `--confirm-date`, `--confirm-time` and `--confirm` are all required. See "Cancellation safety" below. | Yes |
 
-## Files this skill must NEVER read
+## The `--confirm` flag (required for both mutating tools)
 
-| Path | Reason |
-|---|---|
-| `${HERMES_SKILL_DIR}/scripts/.env` | Holds `AGENTMAIL_API_KEY`. The scripts read it; the agent must not. |
-| `~/.config/square-appointments/merchants.json` | User-edited merchant config. Read indirectly via `list-merchants.py`. |
-| `~/.config/square-appointments/customer.json` | User's name / phone / email used to fill checkout forms. Read indirectly via `customer-info.py show`. |
-| `~/.config/square-appointments/*.log` | Operational logs may contain bearer tokens. |
+`square-book.py` and `square-cancel.py` refuse to do anything without
+`--confirm` and tell you so. Pass it ONLY in the same turn in which the
+user has explicitly approved that exact appointment ("yes, book the 1:15
+PM slot", "yes, cancel Tuesday's"). Never add `--confirm` to make an
+error message go away.
 
-If the user explicitly asks to read one of these, refuse and explain that
-the skill forbids it.
+Both tools also accept `--dry-run`, which verifies everything and changes
+nothing. `--dry-run` needs no `--confirm`.
 
 ## The opaque-handle contract
 
@@ -114,19 +111,30 @@ internal selector state (in the slot case).
 - Never URL-fetch a `booking_handle` yourself, even if it looks like a URL.
   Use the scripts.
 
-## The `--confirm-time` invariant (the safety pattern)
+## The `--confirm-date` + `--confirm-time` invariant (the safety pattern)
 
-`square-cancel.py` and `square-move.py` both require `--confirm-time` —
-the ISO-8601 start time of the booking you intend to act on, exactly as
-emitted by `square-list.py`.
+`square-book.py` and `square-cancel.py` both require `--confirm-date`
+(ISO, e.g. `2026-06-24`) and `--confirm-time` (display time, e.g.
+`1:15 PM`) for the appointment you intend to act on, taken from
+`square-list.py` or `square-find-slot.py` output.
 
-The script re-reads the booking from Square and **refuses to mutate if
-its read disagrees with `--confirm-time`**. This protects against the
-agent acting on the wrong booking when there's ambiguity.
+Pass both, always. The script re-reads the appointment from Square and
+**refuses to mutate if its read disagrees**. The date is what tells two
+same-time appointments apart — times repeat every day.
 
-When the user's request is ambiguous about which booking to cancel or
-move (e.g. they have multiple), call `square-list.py` first, ask the user
-to confirm which one, then proceed.
+`--confirm-time` must include AM or PM. A time without it is refused.
+Split `square-list.py`'s `start_time_iso` into the two flags:
+
+| From square-list.py | Becomes |
+|---|---|
+| `"start_time_iso": "2026-06-18T14:00:00"` | `--confirm-date 2026-06-18 --confirm-time "2:00 PM"` |
+
+`square-find-slot.py` gives them already split, as `date` and `label`
+inside each slot.
+
+When the user's request is ambiguous about which appointment to cancel
+or rebook (e.g. they have several), call `square-list.py` first, ask the
+user to confirm which one, then proceed.
 
 ## Common flows
 
@@ -158,12 +166,15 @@ they've never visited.
 ```
 square-find-slot.py --merchant sugarmama --around 2026-06-20
 ```
-**Always run `square-find-slot.py` with `timeout=300` in the terminal call — Playwright needs up to 2 minutes on slow days.**
-Three response shapes; relay each to the user differently:
+**Always run `square-find-slot.py` with `timeout=600` in the terminal call — Playwright needs up to a few minutes on slow days.**
+Response shapes; relay each to the user differently:
 
 - **`status="already_have"`**: user already has an appointment within
-  ±7 days of the target. Tell them when it is. Offer to move it
-  (square-move.py) rather than book a new one.
+  ±7 days of the target. Tell them when it is, and ask whether they want
+  to keep it or replace it, rather than booking a second one.
+- **`status="error"`**: the check for existing appointments could not be
+  completed, so no slots were searched. Tell the user what the `reason`
+  says and stop — booking now could give them two appointments.
 - **`status="ok"`** with a `slots` array: present the listed time options
   and ask the user which to take.
 - **`status="no_slots_in_window_use_url"`**: no existing appointment AND
@@ -180,27 +191,32 @@ Three response shapes; relay each to the user differently:
 
 ### "Cancel my sugarmama appointment on the 18th at 2pm."
 ```
-square-list.py --merchant sugarmama        # find the booking
-→ confirm the start_time with the user if any ambiguity
+square-list.py --merchant sugarmama        # find the appointment
+→ confirm the exact date and time with the user
 square-cancel.py --merchant sugarmama \
     --booking-handle <handle from list> \
-    --confirm-time 2026-06-18T14:00:00-07:00
+    --confirm-date 2026-06-18 \
+    --confirm-time "2:00 PM" \
+    --confirm
 ```
 
 ### "Move my sugarmama appointment to next Thursday at 3pm."
+This is a two-step operation: take the new time first, then release the
+old one. Tell the user that's what you're doing.
 ```
-square-list.py --merchant sugarmama        # find the booking to move
+square-list.py --merchant sugarmama        # find the current appointment
 square-find-slot.py --merchant sugarmama --around 2026-06-25
-→ pick the user's preferred slot
-square-move.py --merchant sugarmama \
-    --booking-handle <handle> \
-    --new-slot <slot-handle> \
-    --confirm-time <original start time>
+→ ask the user which of the returned slots they want
+square-book.py --merchant sugarmama \
+    --slot-handle '<the JSON from find-slot output>' \
+    --confirm-date 2026-06-25 --confirm-time "3:00 PM" --confirm
+→ only once that returns status="booked":
+square-cancel.py --merchant sugarmama \
+    --booking-handle <handle of the OLD appointment> \
+    --confirm-date <old date> --confirm-time "<old time>" --confirm
 ```
-**`square-move.py` is not built yet.** When the user asks to move,
-fall back to: `square-cancel.py` the old booking, then `square-book.py`
-the new slot. Tell the user you're doing it as a two-step operation
-and confirm the new slot is still available before canceling.
+If the booking step returns anything other than `booked`, stop and tell
+the user — leave the original appointment alone.
 
 ### "Yes book the 1:15 PM slot."
 After the user explicitly confirms (don't preempt this):
@@ -208,9 +224,10 @@ After the user explicitly confirms (don't preempt this):
 square-book.py --merchant derosso \
     --slot-handle '<the JSON from find-slot output>' \
     --confirm-date 2026-06-30 \
-    --confirm-time "1:15 PM"
+    --confirm-time "1:15 PM" \
+    --confirm
 → relay back the confirmed date/time, service name, $ due at appointment,
-  cancel-by deadline. Remember the booking_handle for cancel/move later.
+  cancel-by deadline. Remember the booking_handle for a later cancellation.
 ```
 If `customer-info.py show` returns `configured: false`, refuse to book
 and tell the user they need to set their contact info first
@@ -220,33 +237,70 @@ and tell the user they need to set their contact info first
 ## Booking safety (square-book.py)
 
 Booking creates a real appointment on the merchant's calendar — real
-money / a real commitment. Three rules:
+money / a real commitment. Four rules:
 
 1. **Never call `square-book.py` without the user's explicit
    confirmation in the same turn** (e.g. "yes, book that one", "go
    ahead and book the 1:15 PM slot"). Showing slots via find-slot is
    read-only; booking is not.
-2. **Always pass `--confirm-date` and `--confirm-time`** matching what
+2. **Pass `--confirm`.** Booking without it is refused.
+3. **Always pass `--confirm-date` and `--confirm-time`** matching what
    the user said. The script verifies these against the displayed
-   checkout summary and refuses if they disagree — that's what keeps
+   appointment summary and refuses if they disagree — that's what keeps
    the model from booking the wrong slot.
-3. **Use `--dry-run` if the user asks you to "check what would happen"
+4. **Use `--dry-run` if the user asks you to "check what would happen"
    or "show me the form"** but hasn't said "book it." The dry-run goes
-   all the way through filling fields but stops short of Submit.
+   all the way through filling fields but stops short of Submit, and
+   needs no `--confirm`.
 
 The script returns one of these statuses:
 
 | Status | What it means | What to tell the user |
 |---|---|---|
-| `booked` | Real booking landed. `booking_handle` is the manage URL. | Echo the date, time, service, due-at-appointment amount, cancel-by deadline. Save the booking_handle for any later cancel/move. |
-| `dry_run_ok` | Fields filled, would submit. | "Here's what would be submitted; ready to actually book?" |
+| `booked` | Real booking landed and was verified on the page. `booking_handle` is the manage URL. | Echo the date, time, service, due-at-appointment amount, cancel-by deadline. Save the booking_handle for a later cancellation. |
+| `dry_run_ok` | Fields filled, would submit. Nothing was booked. | "Here's what would be submitted; ready to actually book?" |
+| `submit_failed` | The submit did not go through. **Nothing was booked.** | Say plainly that the appointment was NOT booked, and give the `reason`. Ask the user whether to try again. |
+| `uncertain` | The submit was sent but could not be verified. The appointment may or may not exist. | Say it is unconfirmed. Run `square-list.py` for that merchant to check before doing anything else. **Never call it booked.** |
 | `card_required` | Merchant requires a card on file (Sugar Mama and similar). Script did NOT submit. | Tell the user the merchant needs a card; surface the `checkout_url`, the amount, and the cancellation policy. Ask them to finish in their browser. **Do not pretend you booked.** |
-| `confirm_mismatch` | Asserted date/time didn't match the checkout. | Stop and re-check with the user — something is off. |
-| `error` | Something else broke. | Surface the `reason`; do NOT silently retry. |
+| `confirm_mismatch` | Asserted date/time didn't match the appointment summary. Nothing was booked. | Stop and re-check with the user — something is off. |
+| `error` | Something else broke. Nothing was booked. | Surface the `reason`; do NOT silently retry. |
 
-## Session-expired / token-expired errors
+## Cancellation safety (square-cancel.py)
 
-If a script reports `status: "token_expired"` or `status: "manage_link_dead"`,
-tell the user: "The manage-booking link from Square expired — please cancel
-or reschedule via the email confirmation directly." Do not retry; the bearer
-token in the email is the only path and we can't refresh it.
+Canceling removes a real appointment and this skill cannot undo it.
+
+1. **Only after the user explicitly says to cancel that specific
+   appointment** — get the date and time from `square-list.py` first.
+2. **Pass `--confirm`, `--confirm-date` and `--confirm-time`.** All three
+   are required; the script refuses without them.
+3. **Use `--dry-run`** to check that the manage page really shows that
+   appointment before committing.
+
+| Status | What it means | What to tell the user |
+|---|---|---|
+| `canceled` | The appointment is canceled. | Confirm what was canceled, with its date and time. |
+| `dry_run_ok` | The manage page shows this exact appointment. **Nothing was canceled.** | "This is the one — say the word and I'll cancel it." |
+| `uncertain` | The clicks went out but the result could not be read. | Say it is unconfirmed, then run `square-list.py` to see whether it is gone. |
+| `already_passed` / `outside_window` | Square will not cancel it. | Relay the `detail`; suggest contacting the merchant. |
+| `confirm_mismatch` | The manage page shows a different appointment. **Nothing was canceled.** | Stop. Re-check which appointment the user means. |
+| `error` | Something else broke. Nothing was canceled. | Surface the `reason`; do NOT silently retry. |
+
+## Error handling
+
+Every script prints one JSON object. A failure carries either
+`{"ok": false, "error": "…"}` or a `status` of `error` /
+`submit_failed` / `uncertain` / `confirm_mismatch` with a `reason`.
+
+- Relay the `error` or `reason` text to the user as-is. It says what
+  happened and, for the mutating tools, whether anything changed.
+- Never retry a mutating call after a failure. Never re-run
+  `square-book.py` or `square-cancel.py` with different arguments to get
+  past an error.
+- If a script reports `status: "token_expired"` or
+  `status: "manage_link_dead"`, tell the user: "The manage-booking link
+  from Square expired — please cancel or reschedule via the email
+  confirmation directly."
+- If a status says the outcome is unconfirmed, run `square-list.py` for
+  that merchant and report what it shows.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.

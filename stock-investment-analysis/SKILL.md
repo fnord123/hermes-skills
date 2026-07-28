@@ -1,21 +1,27 @@
 ---
 name: stock-investment-analysis
 description: >
-  Conduct rigorous, evidence-based equity research analysis on a single stock.
-  Use when the user asks to analyze, evaluate, research, or value a stock or
-  ticker; asks for a buy/sell/hold view; wants a bull case and bear case; asks
-  whether a stock is overvalued or undervalued; requests fundamental analysis,
-  DCF, reverse-DCF, valuation comparison, or peer comparison; asks to dig into
-  a company's financials, moat, competitive position, or management quality;
-  or mentions equity research, stock pitch, investment memo, or stock thesis.
-  Also activate for "what do you think of [TICKER]" and "should I buy [TICKER]".
-version: 1.0.0
+  Equity research on ONE publicly traded company, named by ticker or company
+  name. Produces a full investment memo: valuation, bull and bear case, and a
+  Buy / Hold / Avoid verdict. PREFER THIS SKILL whenever the subject is a single
+  listed security — including muni ETFs and closed-end funds such as MUB, VTEB,
+  and NVG, which are evaluated as equities. Use
+  `investment-hypothesis-investigation` instead when the subject is a theme,
+  sector, or macro claim spanning several companies. Use
+  `pre-ipo-investment-analysis` instead when the company is private and not yet
+  listed. Use `municipal-bond-analysis` instead for an individual bond
+  identified by CUSIP. Activate on any of: "analyze NVDA", "is TSLA a buy",
+  "what do you think of <ticker>", "should I buy <ticker>", "what's <ticker>
+  worth", "is <company> overvalued", "bull case and bear case", "DCF",
+  "reverse-DCF", "peer comparison", "equity research", "stock pitch",
+  "investment memo", "stock thesis".
+version: 0.1.0
 author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
     tags: [Finance, Investing, Equity-Research, Valuation, Analysis]
-    related_skills: [investment-hypothesis-investigation, pre-ipo-investment-analysis]
+    requires_toolsets: [web, file]
 ---
 
 # Stock Investment Analysis
@@ -24,7 +30,9 @@ metadata:
 
 Activate this skill any time the user wants a substantive view on a publicly traded equity — from a quick screen to a full investment memo. Trigger phrases include "analyze NVDA," "is TSLA a buy," "research this stock," "build me a bull/bear case," "what's [TICKER] worth," "should I own this," and any mention of a ticker symbol with intent to evaluate it.
 
-Do **not** activate for: multi-company or thematic theses (use `investment-hypothesis-investigation` instead), macro questions, ETF or fund analysis, options strategy, tax questions, or general personal-finance advice. For those, defer to the user's default behavior.
+## When NOT to use
+
+Do **not** activate for: multi-company or thematic theses (use `investment-hypothesis-investigation` instead), macro questions, options strategy, tax questions, or general personal-finance advice. For those, defer to the user's default behavior. For an individual municipal bond identified by CUSIP, use `municipal-bond-analysis`; for a private company that is not yet listed, use `pre-ipo-investment-analysis`.
 
 ## Quick Reference
 
@@ -39,7 +47,7 @@ Output: a structured report (Sections 1–12 below) followed by a numbered Sourc
 
 ## Operating Principles
 
-1. **Never fabricate data.** Every number, date, quote, or claim about a specific company must come from a tool call (web search, fetch, financial data API, filings). If you cannot verify a figure, say so explicitly — do not estimate it silently.
+1. **Never fabricate data.** Every number, date, quote, or claim about a specific company must come from a tool call — `web_search` and `web_extract` against filings, transcripts, and primary sources. If you cannot verify a figure, say so explicitly — do not estimate it silently.
 2. **Always cite via clickable footnotes.** After every non-obvious factual claim, attach a footnote reference using GitHub-flavored markdown footnote syntax: `[^1]`, `[^2]`, etc. Collect the full citations as footnote definitions at the end of the report, in the form `[^N]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>`. The source title is the clickable link text; the URL is wrapped in markdown link syntax so the rendered footnote is a hyperlink, not a bare URL. GitHub renders the inline `[^N]` references as clickable superscripts that jump to the matching definition (and back) — so the report should not include a manual `## Sources` heading; GitHub auto-renders a "Footnotes" section. Prefer primary sources (10-K, 10-Q, 8-K, earnings transcripts, investor presentations) over secondary commentary. Reuse a number when citing the same source again — do not duplicate entries.
 3. **Date-stamp everything.** Quote prices, market caps, and multiples are time-sensitive. Note the as-of date for every figure. If data is older than 30 days for prices/multiples or older than the latest filed quarter for fundamentals, flag it.
 4. **Separate fact, inference, and opinion.** Tag inferences with `(inferred:)` and opinions with `(view:)`. Plain text is reserved for sourced facts.
@@ -287,14 +295,14 @@ Use this skeleton verbatim for the structure. Phase 2 above describes what conte
 [New footnote definitions continue numbering from the highest existing `[^N]` — never renumber. Append the new `[^N]: ...` lines to the existing footnote block at the end of the file.]
 ```
 
-## Notes
+## Errors
 
-- **Hallucinated multiples.** If forward P/E or EV/EBITDA cannot be sourced, mark `DATA UNAVAILABLE`. Do not back-calculate from a guessed earnings figure.
-- **Stale prices.** A "current price" pulled from training data is wrong. Always fetch live, and timestamp it.
-- **One-sided pattern matching.** If the bull case is three paragraphs and the bear case is three sentences, you have not done the work. Search again with disconfirming queries.
-- **Citation drift.** Every `[^N]` reference in the body must have a matching `[^N]: ...` definition, and every definition must be referenced at least once. Verify before delivering.
-- **Reverse-DCF skipped.** If valuation tools are limited, you can simplify the reverse-DCF to revenue-growth-implied alone, but do not omit it — it is the single most useful section for sanity-checking sentiment.
-- **Mixing GAAP and adjusted figures within a comparison.** Pick one basis and stick to it within Section 3 and Section 4.
+- A search or fetch fails for a required field → write `DATA UNAVAILABLE` for that field and state what you tried.
+- Two sources conflict → prefer the most recent 10-Q or 10-K over news summaries.
+- The ticker or exchange cannot be confirmed → ask the user which listing they mean before doing any research.
+- The report directory `~/.hermes/reports/company/` cannot be created or written → report the exact error and stop.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Verification
 

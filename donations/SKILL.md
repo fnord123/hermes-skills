@@ -143,8 +143,7 @@ deliberately if they meant to.
   configured. Point the user to `README.md`; do NOT try to reach the data another
   way.
 
-Always ask the user for guidance when there is an error; do not proactively try
-to resolve errors yourself.
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Empty results
 

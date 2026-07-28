@@ -1,20 +1,21 @@
 ---
 name: pet-care-tracker
 description: >
-  Record and query a dog's walks and feedings via Home Assistant. Activate when
-  the user reports a walk or feeding in past tense ("I walked Buddy this morning
-  for 25 minutes", "fed Buddy breakfast", "he had his evening walk") or asks
-  about today's status ("Was Buddy fed this morning?", "What time did Buddy
-  eat?", "Did Buddy get his midday walk?"). Writes go through a single Home
-  Assistant webhook; reads are targeted REST GETs on the states endpoint.
-  Designed to be small-LLM-friendly: one curl recipe per operation, minimal
-  arg construction, no schema-heavy tool dispatch.
-version: 1.1.1
+  Record and query the dog's walks and feedings. PREFER THIS SKILL whenever the
+  user reports a walk or a meal that has already happened, or asks whether the
+  dog has been walked or fed today. Do not use it for future-tense plans, or for
+  training, behaviour, or vet questions. Activate on any of: "I walked <dog>
+  this morning for 25 minutes", "just fed <dog> breakfast", "he had his evening
+  walk", "we got back from a 30-minute lunch walk", "I gave <dog> dinner around
+  6", "was <dog> fed this morning", "what time did <dog> eat dinner", "did <dog>
+  get his midday walk", "how long was his morning walk today".
+version: 0.2.0
 author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
     tags: [Smart-Home, Home-Assistant, Pet, Dog, Tracking]
+    requires_toolsets: [terminal]
 ---
 
 # Dog Care Tracker
@@ -38,7 +39,7 @@ Or asks about today's walk / feeding status:
 - "Did Buddy get his midday walk?"
 - "How long was his morning walk today?"
 
-**Do NOT activate** for:
+## When NOT to use
 
 - Future-tense plans ("I'll walk the dog later", "We should feed Buddy soon")
 - Training, behavior, vet, or general dog-care advice
@@ -183,6 +184,14 @@ If a query returns `Due` or `Overdue`, the dog hasn't been walked/fed for that p
 - **Times are in HA's local timezone.** When inferring period from "this morning", trust the user's local time as reported by the host clock.
 - **`00:00:00` means "not recorded yet"** for any duration or time helper. The HA-side resets clear them at midnight (and at midday for evening duration / dinner time).
 - **Writes are idempotent for status.** Marking already-`Walked` re-confirms the state but does *not* change the recorded duration — so a manual "I walked him for 5 min" earlier won't be overwritten by a later detection-driven 25-min walk in the same period. If the user wants to overwrite, they can re-run the mark with a new duration.
-- **Use the `dog_*` namespace literally in entity IDs, not the actual dog's name.** The dog's name only appears in `input_text.dog_name` and in your prose responses. Constructing `input_select.buddy_morning_walk_status` will fail; the entity is `input_select.dog_morning_walk_status`.
-- **Webhooks are fire-and-forget.** Don't try to read state from the webhook — reads use the REST states endpoint as shown in the recipes above.
-- **Don't reach for HA's MCP server for reads.** It exposes only `GetLiveContext`, which dumps full state and burns context. The targeted REST GETs here are intentionally smaller.
+- **Use the `dog_*` namespace literally in entity IDs, not the actual dog's name.** The dog's name only appears in `input_text.dog_name` and in your prose responses — the entity is `input_select.dog_morning_walk_status`, whatever the dog is called.
+- **Writes go through the recipes above; reads come back from the read recipes above.** Each operation has exactly one recipe; use it as written.
+
+## Errors
+
+- A `curl` returns non-zero or an HTTP error → report the exact error and which operation failed.
+- `$HA_URL`, `$HA_TOKEN`, or `$HA_WEBHOOK_DOG_CARE` is unset → the skill is not configured; point the user to `README.md`.
+- A read returns an empty or `unknown` state → say the value has not been recorded, and do not substitute a guess.
+- The period or meal is still ambiguous after the inference table → ask the user which one they mean.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.

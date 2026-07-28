@@ -1,28 +1,26 @@
 ---
 name: municipal-bond-analysis
 description: >
-  Conduct rigorous, evidence-based analysis of a specific municipal bond
-  (by CUSIP, by issuer + maturity for new issues without CUSIP yet, or
-  from an offering statement). Use when the user is evaluating a muni for
-  purchase, comparing a muni to taxable alternatives at the same duration,
-  checking AMT exposure or de minimis impact, assessing yield-to-worst
-  on a callable bond, or doing credit due diligence on a GO or revenue
-  bond. Trigger phrases include "analyze [CUSIP]", "should I buy this
-  muni", "is this muni a good deal", "evaluate this revenue bond",
-  "check this GO bond", "what's this bond's yield to worst", "muni TEY at
-  my bracket", "muni vs Treasury", "review this offering statement," and
-  "is this bond pre-refunded." Defer to `stock-investment-analysis` for
-  muni ETFs (MUB, VTEB, NMBIY) since those are equities for purposes of
-  evaluation. Defer to `investment-hypothesis-investigation` for sector
-  or market-timing theses (e.g., "are munis cheap right now," "is the
-  yield ratio signaling a buying opportunity").
-version: 1.0.0
+  Analysis of ONE municipal bond identified by CUSIP, by issuer plus maturity,
+  or from an offering statement. Computes yield-to-worst and tax-equivalent
+  yield at the user's bracket, checks AMT and de minimis exposure, runs GO or
+  revenue-bond credit analysis, and returns a Buy / Watch / Pass verdict.
+  PREFER THIS SKILL whenever the subject is an individual bond rather than a
+  fund. Use `stock-investment-analysis` instead for muni ETFs and closed-end
+  funds (MUB, VTEB, NVG), which are evaluated as equities. Use
+  `investment-hypothesis-investigation` instead for muni-market timing or
+  sector questions such as "are munis cheap right now". Activate on any of:
+  "analyze <CUSIP>", "should I buy this muni", "is this muni a good deal",
+  "evaluate this revenue bond", "check this GO bond", "yield to worst", "muni
+  TEY at my bracket", "muni vs Treasury", "review this offering statement",
+  "is this bond pre-refunded".
+version: 0.1.0
 author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
     tags: [Investing, Fixed-Income, Municipal-Bonds, Tax-Aware]
-    related_skills: [stock-investment-analysis, investment-hypothesis-investigation, pre-ipo-investment-analysis]
+    requires_toolsets: [web, file]
     config:
       - key: federal_marginal_rate
         description: Federal marginal income-tax rate as a decimal (0.37 for 37% top bracket, 0.32, 0.24, etc.).
@@ -48,7 +46,9 @@ metadata:
 
 Activate any time the user is evaluating a specific municipal bond — by CUSIP, by issuer + maturity (for new issues without a CUSIP yet), or from an offering statement / preliminary OS. The defining signals are: a single named issuer, a specific maturity (or call schedule), and an actionable decision (buy / watch / pass) against the user's tax-aware portfolio.
 
-Do **not** activate for: muni ETFs or closed-end funds (use `stock-investment-analysis` — MUB, VTEB, NMBIY, etc. are equities for purposes of evaluation), sector or market-timing theses (use `investment-hypothesis-investigation` for questions like "are munis cheap right now" or "is the AAA muni/Treasury ratio signaling"), portfolio-level ladder construction across multiple bonds, tax-loss harvesting workflows, or generic muni-bond explainers.
+## When NOT to use
+
+Do **not** activate for: muni ETFs or closed-end funds (use `stock-investment-analysis` — MUB, VTEB, NVG, etc. are equities for purposes of evaluation), sector or market-timing theses (use `investment-hypothesis-investigation` for questions like "are munis cheap right now" or "is the AAA muni/Treasury ratio signaling"), portfolio-level ladder construction across multiple bonds, tax-loss harvesting workflows, or generic muni-bond explainers.
 
 If the bond is a taxable municipal (e.g., Build America Bond, taxable refunding) or has otherwise lost its tax exemption, tax-equivalent-yield framing is irrelevant — compare it directly against same-maturity corporates and Treasuries.
 
@@ -62,7 +62,7 @@ User input format:
 
 Output: a structured markdown report saved to `~/.hermes/reports/muni/{CUSIP}.md` (or `{ISSUER-SLUG}-{MATURITY-YEAR}.md` for new issues without a CUSIP yet), with GitHub-flavored footnote citations.
 
-**Tax-bracket inputs.** The user's federal marginal rate, state marginal rate, state of residence, and AMT exposure status are needed to compute TEY correctly. These values are declared as skill-level frontmatter so Hermes can inject them into your context automatically. If the values are absent or appear stale relative to the user's prompt, ask the user once at the start of the analysis and use the corrected values for the run.
+**Tax-bracket inputs.** Use the four tax values in your context — federal marginal rate, state marginal rate, two-letter state of residence, and AMT exposure — to compute TEY. If any of them looks like a placeholder, ask the user once and use the corrected values for the run.
 
 ## Operating Principles
 
@@ -144,7 +144,7 @@ If the current purchase price is below the threshold, the accreted discount is t
 
 For a premium bond (price > 100), note that the premium amortizes against the coupon over time, so the YTW is the relevant economic yield, not the coupon rate.
 
-**State-specific.** Most states exempt their own munis from state income tax; some have reciprocal arrangements with neighbors or treat U.S. territory (Puerto Rico, Guam, USVI) bonds as in-state. A handful (e.g., IL, WI, OK have historically had quirks; some allow only federally-tax-exempt munis as state-exempt) — verify the specific state's rule against state tax-authority guidance, do not assume.
+**State-specific.** Read the "State tax treatment" section of `references/credit-benchmarks.md`, then verify the specific state's rule against that state's tax-authority guidance.
 
 ### Phase 5 — Defeasance / pre-refunding check
 
@@ -160,7 +160,7 @@ If not pre-refunded, proceed to Phase 6.
 
 ### Phase 6 — Insurance unwrap
 
-Check whether the bond is insured. Current active muni insurers include Assured Guaranty Municipal (AGM), Build America Mutual (BAM), and (historically) others that have been downgraded or stopped writing new business (AGC, NPFG, AMBAC, MBIA — relevant for older insured bonds still outstanding).
+Check whether the bond is insured. The "Muni insurers" section of `references/credit-benchmarks.md` lists the active and legacy insurers to expect.
 
 For an insured bond:
 - Report the insurer and its current financial-strength rating.
@@ -172,39 +172,9 @@ If uninsured, the issuer's published rating is the operative one.
 
 ### Phase 7 — Credit analysis
 
-Branch on bond type.
+Branch on bond type: **GO bond** or **revenue bond**. Read `references/credit-benchmarks.md` and work the metric list for the branch that applies — it holds the metrics to pull, the sector-specific DSCR benchmark table, and the healthy/concern thresholds to compare each figure against.
 
-**GO bond branch.** Evaluate:
-
-- **Tax base diversity** — top 10 taxpayers as % of assessed value (concentration risk if any single taxpayer > 5%)
-- **Tax base trend** — assessed value growth over the last 5 years (declining is a red flag)
-- **Economic base** — population trend, employment trend, unemployment rate, median household income vs state and national medians
-- **Debt burden ratios** — debt per capita, direct debt / assessed value, overall debt (including overlapping debt) / assessed value
-- **Fund balance** — unassigned general fund balance as % of expenditures (15–20% is healthy; below 5% is a concern)
-- **Pension and OPEB load** — net pension liability per capita, NPL as % of revenues, funded ratio of pension plan, OPEB unfunded liability. This is the silent killer for many U.S. municipalities — IL, NJ, CT, Chicago, Hartford, and similar issuers have outsized pension/OPEB drags on credit.
-- **Recent budget actuals vs. budget** — chronic budget gaps signal structural problems
-
-**Revenue bond branch.** Evaluate:
-
-- **Debt Service Coverage Ratio (DSCR)** = net revenue available for debt service / annual debt service. Look at the last 5 years.
-- **Sector-specific DSCR benchmarks** for context:
-
-| Sector | Typical DSCR floor | Strong DSCR |
-|---|---|---|
-| Water / Sewer | 1.20–1.25× | 1.50×+ |
-| Public Power (Electric Utility) | 1.25× | 1.50×+ |
-| Higher Education | 1.10–1.20× | 1.50×+ |
-| Hospital / Healthcare | 1.50× | 2.00×+ |
-| Airports | 1.15–1.25× | 1.50×+ (with growth) |
-| Toll Roads (mature) | 1.30×+ | 1.75×+ |
-| Multifamily Housing | 1.10–1.25× | 1.30×+ |
-| Charter Schools | 1.10–1.25× | (varies; high credit risk) |
-
-- **Rate covenant** — minimum DSCR the issuer pledges to maintain (often 1.10× or 1.25×). Has the issuer ever breached it?
-- **Additional bonds test (ABT)** — what DSCR coverage is required to issue additional bonds parity with this one?
-- **Demand analysis** — for utilities: customer count trend, consumption trend; for airports: enplanements; for toll roads: traffic and toll revenue
-- **Reserve fund adequacy** — debt service reserve fund typically required at MADS (maximum annual debt service); confirm it's fully funded
-- **Concentration risk** — for a hospital revenue bond, is the system dominated by Medicare/Medicaid? For a public power bond, is there a single large industrial customer?
+For a revenue bond, the Debt Service Coverage Ratio over the last 5 years is the load-bearing figure, and it is only meaningful against its own sector's benchmark. For a GO bond, the pension and OPEB load is.
 
 ### Phase 8 — Continuing disclosure and material events review
 
@@ -312,234 +282,16 @@ After saving, report the absolute path of the file to the user.
 
 ## Report Template
 
-Use this skeleton verbatim.
+The report skeleton lives in `references/report-template.md`. Read it and use it verbatim.
 
-```markdown
-# {CUSIP_OR_SLUG} — Municipal Bond Tracker
+## Errors
 
-## Initial Analysis — {YYYY-MM-DD}
+- EMMA has no security page for the CUSIP → say so and ask the user to confirm the identifier before going further.
+- A search, fetch, or filing download fails for a required field → write `DATA UNAVAILABLE` for that field and state what you tried.
+- A tax-bracket value in your context looks like a placeholder → ask the user once for the correct value.
+- The report directory `~/.hermes/reports/muni/` cannot be created or written → report the exact error and stop.
 
-### TL;DR
-
-[One paragraph: bond identification (issuer, maturity, coupon), current price/YTW as-of date, verdict (bold), confidence, core thesis in one sentence, top risk in one sentence.]
-
----
-
-### 1. Bond identification
-
-| Field | Value | Source |
-|---|---|---|
-| CUSIP | | |
-| Issuer | | |
-| Series | | |
-| Maturity date | | |
-| Coupon | | |
-| Dated date | | |
-| Par outstanding | | |
-| Tax status | tax-exempt / AMT / taxable | |
-| Insurance | | |
-| Use of proceeds | | |
-| Call schedule | (date, price) entries | |
-| Sinking fund | | |
-
----
-
-### 2. Yield analysis
-
-**Current price (as-of YYYY-MM-DD):** [price]
-
-| Metric | Value |
-|---|---|
-| YTM | |
-| YTC at first call ({date}, {price}) | |
-| YTC at subsequent calls | |
-| **YTW** | **(min of above)** |
-| Current yield | |
-
-**Tax-equivalent yield (at user's bracket):**
-
-| Metric | Value |
-|---|---|
-| Federal marginal rate (config) | |
-| State marginal rate (config) | |
-| In-state for user (`state_code` vs issuer state) | yes / no |
-| TEY (federal only) | YTW / (1 − fed) = |
-| TEY (federal + state) | YTW / (1 − fed − state × (1 − fed)) = |
-| AMT-adjusted TEY (if `amt_exposed` and bond is AMT-subject) | |
-
----
-
-### 3. Tax analysis
-
-**AMT exposure:** [yes / no, with reason]
-
-**De minimis check:**
-
-| Field | Value |
-|---|---|
-| Current price | |
-| Years to maturity | |
-| De minimis threshold (par − 0.25% × YTM) | |
-| Below threshold? | yes / no |
-| After-tax yield treating discount as ordinary income (if below) | |
-
-**State-specific treatment:** [in-state benefit applies / out-of-state, federal-only / reciprocal arrangement / state-specific quirk]
-
----
-
-### 4. Defeasance / pre-refunding
-
-[Pre-refunded yes/no. If yes: refunding date, call date escrowed to, escrow composition (SLGS / open-market Treasuries / other), effective rating. If no: state explicitly so the credit analysis below is the operative section.]
-
----
-
-### 5. Insurance
-
-| Field | Value |
-|---|---|
-| Insurer | |
-| Insurer current rating | |
-| Underlying rating | |
-| Effective rating | |
-| Insurer rating trend since issuance | |
-
----
-
-### 6. Credit analysis
-
-[GO branch OR Revenue branch — use the relevant template below; delete the other.]
-
-**GO branch:**
-
-| Metric | Value | Trend | Benchmark |
-|---|---|---|---|
-| Tax base concentration (top 10 taxpayers % of AV) | | | <30% healthy |
-| Tax base growth (5y) | | | |
-| Population trend (5y) | | | |
-| Unemployment rate | | | |
-| Median household income vs state | | | |
-| Debt per capita | | | |
-| Overall debt / AV | | | |
-| Unassigned fund balance / expenditures | | | 15–20% healthy |
-| Net pension liability per capita | | | |
-| NPL / revenues | | | |
-| Pension funded ratio | | | >80% healthy |
-| OPEB unfunded liability | | | |
-
-**Revenue branch:**
-
-| Metric | Value | Trend | Benchmark (sector) |
-|---|---|---|---|
-| DSCR (last 5y) | | | (from sector table) |
-| Rate covenant minimum | | | |
-| Has issuer ever breached the rate covenant? | | | |
-| Additional bonds test | | | |
-| Demand metric (customers, enplanements, traffic) | | | |
-| Debt service reserve adequacy | | | MADS-funded |
-| Concentration risk | | | |
-
----
-
-### 7. Continuing disclosure and material events
-
-**Filing timeliness:** [on-time / late by N days / chronically late / missing]
-
-**Audit status:** [clean / qualified / going-concern]
-
-**Recent material event notices (last 24 months):**
-
-| Date | Event type | Notes |
-|---|---|---|
-
-**Recent rating actions:**
-
-| Date | Agency | From → To | Outlook | Notes |
-|---|---|---|---|---|
-
----
-
-### 8. Liquidity
-
-| Metric | Value |
-|---|---|
-| Trades in last 12 months | |
-| Trade-size distribution | odd-lot dominant / round-lot present |
-| Estimated bid-ask spread (recent customer trades) | |
-| Most recent trade (date, price, yield, type) | |
-| Assessment | liquid / thin / effectively illiquid |
-
----
-
-### 9. Comparables and taxable alternatives
-
-**Peer munis:**
-
-| CUSIP | Issuer | Maturity | Rating | YTW | Notes |
-|---|---|---|---|---|---|
-
-**Taxable alternatives (same duration, after-tax to user):**
-
-| Alternative | YTW | Tax treatment | After-tax yield to user |
-|---|---|---|---|
-| U.S. Treasury (same maturity) | | Federal-taxable, state-exempt | |
-| AAA corporate (same maturity) | | Fully taxable | |
-| Brokered CD (same maturity) | | Fully taxable | |
-| **This muni** | | Tax-exempt (or AMT-subject) | **(use TEY)** |
-
-**Muni / Treasury ratio:** [YTW(muni) / YTW(Treasury same maturity)] — vs ~80% historical AAA average; rich / fair / cheap.
-
----
-
-### 10. Buy case
-
-[Most credible "this is a good purchase" scenario. Required assumptions, the after-tax yield premium over alternatives, what holds for this to work, probability of the case.]
-
----
-
-### 11. Pass case
-
-[Most credible "this is the wrong bond" scenario. Concrete pass triggers from the credit / yield / liquidity analysis above. Probability.]
-
----
-
-### 12. Base case and verdict
-
-**Base case:** [held to YTW horizon, after-tax IRR at user's bracket]
-
-**Verdict:** **[Buy / Watch / Pass]**
-
-**Confidence:** **[Low / Medium / High]** — [one sentence on what would move you higher]
-
-**Sizing:** [full position / minimum lot / pass entirely]
-
----
-
-### 13. Open Questions
-
-1. [Unknown #1] — [how to resolve: specific filing / disclosure date / rating action to watch]
-2. [Unknown #2] — [how to resolve]
-3. [Unknown #3] — [how to resolve]
-
----
-
-*Not investment advice. Verify all figures independently before acting.*
-
-[^1]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
-[^2]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
-```
-
-## Notes
-
-- **YTW-vs-YTM confusion.** A callable muni's quoted yield is often YTM, which overstates expected return if the issuer is likely to call. Always anchor on yield-to-worst; if YTW < YTM, state the call date that drives YTW and what call probability assumption that implies.
-- **De minimis blindness.** A discount muni below the de minimis threshold loses tax-exempt treatment on the accretion portion. The after-tax math can flip from "competitive" to "underwater vs. Treasuries" silently. Always compute the threshold for any discount bond.
-- **Insurance-as-credit.** A bond rated AA only because of insurance is functionally a play on the insurer's credit. Always surface the underlying rating; if the insurer has been downgraded since issuance, the market price has likely fallen and the effective rating is now the underlying.
-- **Pre-refunded misclassification.** A pre-refunded bond is functionally a U.S. Treasury proxy. If credit analysis is conducted on the underlying issuer instead of the escrow, the analysis is meaningless. Always check pre-refunding status first.
-- **Sector-mismatched DSCR comparison.** A 1.30× DSCR is strong for a multifamily housing bond but mediocre for a toll road. Always reference the sector benchmark table; do not apply a single DSCR floor across sectors.
-- **Pension/OPEB blindness on GO bonds.** Some of the largest municipal credit losses (Detroit, Puerto Rico, Chicago Public Schools' near-misses) were driven by pension obligations crowding out debt service. Always pull the NPL and funded ratio; treat NPL/revenues as a primary credit metric for GO bonds.
-- **Stale continuing disclosure.** A bond whose issuer has not filed annual financial information in 18+ months should be treated as data-impaired. State `DATA UNAVAILABLE` for the missing year and call it out as a yellow flag.
-- **Treating brokerage marks as primary.** Schwab/Fidelity/Vanguard "current yield" displays on muni pages are derived; the primary source is EMMA's trade history. Cite EMMA, not the brokerage UI.
-- **Citation drift.** Every `[^N]` reference in the body must have a matching `[^N]: ...` definition, and every definition must be referenced at least once. No gaps.
-- **Bare URLs.** All URLs use markdown link syntax `[descriptive text](url)`. Verify before delivering.
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Verification
 

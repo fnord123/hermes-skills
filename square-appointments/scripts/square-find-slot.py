@@ -9,7 +9,7 @@ Behavior:
    window, and returns up to 5 bookable slots nearest the target.
 
 Returns: small structured JSON. The agent passes slot_handle back to
-square-cancel.py / square-move.py opaquely.
+square-book.py opaquely.
 
 Usage:
   python3 square-find-slot.py --merchant <alias> --around <YYYY-MM-DD>
@@ -78,24 +78,43 @@ def parse_around(s: str) -> datetime:
 
 # ── collision check (via square-list.py) ─────────────────────────────────────
 
-def get_existing_bookings(alias: str) -> list[dict]:
-    """Re-use square-list.py as the source of truth for current bookings."""
+def get_existing_bookings(alias: str) -> tuple[list[dict] | None, str | None]:
+    """Re-use square-list.py as the source of truth for current bookings.
+
+    Returns (bookings, error). A non-None error means we do NOT know whether
+    the user already has an appointment near the target — the caller must
+    surface that instead of treating it as "no conflict", which is how you
+    double-book someone.
+    """
     sl = SCRIPT_DIR / "square-list.py"
     try:
         res = subprocess.run(
             [sys.executable, str(sl), "--merchant", alias],
-            capture_output=True, text=True, timeout=20,
+            # square-list walks the mail API a page at a time (up to ~20 calls
+            # at 30s each), so this has to be generous.
+            capture_output=True, text=True, timeout=180,
         )
     except subprocess.TimeoutExpired:
-        return []
+        return None, ("timed out reading existing appointments for "
+                      f"'{alias}' (square-list.py took over 180s)")
     if res.returncode != 0:
-        # Don't block find-slot on a list failure — agent will hear no collision
-        # and proceed to slot search; surface the error in the response.
-        return []
+        detail = ""
+        try:  # square-list prints its own JSON failure envelope
+            payload = json.loads(res.stdout)
+            detail = str(payload.get("error") or payload.get("reason") or "")
+        except Exception:
+            pass
+        if not detail:
+            lines = (res.stderr or res.stdout or "").strip().splitlines()
+            detail = lines[0] if lines else ""
+        return None, (f"couldn't read existing appointments for '{alias}': "
+                      f"square-list.py exited {res.returncode}"
+                      + (f" — {detail[:200]}" if detail else ""))
     try:
-        return json.loads(res.stdout).get("bookings", [])
+        return json.loads(res.stdout).get("bookings", []), None
     except json.JSONDecodeError:
-        return []
+        return None, (f"couldn't read existing appointments for '{alias}': "
+                      f"square-list.py returned output that wasn't JSON")
 
 
 def find_collision(bookings: list[dict], target_dt: datetime, window_days: int) -> dict | None:
@@ -540,7 +559,7 @@ def load_env(path: Path) -> dict[str, str]:
     return out
 
 
-def main() -> int:
+def _run() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--merchant", required=True)
     ap.add_argument("--around", required=True, help="ISO date (2026-07-15) or relative ('tomorrow', 'next week', 'in 3 days').")
@@ -564,8 +583,20 @@ def main() -> int:
 
     # Step 1: collision check (skipped in probe mode so we can isolate page scraping).
     if not args.probe:
-        existing = get_existing_bookings(args.merchant)
-        coll = find_collision(existing, target, args.window_days)
+        existing, coll_error = get_existing_bookings(args.merchant)
+        if coll_error:
+            # Fail closed: an unknown collision state must not be reported as
+            # "no conflict", or the next step books a duplicate appointment.
+            print(json.dumps({
+                "status": "error",
+                "reason": f"{coll_error}. Existing appointments could NOT be checked, "
+                          f"so no slots were searched — booking now could double-book "
+                          f"the user.",
+                "merchant_alias": args.merchant,
+                "target_date": target.date().isoformat(),
+            }, indent=2))
+            return 1
+        coll = find_collision(existing or [], target, args.window_days)
         if coll:
             print(json.dumps({"status": "already_have", "existing": coll, "target_date": target.date().isoformat()}, indent=2))
             return 0
@@ -642,6 +673,19 @@ def main() -> int:
         out["discovered_note"] = discovered_note
     print(json.dumps(out, indent=2))
     return 0
+
+
+def main() -> int:
+    """Wrap _run so an internal `raise SystemExit("sentence")` still produces
+    one JSON object on stdout instead of a bare line on stderr."""
+    try:
+        return _run()
+    except SystemExit as e:
+        code = e.code
+        if code is None or isinstance(code, int):
+            return 0 if code is None else code
+        print(json.dumps({"ok": False, "error": str(code)}, indent=2))
+        return 1
 
 
 if __name__ == "__main__":

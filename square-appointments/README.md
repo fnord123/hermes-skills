@@ -2,7 +2,7 @@
 
 Manage your Square appointments at a small, hand-configured set of merchants,
 through Hermes chat (e.g. Discord). Read-only by default; the two mutating
-operations (cancel, move) require a confirmation-time invariant.
+operations (book, cancel) require `--confirm` plus a date/time invariant.
 
 ## What this is, and what it isn't
 
@@ -30,8 +30,9 @@ truth and Playwright as the executor:
 |---|---|
 | List existing appts at a merchant | AgentMail REST → filter recent threads by sender/subject → parse start time + manage-link from `extracted_text` |
 | Find an open slot near a date | Playwright navigates the merchant's public `book.squareup.com/.../services/<id>` URL → scrapes the day picker → returns up to 5 candidates |
-| Cancel | Playwright loads the bearer-token manage URL → verifies the displayed start time matches `--confirm-time` → clicks Cancel → confirms |
-| Move | Prefer Square's reschedule UI if exposed (single transaction). Fallback: book new slot first, then cancel old — never leave you with no booking if step 2 fails |
+| Book a slot | Playwright replays the booking flow to that slot → verifies the appointment summary against `--confirm-date` / `--confirm-time` → fills your contact details → submits → verifies the submit actually landed before reporting `booked` |
+| Cancel | Playwright loads the bearer-token manage URL → verifies the displayed date + start time match `--confirm-date` / `--confirm-time` → clicks Cancel → confirms |
+| Move | No dedicated script. Book the new slot first, then cancel the old one — that order never leaves you with no appointment if step 2 fails |
 
 ### Architectures we rejected, and why
 - **Square Bookings REST API directly.** Square's OAuth is seller-side only —
@@ -123,15 +124,15 @@ You should see your upcoming bookings at that merchant.
 - **Token expiry.** Square's manage-booking tokens appear to remain valid
   until the appointment ends. If a script reports `token_expired`, you'll
   have to go through the email confirmation manually.
-- **`--confirm-time` exact match.** Cancel and move both refuse to proceed
-  if the script's own read of the manage page disagrees with the agent's
-  asserted `--confirm-time`. This protects against the model acting on the
-  wrong booking when there's ambiguity.
-- **Move atomicity.** Where the manage-booking UI exposes a "Reschedule"
-  flow, the move script uses it as a single transaction. Where it doesn't,
-  the fallback is book-new-then-cancel-old (in that order). The script
-  reports the partial state explicitly if step 2 fails, so you and the
-  agent can recover.
+- **`--confirm-date` / `--confirm-time` exact match.** Book and cancel both
+  refuse to proceed if the script's own read of the page disagrees with the
+  agent's asserted date and time. This protects against the model acting on
+  the wrong appointment when there's ambiguity. The date check verifies the
+  year whenever Square renders one next to the date, and reports
+  `date_year_verified: false` when it doesn't.
+- **Move atomicity.** A move is book-new-then-cancel-old, in that order, run
+  as two explicit steps. If the booking step returns anything other than
+  `booked`, the original appointment is left alone.
 - **UI churn.** Playwright selectors against `book.squareup.com` are
   inherently fragile — Square can redesign their flow without notice.
   If a script starts failing with selector errors, that's the cause;
@@ -158,14 +159,42 @@ local models "mis-select among large tool sets" and "hallucinate dangerous
 calls," so skills should be "smaller, more prescriptive, and free of obvious
 footguns." That informs three load-bearing choices here:
 
-1. **Five named scripts, not a meta-API.** The agent's tool surface is small
+1. **Six named scripts, not a meta-API.** The agent's tool surface is small
    and direct. No JSON-schema discovery dance like the Square MCP server.
 2. **Opaque handles.** `booking_handle` and `slot_handle` contain values the
    model has no business reasoning about. The contract is "carry them
    verbatim."
-3. **`--confirm-time` invariants.** If the model is confused about which
-   booking, the time won't match the manage-page read, and the script
-   refuses. Cheap correctness check at the boundary.
+3. **`--confirm-date` + `--confirm-time` invariants.** If the model is
+   confused about which appointment, the asserted date/time won't match the
+   script's own read of the page, and it refuses. Cheap correctness check at
+   the boundary. The date is required as well as the time because times
+   repeat daily — two 1:15 PM appointments on different days are
+   indistinguishable by time alone.
+4. **`--confirm` on both mutating scripts.** Booking and canceling refuse to
+   run without it, before opening a browser at all. `--dry-run` is the
+   escape hatch for "show me what would happen" and needs no `--confirm`.
+5. **Post-action verification.** `square-book.py` will not report `booked`
+   unless the checkout step is actually gone or a confirmation marker is on
+   the page; `square-cancel.py` only reports `canceled` on Square's specific
+   post-cancel wording, not on the word "canceled" alone (which also appears
+   in every merchant's cancellation *policy* text). Anything else comes back
+   as `submit_failed` or `uncertain`, which the SKILL tells the agent to
+   relay as "not confirmed."
+6. **Collision checks fail closed.** If `square-find-slot.py` cannot read the
+   user's existing appointments, it returns an error instead of an empty
+   list — an empty list reads as "no conflict" and is how you end up with two
+   appointments in the same week.
+
+### Why SKILL.md pushes so hard on fuzzy merchant matching
+
+The local model routing this skill tends to give up on a business name it
+doesn't recognise and fall through to a web search, which is always the wrong
+move here: the user is naming one of a handful of merchants they configured
+themselves. Sound-alike misspellings ("Dhoraso Brothers" for "deRosso
+Brothers") were the specific failure. SKILL.md therefore states the positive
+rule — read `list-merchants.py`, match on spelling *and* sound, be aggressive
+about claiming a match — without describing the failure itself, since naming a
+model's failure mode in its own context tends to reproduce it.
 
 ## Files
 
@@ -179,11 +208,13 @@ square-appointments/
 └── scripts/
     ├── requirements.txt           # playwright, playwright-stealth
     ├── list-merchants.py
-    ├── square-list.py             # CUJ #1
-    ├── square-find-slot.py        # CUJ #2 (planned, post-validate)
-    ├── square-cancel.py           # CUJ #3 (planned, post-validate)
-    └── square-move.py             # CUJ #4 (planned, post-validate)
+    ├── customer-info.py
+    ├── square-list.py             # CUJ #1 — list appointments
+    ├── square-find-slot.py        # CUJ #2 — find an open slot
+    ├── square-book.py             # CUJ #3 — book a slot
+    └── square-cancel.py           # CUJ #4 — cancel an appointment
 ```
 
-The two read-only scripts ship first. The mutating scripts land after
-end-to-end validation of the read path against real data.
+There is no move/reschedule script. A move is done as book-the-new-slot
+then cancel-the-old-one, in that order, so a failure never leaves the user
+with no appointment.

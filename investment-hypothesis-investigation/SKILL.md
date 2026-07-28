@@ -1,32 +1,49 @@
 ---
 name: investment-hypothesis-investigation
-description: "Investigate a high-level investment hypothesis through structured, adversarial research. Use when the user states a thesis or claim they want stress-tested - e.g., the strait of Hormuz staying closed longer than expected, transformer makers undervalued vs hyperscalers, AI capex plateauing in 2027, antitrust breaking up Big Tech. Also activate for: test this thesis, research this hypothesis, is this view priced in, what's the edge here, build a case for or against, or any user statement of a directional investing view they want validated against current evidence and consensus. Produces a single living markdown report with linked endnote citations, saved to ~/.hermes/reports/research/."
-version: 1.0.0
+description: >
+  Stress-test ONE directional investment THESIS spanning multiple companies, a
+  sector, or a macro variable — no single security is the subject. Quantifies
+  what the market already prices in, gathers evidence for and against, and
+  reports a probability estimate against market-implied with an explicit edge
+  number. PREFER THIS SKILL whenever the user states a claim or view they want
+  validated, rather than naming one security to analyze. Use
+  `stock-investment-analysis` instead the moment a single ticker or listed
+  company is the subject. Use `municipal-bond-analysis` instead for one bond by
+  CUSIP. Use `pre-ipo-investment-analysis` instead for one private round.
+  Activate on any of: "test this thesis", "research this hypothesis", "is this
+  priced in", "what's the edge here", "build a case for", "build a case
+  against", "stress-test this view", "are <sector> stocks cheap", "will <event>
+  happen by <date>", "is <theme> overvalued", "should I bet on <trend>".
+version: 0.1.0
 author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
     tags: [Investment, Investing, Research, Hypothesis, Thesis-Testing, Macro, Equity]
-    related_skills: [stock-investment-analysis, pre-ipo-investment-analysis, arxiv]
+    requires_toolsets: [web, file]
 ---
 
 # Investment Hypothesis Investigation
 
 Stress-test a high-level investment hypothesis through adversarial multi-angle research. Output is a single living markdown report saved to `~/.hermes/reports/research/` that decomposes the claim, establishes the consensus baseline, gathers evidence for and against with linked citations, estimates the probability vs market-implied, and constructs concrete trades that express the view.
 
-## When to Use (and when NOT to)
+## When to Use
 
 Activate for thematic, macro, or multi-company investment theses — e.g., "is the AI infrastructure theme overvalued," "should I bet on nuclear energy," "are semiconductor equipment stocks a good entry point."
-
-**Do NOT activate for single-stock analysis.** If the user names a specific ticker or asks to analyze/evaluate/research one company (e.g., "analyze Schneider Electric," "what do you think of SU," "is Eaton undervalued"), load `stock-investment-analysis` instead. This skill is for theses that span multiple companies, sectors, or macro factors — not individual equity research.
-
-**When a thesis investigation identifies specific companies as candidates:** After completing the hypothesis-level analysis, offer to run `stock-investment-analysis` on any named tickers for deeper due diligence. Do not attempt single-stock valuation within this skill's framework.
 
 - *Macro/event:* "The strait of Hormuz will be kept closed for months instead of weeks."
 - *Relative valuation:* "Electrical-component makers (transformers, UPS, switchgear) are undervalued vs hyperscaler/AI-compute names."
 - *Secular trend:* "AI training capex will plateau by 2027 as scaling laws hit diminishing returns."
 - *Regulatory/structural:* "FTC will block at least one Big Tech acquisition in the next 12 months."
 - *Cross-asset:* "The dollar weakens 10%+ against EM currencies over the next 18 months."
+
+**When a thesis investigation identifies specific companies as candidates:** After completing the hypothesis-level analysis, offer to run `stock-investment-analysis` on any named tickers for deeper due diligence. Do not attempt single-stock valuation within this skill's framework.
+
+## When NOT to use
+
+**Do NOT activate for single-stock analysis.** If the user names a specific ticker or asks to analyze/evaluate/research one company (e.g., "analyze Schneider Electric," "what do you think of SU," "is Eaton undervalued"), load `stock-investment-analysis` instead. This skill is for theses that span multiple companies, sectors, or macro factors — not individual equity research.
+
+For one municipal bond identified by CUSIP, load `municipal-bond-analysis`. For one private-company round, load `pre-ipo-investment-analysis`.
 
 Also do **not** activate for: pure educational topic explainers, or open-ended sector overviews without a directional claim.
 
@@ -282,21 +299,14 @@ When the user requests additions or refinements:
 [^2]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
 ```
 
-## Notes
+## Errors
 
-1. **Skipping Phase 2.** Without a quantified consensus, "the evidence supports the hypothesis" is meaningless — the question is whether evidence supports it *more than the market already believes*. Always quantify the baseline before gathering supporting evidence.
-2. **Confirmation cascade.** If your evidence-for section is twice as long as evidence-against, you have not done the work. Force-search for the strongest counter-argument from a credible source.
-3. **Vague probability.** "Likely" is not an estimate. "55–65% with medium confidence" is.
-4. **No null-edge finding.** If the market is already pricing the hypothesis correctly, that is the right answer. Say so. Do not manufacture edge.
-5. **Trade list without specifics.** Every named instrument in Section 7 must include all five fields: (a) ticker, (b) current price with explicit as-of date, (c) market cap or notional size, (d) one-line rationale for why it expresses the view, (e) the specific risk that breaks the trade even if the hypothesis is right. "Long electrical-component names" is useless. "GEV at $X (as-of YYYY-MM-DD), 12-month target $Y based on 18× forward EPS, breaks if data-center capex guidance cuts >15% in next two earnings cycles" is a trade. **If you cannot fill all five fields for an instrument, strike it from the list rather than including a half-formed entry.** Generic ETF baskets ("dry bulk ETFs", "shipping stocks") without named tickers count as half-formed.
-6. **Footnote drift.** Every `[^N]` reference in the body must have a matching `[^N]: ...` definition at the end of the report, and every definition must be referenced at least once. No gaps in numbering. Verify before saving.
-7. **Saving to the wrong directory.** Reports go to `~/.hermes/reports/research/`, not `cwd`, not `/tmp`. Create the directory if missing.
-8. **Renumbering on edit.** When extending the report, append new footnotes with the next available number. Never renumber existing ones — the user may have linked to them.
-9. **Stale prices.** Any quoted price, multiple, or yield must have an as-of date. Pull live, do not rely on training data.
-10. **Skipping stock-investment-analysis when a specific ticker is named.** If the user says "analyze [company]" or names a ticker, that's a single-stock request — delegate to `stock-investment-analysis`. Do not try to do valuation, bull/bear cases, or financial deep dives within this skill.
-11. **Overclaiming certainty on market timing.** Even with strong evidence, assign probabilities honestly. A 70% conviction thesis can still lose money if the catalyst is priced in.
-12. **Citing blogs and social media as primary evidence.** Footnotes whose URLs point to Substack, Medium, X/Twitter, personal blogs, or SaaS-company marketing pages are secondary at best. Replace with the underlying primary source — the SEC filing, government data (EIA, BLS, IMF, Treasury, central bank), regulatory release, court document, peer-reviewed paper, or major-publication article they are paraphrasing. If you cannot find the primary source, demote that claim's weight rather than treating the blog as canonical. Target ≥75% of footnotes pointing to primary sources.
-13. **Stale data without flagging.** When citing a report, filing, or assessment whose date is older than the most recently filed quarter (for fundamentals) or older than 30 days (for prices, prediction-market odds, multiples), explicitly note the as-of date in the body and flag that the figure may be stale. Do not silently treat year-old assessments as current.
+- A search or fetch fails for a required field → write `DATA UNAVAILABLE` for that field and state what you tried.
+- The hypothesis is ambiguous → ask **one** clarifying question, then proceed.
+- No market-implied baseline can be found for the hypothesis → say so explicitly in Section 2 rather than substituting your own prior.
+- The report directory `~/.hermes/reports/research/` cannot be created or written → report the exact error and stop.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Verification
 

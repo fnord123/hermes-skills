@@ -114,8 +114,7 @@ monitor with `status`.
 - `"retain failed…"` → the memory server rejected or timed out on the request.
   Report it; do not retry in a loop.
 
-Always ask the user for guidance when there is an error; do not proactively try
-to resolve errors yourself.
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Empty results
 

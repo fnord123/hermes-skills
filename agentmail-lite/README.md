@@ -45,6 +45,10 @@ MCP server 'agentmail' (stdio): registered 9 tool(s): mcp_agentmail_list_inboxes
 
 If you see a different tool count or no registration line, the MCP server isn't loading correctly — check the `mcp_servers.agentmail` block in `config.yaml`.
 
+Alongside the 9 allowlisted tools, the MCP server registers 4 framework tools (`list_resources`, `read_resource`, `list_prompts`, `get_prompt`) regardless of `--tools`. They are inert. This is recorded here rather than in SKILL.md: naming a tool in model context is what puts it back on the table, and there is nothing for the model to do about these.
+
+Likewise, AgentMail exposes no `delete_message` tool — deletion is a `trash` label via `update_message`, which is what SKILL.md documents positively.
+
 ## Verification
 
 ```

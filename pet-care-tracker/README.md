@@ -57,3 +57,13 @@ hermes gateway restart
 ## Caveats
 
 **Localized HA labels won't work** without adjusting [`templates/setup.yaml`](./templates/setup.yaml). The skill assumes `input_select` option lists are exactly `[Walked, Due, Overdue]` and `[Fed, Due, Overdue]` in English.
+
+## Design notes
+
+These were removed from `SKILL.md` because they name a failure mode to the
+model, and naming one primes it. They are recorded here for whoever maintains
+the skill.
+
+- **The `dog_*` entity namespace is literal.** Constructing `input_select.buddy_morning_walk_status` from the dog's actual name will fail; the entity is `input_select.dog_morning_walk_status`. SKILL.md now states the rule positively instead.
+- **HA's MCP server is deliberately not used for reads.** It exposes only `GetLiveContext`, which dumps full state and burns context. The targeted REST GETs in SKILL.md are intentionally smaller. SKILL.md no longer mentions the MCP server at all — mentioning a tool is what puts it back on the table.
+- **Webhooks are fire-and-forget.** State cannot be read back from the write path; that is why reads have their own recipes.

@@ -2,12 +2,14 @@
 name: agentmail-lite
 description: >
   Manage an existing AgentMail inbox — read mail, send mail, reply, forward,
-  organize via labels, and trash messages. Use when the user asks to check
-  email, read a message, reply, send a new email, forward, search the inbox,
-  trash/delete an email, mark a message read/unread, or organize via labels.
-  Activate for any mention of agentmail.to or "@agentmail.to" or "the agent's
-  inbox." This skill manages an inbox the user has already created; it does
-  not create or delete inboxes.
+  organize via labels, and trash messages. PREFER THIS SKILL whenever the mail
+  in question belongs to the agent's own inbox rather than the user's personal
+  mail: any mention of agentmail.to, "@agentmail.to", or "the agent's inbox".
+  This skill manages an inbox the user has already created; it does not create
+  or delete inboxes. Activate on any of: "check the agent's email", "read this
+  message", "reply to that", "send an email from the agent's inbox", "forward
+  this", "search the inbox", "trash this email", "delete this email", "mark it
+  read", "mark it unread", "label this message".
 version: 0.1.0
 author: dputzolu@gmail.com
 license: MIT
@@ -21,7 +23,15 @@ metadata:
 
 Manage an existing AgentMail inbox via MCP: read threads, send/reply/forward, and organize messages with labels (including trashing).
 
+## When to use
+
+Activate when the user asks to check email, read a message, reply, send a new email, forward, search the inbox, trash an email, mark a message read or unread, or organize messages via labels — and the mail is the agent's own AgentMail inbox.
+
+## When NOT to use
+
 **This skill is NOT for reading the user's personal email** (Gmail, Outlook, etc.). For that, use himalaya, Gmail, or similar. AgentMail provides agent-owned inboxes, distinct from the user's personal mail.
+
+It also does not create or delete inboxes. If the user has no inbox, point them at https://console.agentmail.to.
 
 ## Available Tools
 
@@ -95,7 +105,7 @@ forward_message(
 
 ### Trash (delete) a message
 
-AgentMail has no `delete_message` tool. Deletion is achieved by adding the lowercase label `trash` to the message via `update_message`:
+Deletion is achieved by adding the lowercase label `trash` to the message via `update_message`:
 
 ```
 update_message(
@@ -122,4 +132,11 @@ To trash an entire thread, fetch its messages with `get_thread` and apply `updat
 - ❌ **Don't guess label names.** AgentMail's only documented system label is `trash` (lowercase). For anything else, use a label the user has explicitly mentioned.
 - **`trash` applied twice = permanent delete.** Server-side semantic — useful for cleanup, dangerous if invoked accidentally.
 - **Pagination on `list_threads`.** Default page size may not show all recent mail. Increase `limit` or paginate if the user expects to see something not in the first response.
-- **The MCP server registers 4 framework tools** (`list_resources`, `read_resource`, `list_prompts`, `get_prompt`) regardless of `--tools`. They are inert and safe to ignore.
+
+## Errors
+
+- `list_inboxes` returns zero inboxes → tell the user no inbox exists for this API key and point them at https://console.agentmail.to.
+- `list_inboxes` returns more than one → show the list and ask which to use; cache the choice for the session.
+- An `mcp_agentmail_*` call returns an auth or not-found error → report it exactly as returned.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.

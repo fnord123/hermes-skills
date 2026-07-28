@@ -286,7 +286,7 @@ def _in_window(start_iso: str | None, days_back: int, days_ahead: int) -> bool:
     return (now - timedelta(days=days_back)) <= dt <= (now + timedelta(days=days_ahead))
 
 
-def main() -> int:
+def _run() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--merchant", required=True, help="Merchant alias from merchants.json.")
     ap.add_argument("--days-ahead", "--horizon-days", dest="days_ahead", type=int, default=60,
@@ -383,6 +383,19 @@ def main() -> int:
         out["skipped"] = skipped
     print(json.dumps(out, indent=2))
     return 0
+
+
+def main() -> int:
+    """Wrap _run so an internal `raise SystemExit("sentence")` still produces
+    one JSON object on stdout instead of a bare line on stderr."""
+    try:
+        return _run()
+    except SystemExit as e:
+        code = e.code
+        if code is None or isinstance(code, int):
+            return 0 if code is None else code
+        print(json.dumps({"ok": False, "error": str(code)}, indent=2))
+        return 1
 
 
 if __name__ == "__main__":

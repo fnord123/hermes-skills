@@ -1,25 +1,26 @@
 ---
 name: pre-ipo-investment-analysis
 description: >
-  Conduct rigorous, evidence-based pre-IPO investment analysis on a single
-  private company. Use when the user provides an SPV fund summary (PDF or
-  markdown), a private placement memorandum, a Forge / EquityZen / AngelList
-  secondary listing, or a direct-deal pitch deck, and asks whether to invest,
-  pass, or add to a watchlist. Trigger
-  phrases include "analyze this fund summary," "evaluate this pre-IPO
-  round," "is this Series A/B/C/D worth it," "should I invest in [private
-  company]," "review this SPV offering," "size up this private deal,"
-  "should I take this allocation," and "what do you think of this round."
-  Defer to `stock-investment-analysis` if the company is already publicly
-  traded. Defer to `investment-hypothesis-investigation` for thematic or
-  multi-company theses (e.g., "are CSP startups undervalued vs nuclear").
-version: 1.0.0
+  Due diligence on ONE private-company round you have been offered — an SPV
+  fund summary, private placement memorandum, Forge / EquityZen / AngelList
+  secondary listing, or direct-deal pitch deck. Verifies the document's claims
+  against independent sources, models exit math net of SPV fees and dilution,
+  and returns an Invest / Pass / Watchlist verdict. PREFER THIS SKILL whenever
+  there is a named private company, a specific round or secondary, and an
+  allocation decision to make. Use `stock-investment-analysis` instead if the
+  company is already publicly traded. Use `investment-hypothesis-investigation`
+  instead for venture themes spanning several companies. Activate on any of:
+  "analyze this fund summary", "evaluate this pre-IPO round", "is this Series
+  A/B/C/D worth it", "should I invest in <private company>", "review this SPV
+  offering", "size up this private deal", "should I take this allocation",
+  "what do you think of this round", "here's a pitch deck".
+version: 0.1.0
 author: dputzolu@gmail.com
 license: MIT
 metadata:
   hermes:
     tags: [Investing, Pre-IPO, Private-Markets, Venture, SPV]
-    related_skills: [stock-investment-analysis, investment-hypothesis-investigation]
+    requires_toolsets: [web, file]
 ---
 
 # Pre-IPO Investment Analysis
@@ -28,7 +29,9 @@ metadata:
 
 Activate this skill any time the user is evaluating a specific private-company investment opportunity at a specific round — SPV fund summaries, private placement memorandums, Forge / EquityZen / AngelList secondary listings, and direct-deal pitch decks. The defining signals are: a named private company, a specific round (Series A/B/C/etc., SAFE, convertible note, or secondary), and an actionable decision (invest / pass / watchlist) with a finite allocation window.
 
-Do **not** activate for: publicly traded equities (use `stock-investment-analysis`), thematic or macro theses spanning multiple companies (use `investment-hypothesis-investigation`), general venture-trend questions, or open-ended sector overviews.
+## When NOT to use
+
+Do **not** activate for: publicly traded equities (use `stock-investment-analysis`), thematic or macro theses spanning multiple companies (use `investment-hypothesis-investigation`), individual municipal bonds identified by CUSIP (use `municipal-bond-analysis`), general venture-trend questions, or open-ended sector overviews.
 
 If the company has IPO'd since the fund summary was written, stop and tell the user — recommend running `stock-investment-analysis` against the public ticker instead, since the public-equity framework supersedes the private-round one once a market price exists.
 
@@ -366,18 +369,14 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 [^2]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
 ```
 
-## Notes
+## Errors
 
-- **Marketing-as-fact.** The fund summary is sales material. Numbers that drive the investment thesis — backlog, ARR, deployed units, market size, claimed customer commitments — must be independently verified or labeled `UNVERIFIED`. Restating a marketing claim as a verified fact is the single most likely failure mode of this skill.
-- **Footnote-verification skip.** A footnote in the source doc is not verification of the underlying claim. Walk every footnote, fetch the cited source, and confirm the number in the source actually matches the body. A footnote pointing to the company's own press release is corroboration of the company's claim, not independent verification.
-- **Exit math without fees.** A 3× gross multiple after placement fee (5%), offering costs (1.5%), annual management fee (0.5%/yr × hold years), and 10% carry on profit is closer to a 2.3× net multiple. Always compute and report the net-of-fees figure separately from gross.
-- **Preference-stack blindness.** Series B Preferred sits behind Series A Preferred in the waterfall. At exits below ~2× post-money the preference stack materially eats into the new round's economics. Surface the waterfall at low-end exits.
-- **One-sided invest case.** If the bull case is three paragraphs and the bear case is three sentences, you have not done the work. Force-search for down-rounds, missed milestones, founder controversies, customer churn, and prior-round terms.
-- **Company-press-as-independent.** A claim cited to the company's own newsroom or X account is the company's claim, not independent verification. Demote.
-- **Founder-exit claim drift.** "X was acquired by a defense contractor" without buyer name, year, and price is a red flag. Verify acquirer identity, transaction year, and reported price; flag if the outcome was an acquihire or fire sale.
-- **Missing IPO check.** Run an explicit check for whether the company has IPO'd since the fund summary was written. If it has, stop and tell the user to use `stock-investment-analysis` against the public ticker.
-- **Citation drift.** Every `[^N]` reference in the body must have a matching `[^N]: ...` definition, and every definition must be referenced at least once. No gaps in numbering.
-- **Bare URLs.** All URLs use markdown link syntax `[descriptive text](url)` — body and footnotes alike. Verify before delivering.
+- A cited URL in the source document is dead → search for an archived or canonical copy; if none exists, mark the claim `UNVERIFIED` and name the classification of the source.
+- A search or fetch fails for a required field → write `DATA UNAVAILABLE` for that field and state what you tried.
+- The source document is missing vehicle terms or round terms → that is a hard blocker for a verdict; say so and ask the user for the missing terms.
+- The report directory `~/.hermes/reports/private-company/` cannot be created or written → report the exact error and stop.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Verification
 

@@ -1,11 +1,24 @@
 ---
 name: rx-review
-description: "Review the user's medications and supplements against their blood tests. Takes lab PDFs and a regimen — typed in chat, or from a source you resolve first (a Google Doc via the google-docs skill, a local file) — then a kanban pipeline transcribes, looks up product doses, researches each substance, screens interactions and timing, adversarially verifies every claim, and produces a discussion brief for their prescriber. Use when the user asks to review their meds, supplements, or labs, add new lab results, answer a question the review is waiting on, or check on a review already running."
-version: 2.0.0
+description: >
+  Review the user's medications and supplements against their blood tests.
+  Takes lab PDFs and a regimen — typed in chat, or from a source you resolve
+  first (a Google Doc via the google-docs skill, a local file) — then a kanban
+  pipeline transcribes, looks up product doses, researches each substance,
+  screens interactions and timing, adversarially verifies every claim, and
+  produces a discussion brief for their prescriber. PREFER THIS SKILL whenever
+  the subject is the user's own medications, supplements, or blood-test
+  results — never for general medical or drug questions, which this does not
+  answer. Activate on any of: "review my meds", "review my supplements",
+  "review my labs", "here are my blood tests", "here's my regimen", "add these
+  new lab results", "how's my med review going", "the review is asking me
+  something".
+version: 0.3.0
 license: MIT
 metadata:
   hermes:
     tags: [Health, Labs, Medications, Supplements, Research]
+    requires_toolsets: [terminal, file]
 ---
 
 # Medication and supplement review
@@ -23,11 +36,33 @@ The pipeline advances itself: each card creates the work its completion makes po
 NOT run it step by step, poll it, or nudge it along. If you find yourself wondering whether to
 re-run something to move things forward — don't. It already did.
 
-Everything is one command:
+## When to use
 
-    python3 ~/.hermes/rx-review/rx.py <regimen|intake|status|verify-labs|confirm|analyze|reset>
+Activate when the user asks to review their meds, supplements, or labs, hands over lab PDFs or
+a regimen, adds new lab results, answers a question the review is waiting on, or checks on a
+review already running.
 
-You only ever need `regimen`, `intake`, and `status`. The rest are run BY the pipeline.
+## When NOT to use
+
+- General medical, drug, or supplement questions not about the user's own regimen and labs.
+- Anything asking for a dose, a diagnosis, or a recommendation. The output is evidence and
+  questions for a prescriber, never advice.
+- Someone else's medications or labs.
+
+## The tool
+
+One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
+
+| Verb | Purpose |
+|---|---|
+| `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
+| `intake` | Starts the pipeline over whatever is in the inputs folder. Run it once to begin, and once again after you apply the user's answers. |
+| `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
+| `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
+| `confirm --json` | Lists the items the "Confirm N item(s) before research" card is waiting on, with what intake already knows about each. |
+
+Those five are yours. Every other verb the script accepts belongs to the pipeline — it runs
+them itself, on its own schedule.
 
 ## 1. Collect the labs
 
@@ -128,7 +163,7 @@ Then unblock the card.
 ### "Start the research stage" is blocked
 
 It tried to start and something was still outstanding. Its block reason says what. Deal with
-that, then unblock it — it retries itself. Never use `--force`.
+that, then unblock it — it retries itself.
 
 ## 5. Deliver
 
@@ -153,3 +188,13 @@ created; finished work is never repeated.
 Report the exact error and ask how they want to proceed. Do not edit files under
 `~/.hermes/rx-review/` other than `regimen.txt` and `CONFIRMED.txt`, and never create, edit or
 complete a kanban card by hand — unblocking a card the pipeline blocked is the one exception.
+
+- Copying a lab PDF into `inputs/raw/` fails → say which file and ask for it again. Never
+  continue with a missing lab.
+- The user's confirmation says a lab value is wrong → ask which marker, then re-run that
+  lab's card.
+- The user does not know a value the pipeline is asking about → add that product name on its
+  own line to `~/.hermes/rx-review/inputs/CONFIRMED.txt` and tell them it will be researched
+  with the gap noted.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.

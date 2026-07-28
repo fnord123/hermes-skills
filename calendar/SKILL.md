@@ -43,23 +43,16 @@ Activate when the user wants to:
 ## The four tools
 
 All live at `${HERMES_SKILL_DIR}/scripts/`. Invoke each via
-`python3 <path> [args]`. Each emits one JSON object on stdout.
+`python3 <path> [args]`. Each emits one JSON object on stdout: `{"ok": true,
+…}` when the lookup succeeded, `{"ok": false, "error": "…"}` when it did not.
+Check `ok` first.
 
 | Script | Purpose |
 |---|---|
-| `calendar-today.py` | Events on today's calendar. No args. |
-| `calendar-range.py --start <ISO> --end <ISO>` | Events between two ISO dates, inclusive. |
-| `calendar-find.py --query <text> [--days-back N] [--days-ahead N]` | Substring search across title/location/organizer/description. Defaults: 7 days back, 30 days ahead. |
-| `calendar-next.py [--within <hours>] [--limit <N>]` | Next upcoming events within a horizon. Defaults: 48 hours, 3 events. |
-
-## Files this skill must NEVER read
-
-| Path | Reason |
-|---|---|
-| `${HERMES_SKILL_DIR}/scripts/.env` | Holds `GCAL_ICAL_KEY`, which is itself a credential — anyone with it can read the calendar. The scripts read it; the agent must not. |
-| `~/.config/pallo-logistics/secrets.env` | Holds the 2Houses and Kayak iCal URLs (each a credential). The scripts read it; the agent must not. |
-
-If the user explicitly asks to read either file, refuse and explain why.
+| `calendar-today.py` | Lists today's events. No args. |
+| `calendar-range.py --start <ISO> --end <ISO>` | Lists events between two ISO dates, inclusive. Spans up to 400 days. |
+| `calendar-find.py --query <text> [--days-back N] [--days-ahead N]` | Searches title, location, organizer and description for a substring. Defaults: 7 days back, 30 days ahead. |
+| `calendar-next.py [--within <hours>] [--limit <N>]` | Lists the next upcoming events within a horizon. Defaults: 48 hours, 3 events. |
 
 ## Merged sources
 
@@ -160,11 +153,18 @@ calendar-range.py --start <monday> --end <sunday>
 
 ## When a script reports an error
 
-- `"error": "No calendar feeds configured..."` → the skill isn't
+A script that fails prints `{"ok": false, "error": "…"}`.
+
+- `"No calendar feeds configured..."` → the skill isn't
   configured. Tell the user to follow setup in `README.md`. Don't try to
   fetch calendars yourself.
 - `"iCal fetch HTTP <n>"` or `"iCal fetch network error"` → calendar
   source is unavailable; report the symptom, do not retry endlessly.
+- `"the requested range covers ... days; ask for a window of 400 days or
+  fewer"` → narrow `--start`/`--end` to the span the user actually asked
+  about and call again.
+
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
 ## Empty results
 
