@@ -63,3 +63,11 @@ Open an [issue](https://github.com/fnord123/hermes-skills/issues) for:
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Conventions and outstanding work
+
+- [CONVENTIONS.md](./CONVENTIONS.md) — the house rules every skill follows, and why.
+- [TODO.md](./TODO.md) — outstanding conformance work, ordered by what it actually costs.
+- `python3 tools/lint_skills.py` — checks a skill (or the repo) against the conventions. CI
+  runs this on every push and gates on critical findings only.
+- `tools/skill_json.py` — the house JSON contract; vendor it into a skill's `scripts/`.
