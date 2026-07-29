@@ -57,16 +57,18 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 |---|---|
 | `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
 | `intake` | Starts the pipeline over whatever is in the inputs folder. Run it once to begin, and once again after you apply the user's answers. |
+| `staged` | What is waiting to be transcribed, across upload rounds. |
+| `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
 | `regimen-confirm` | Records an answer to a regimen question and closes the gate card. Use this instead of unblocking. |
 | `labs-confirm` | Records that the user confirmed the labs and closes the gate card. Use this instead of unblocking. |
 | `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
 | `confirm --json` | Lists the items the "Confirm N item(s) before research" card is waiting on, with what intake already knows about each. |
 
-Those five are yours. Every other verb the script accepts belongs to the pipeline — it runs
+Those nine are yours. Every other verb the script accepts belongs to the pipeline — it runs
 them itself, on its own schedule.
 
-## 1. Collect the labs
+## 1. Collect the labs — over as many rounds as they need
 
 Ask for the lab PDFs. Attachments arrive as local paths — copy each into the intake folder,
 keeping its name:
@@ -74,6 +76,19 @@ keeping its name:
     cp "<attached path>" ~/.hermes/rx-review/inputs/raw/
 
 If a copy fails, say which file and ask for it again. Never continue with a missing lab.
+
+**Chat platforms cap attachments per message — Discord allows 10 — so a full lab history
+usually arrives in several rounds.** After copying each round, run:
+
+    python3 ~/.hermes/rx-review/rx.py staged
+
+Report what it says: how many are waiting, and any it recognised as duplicates. Then **ask
+whether more are coming, and wait.** Re-sending the same PDF is free — files are matched by
+content, so a duplicate is ignored rather than transcribed twice.
+
+**Do not start the pipeline while labs are still arriving.** More history is strictly better
+here: three or more readings of the same marker let the pipeline detect a TREND, and a marker
+drifting inside its reference range is invisible without them.
 
 ## 2. Collect the regimen
 
@@ -106,7 +121,10 @@ matter as much as supplements; drug-supplement interactions are the most valuabl
 Record it VERBATIM. Never correct a spelling, convert a unit, or invent a dose. The pipeline
 looks products up and asks about the rest.
 
-## 3. Start it
+## 3. Start it — only when they say the labs are complete
+
+Wait for the user to say they are done uploading. Confirm the count back to them first
+(`rx.py staged`), then:
 
     python3 ~/.hermes/rx-review/rx.py intake
 
@@ -205,8 +223,9 @@ waiting. Do not run anything else to "help it along".
 
 ## Adding labs later
 
-Copy the new PDFs into `inputs/raw/` and run `rx.py intake` once. Only the new work is
-created; finished work is never repeated.
+Copy the new PDFs into `inputs/raw/`, run `rx.py staged` to confirm what arrived, and run
+`rx.py intake` once when they say that is all. Only the new work is created; finished work is
+never repeated, and a re-sent file is recognised by content and ignored.
 
 ## If something fails
 
