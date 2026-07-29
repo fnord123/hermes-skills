@@ -426,13 +426,22 @@ never 'nothing found'"* in its docstring while failing open in three separate pl
   range" returned four different answers, and the one wired to the gate was the wrong one.
   *"Two answers to 'what is abnormal' means at least one is wrong, and the user is the one who
   has to notice."*
-- **Consolidating a helper whose output feeds an IDENTIFIER.** Merging two near-identical
-  slug functions is obviously right — until you notice one truncated at 48 characters and the
-  other at 60, and that its output becomes the idempotency key. A different key is a different
-  card: a re-plan stops matching the existing graph and silently builds a second one. The same
+- **Consolidating a helper whose output feeds an IDENTIFIER.** Merging two near-identical slug
+  functions is obviously right — until you notice one truncated at 48 characters and the other
+  at 60, and that the output becomes the idempotency key. A different key is a different card:
+  a re-plan stops matching the existing graph and silently builds a second one. The same
   applies to anything deriving a filename, a cache path or a dedupe key. Before merging, ask
   what consumes the output, and diff the output over real inputs rather than reading the two
   implementations.
+
+  **Then keep going, because the divergence is usually hiding a bug rather than causing one.**
+  Those three slug lengths were all arbitrary — the key column was unbounded text, so
+  truncating bought nothing and risked collision, and a colliding idempotency key does not
+  error: `create` returns the EXISTING card and discards the new parent arguments, wiring the
+  graph to the wrong node in silence. Three copies had disagreed about a limit that should
+  never have existed, and each looked defensible on its own. **Consolidation's real value is
+  not that the copies stop drifting; it is that putting them side by side forces the question
+  none of them had to answer alone.**
 - **Two constants with one name.** `MAX_SECTION_CHARS` was 5,000 in one module and 12,000 in
   another.
 - **Re-deriving a classification the upstream stage already made** by hand-parsing its output
