@@ -32,17 +32,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # scripts/ is a generated copy of it.
 SOURCES = {
     "skill_json.py": "tools/skill_json.py",
-    "pipeline.py": "analysis-engine/pipeline.py",
-    "rxfetch.py": "analysis-engine/rxfetch.py",
-}
-
-# Copies that live OUTSIDE this repo, listed explicitly because the glob below cannot see them.
-# rx-review's scripts sit in ~/.hermes (a separate repo) while it is cut over to
-# analysis-engine. An ungoverned copy is precisely how this pipeline lost its fetch hardening
-# once already: the fix landed in one module at 11:17 and a fresh module written four hours
-# later never inherited it, so a whole audit run judged claims against "Checking your browser".
-EXTERNAL_CONSUMERS = {
-    "rxfetch.py": ["~/.hermes/rx-review/rxfetch.py"],
 }
 
 HEADER = (
@@ -80,11 +69,6 @@ def consumers(name):
     found = []
     for p in glob.glob(os.path.join(ROOT, "*", "scripts", "**", name), recursive=True):
         if os.path.abspath(p) != os.path.abspath(src) and ".venv" not in p:
-            found.append(p)
-    for p in EXTERNAL_CONSUMERS.get(name, []):
-        p = os.path.expanduser(p)
-        # Absent is fine and silent: the external repo may not be checked out here.
-        if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(src):
             found.append(p)
     return sorted(found)
 
