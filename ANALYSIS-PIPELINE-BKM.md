@@ -155,10 +155,17 @@ breaks and 166 numbered sections on the same file.
 
 ### 2b. Many sources packed into cards
 
-**Ask the server what context it actually serves; do not assume.** rx-review queries the
-inference server's `/props` for `n_ctx` at plan time, because *"the profiles' declared
-context_length is a claim about the model, not a measurement of it."* Fall back conservatively
-(64,000) and say so out loud when the query fails.
+**Size to the window your WORKERS will get, and ask the layer they actually go through.**
+The tempting move is to probe the inference backend for its real `n_ctx` — "a declared
+context_length is a claim, not a measurement." That reasoning is wrong twice over here. The
+operative number is what the client is *configured to send*: cards are executed by agent
+workers through a proxy, and the agent will not send more than its own configured window
+whatever the backend loaded. And pinning a backend address means the pipeline inherits every
+migration — this one hardcoded `192.168.1.4:10400`, serving moved to another host, every probe
+failed, and the pipeline quietly planned against a quarter of the real window with one warning
+line as the only trace. If your infrastructure says *"clients never talk to a GPU host
+directly; the proxy is the only front door"*, that applies to your pipeline too. Read the
+configured window; keep a conservative floor for when even that is unreadable.
 
 **Measure real sizes by fetching, once, per unique source.** A domain lookup table cannot know
 that one PMC article is an abstract stub and the next is 40 pages, and it silently mis-sizes
