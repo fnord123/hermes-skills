@@ -86,6 +86,13 @@ Report what it says: how many are waiting, and any it recognised as duplicates. 
 whether more are coming, and wait.** Re-sending the same PDF is free — files are matched by
 content, so a duplicate is ignored rather than transcribed twice.
 
+**If any file is marked `CHECK`, raise it before starting.** That file does not look like a lab
+panel — an endoscopy or imaging report, a clinical note, or a scan with no text layer. Name the
+file, say what it looks like, and ask whether it was meant to be included. A narrative report
+has no marker table, so the transcriber has nothing to read and a card is spent for nothing.
+This is a warning, not a refusal: if the user says it is a lab, include it. If it was a
+mistake, delete just that file from `~/.hermes/rx-review/inputs/raw/` and run `staged` again.
+
 **Do not start the pipeline while labs are still arriving.** More history is strictly better
 here: three or more readings of the same marker let the pipeline detect a TREND, and a marker
 drifting inside its reference range is invisible without them.
