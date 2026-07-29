@@ -14,6 +14,14 @@ Local models are a different problem. They tend to:
 
 The skills in this repo are deliberately **smaller, more prescriptive, and free of obvious footguns**, so a local model has fewer ways to go wrong.
 
+## Writing a multi-card analysis pipeline
+
+A pipeline that gathers evidence across many cards, judges it, and writes a conclusion fails in
+ways that are not guessable — sources that answer HTTP 200 with a bot wall, kanban blocks that
+never resume, cards that compact and return confident nonsense. Read
+[ANALYSIS-PIPELINE-BKM.md](./ANALYSIS-PIPELINE-BKM.md) **before** writing one. Every rule in it
+was paid for by a run that failed.
+
 ## Currently used with
 
 - `qwen3.6-27b`
