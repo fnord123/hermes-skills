@@ -275,6 +275,14 @@ wall. A two-second network blip therefore permanently demotes a claim, **and the
 reports itself clean.** Either make verdicts reached without text provisional, or accept that
 transient failures are final.
 
+**If you do make them provisional, gate revival on NEW EVIDENCE and cap it.** Re-judging
+anything that merely *looks* unresolved loops forever on a genuinely unreachable source, and
+re-blocking twice for the same reason escalates the card out of the graph entirely (§1). Two
+constraints make it safe: revive only when the underlying condition has actually changed — the
+source now returns usable text — and revive each item at most once, tracked in persisted state,
+so an item whose source reads fine but whose quote is truly absent settles after one retry
+instead of oscillating.
+
 **A judged-but-unfinished card looks exactly like a finished one on the board.** Sweep for items
 with no verdict, loop until dry, and guard on no-progress so a genuinely unjudgeable item cannot
 spin forever.
@@ -290,7 +298,18 @@ per source, per section, per claim — sized to the context the server actually 
 **This applies to adversarial lenses too, not just the obvious stages.** `rx-review` learned it
 for the citation audit and never carried it to the four lens cards sitting beside it, each of
 which is still handed the entire corpus. **When you fix a scoping bug, grep for every other card
-with the same shape.**
+with the same shape.** The same applies to *conventions*, not just bugs: when a severity scale
+was unified across four lenses, the fifth consumer — a final review card in a different file —
+kept the old two-grade vocabulary and went on reporting in a language the survival rule no
+longer read. **Unifying a convention means enumerating every consumer of it, including the ones
+in other modules.**
+
+**Every card in a fan-out writes its OWN output file.** N cards working the same lens and
+appending to one shared file is a write race, and the interleaved result is not obviously
+corrupt — it just quietly loses lines. Give each card `<stage>-part-NN.md` and merge them
+afterwards. This is easy to get wrong even when the codebase already does it correctly
+elsewhere: a fan-out rebuilt from scratch beside a working one reintroduced the race, because
+the per-part convention lived in the old code and not in anyone's head.
 
 **Feed each critic only its slice, plus that slice's prior findings.** Section-scoped critique
 with the section's failed citations injected beats a corpus-scoped critic that compacts.
@@ -407,6 +426,13 @@ never 'nothing found'"* in its docstring while failing open in three separate pl
   range" returned four different answers, and the one wired to the gate was the wrong one.
   *"Two answers to 'what is abnormal' means at least one is wrong, and the user is the one who
   has to notice."*
+- **Consolidating a helper whose output feeds an IDENTIFIER.** Merging two near-identical
+  slug functions is obviously right — until you notice one truncated at 48 characters and the
+  other at 60, and that its output becomes the idempotency key. A different key is a different
+  card: a re-plan stops matching the existing graph and silently builds a second one. The same
+  applies to anything deriving a filename, a cache path or a dedupe key. Before merging, ask
+  what consumes the output, and diff the output over real inputs rather than reading the two
+  implementations.
 - **Two constants with one name.** `MAX_SECTION_CHARS` was 5,000 in one module and 12,000 in
   another.
 - **Re-deriving a classification the upstream stage already made** by hand-parsing its output
