@@ -117,25 +117,69 @@ violation** and counts as failed regardless of what it accomplished. Say so in t
 
 ---
 
-## 2. Card sizing
+## 2. Fitting the work into the context you actually have
 
-**Measure the work; never size from a domain lookup table.** A table cannot know that one PMC
-article is an abstract stub and the next is 40 pages, and it silently mis-sizes every host
-nobody has added to it.
+Compaction is the quiet killer. A card handed more than its window does not fail — it
+summarises, and then answers confidently from the summary. **Its verdicts look exactly like
+real ones**, so nothing downstream can tell. This is why the whole pipeline is shaped around
+never letting a worker see more than it can hold.
 
-**Size from the median and the p90, not the worst case and not the failures.** One engine
-version took 10 min/item from *the single card that had failed* — sizing a fleet from its
-slowest member.
+### 2a. One source that is too large
 
-**Set the runtime cap ABOVE the design target, not at it.** A cap set exactly at the expected
-duration turns ordinary variance into a timeout; two cards burned four attempts that way.
-Target 20 minutes, cap at 30.
+Never hand a worker a document. Hand it the smallest span that can answer the question, in this
+cascade:
+
+1. **Locate first, then extract the ENCLOSING SECTION.** For the quote in a 90-page drug label,
+   the enclosing section is ~630 tokens against ~52,000 for the document. This is what makes a
+   full re-audit affordable at all — and the heading is what catches scope errors, so it is more
+   accurate *and* smaller.
+2. **If the section itself is oversized, centre a window on the match** (`MAX_SECTION_CHARS`,
+   5,000 in rx-review). Some documents have one enormous "Adverse Reactions" section, and
+   *"one fat item drags a whole card past its budget."*
+3. **If the document has no heading structure, fall back to a plain window** centred on the match
+   (`CONTEXT_IF_NO_SECTION`, 3,000).
+4. **Mark every truncation in the text itself** — rx-review prepends
+   `[section truncated around the quote]`. A judge that cannot tell it is looking at a window
+   will treat absence of context as absence of support.
+
+Structure is worth protecting upstream of all this: convert block-level tags to newlines
+**before** stripping tags, and re-extract PDFs with PyMuPDF rather than reusing flattened
+markdown. Firecrawl markdown arrives with zero newlines and zero headings, which destroys
+section detection and silently forces every item down to step 3. PyMuPDF keeps 5,915 line
+breaks and 166 numbered sections on the same file.
+
+### 2b. Many sources packed into cards
+
+**Ask the server what context it actually serves; do not assume.** rx-review queries the
+inference server's `/props` for `n_ctx` at plan time, because *"the profiles' declared
+context_length is a claim about the model, not a measurement of it."* Fall back conservatively
+(64,000) and say so out loud when the query fails.
+
+**Measure real sizes by fetching, once, per unique source.** A domain lookup table cannot know
+that one PMC article is an abstract stub and the next is 40 pages, and it silently mis-sizes
+every host nobody has added to it. Cache the measurement.
+
+**Bound each card by BOTH a character budget and an item count, whichever binds first.**
+rx-review uses `CARD_BUDGET_CHARS = 36_000` (~9k tokens of sections) and
+`MAX_CITATIONS_PER_CARD = 10`. The character budget stops one fat item from blowing the card;
+the item cap stops thirty tiny ones from blowing the wall clock.
+
+**When something will not fit, flag it — never pack it silently.** rx-review's chunker records
+`oversized: true` on the chunk rather than pretending. Silent truncation reads as "covered
+everything" when it did not, which is indistinguishable from success at every later stage.
 
 **Items go to a file; the card names the file.** A card that inlines its work list *"is one
 incurious worker away from silently auditing 2 of 25 citations and reporting done."*
 
-**One document per worker.** Beyond that Hermes compacts, and a compacted context produces
-verdicts that look identical to real ones.
+### 2c. Sizing the runtime
+
+**Size from the median and the p90 — not the worst case, and never from the failures.** One
+version took 10 min/item from *the single card that had failed*: sizing a fleet from its slowest
+member.
+
+**Set the runtime cap ABOVE the design target, not at it.** A cap equal to the expected duration
+turns ordinary variance into a timeout; two cards burned four attempts that way. Target 20
+minutes, cap at 30.
 
 ---
 
@@ -229,10 +273,9 @@ with the same shape.**
 **Feed each critic only its slice, plus that slice's prior findings.** Section-scoped critique
 with the section's failed citations injected beats a corpus-scoped critic that compacts.
 
-**Judge the enclosing section, not a character window.** A ±200-char window cannot tell you the
-sentence sits under *"6.1 Adverse Reactions in Atopic Dermatitis"* while the claim is about a
-different indication — and the heading is exactly what catches scope errors. It is also what
-makes re-auditing affordable: ~630 tokens of section versus ~52,000 for the document.
+**Judge the enclosing section, not a character window** (§2a). A ±200-char window cannot tell
+you the sentence sits under *"6.1 Adverse Reactions in Atopic Dermatitis"* while the claim is
+about a different indication — and the heading is exactly what catches scope errors.
 
 **Filter junk headings.** Site chrome ("JOIN NOW", "PERMALINK") matches an ALL-CAPS heading
 pattern perfectly, and a junk heading is worse than none because it actively misleads about
@@ -252,7 +295,26 @@ right?" answerable. An unverified question wastes the only human in the loop.
 **Ask answerable questions.** *"Confirm the labs"* is not answerable; *"258 markers, 16 out of
 range, here they are"* is.
 
-**Record the answer, then complete.** See §1 — unblocking re-asks.
+**An answer given in chat is not a state change.** This is the most persistent bug in the whole
+category: the pipeline asks, the human answers, everyone believes the gate is settled, and the
+card sits blocked forever. Nobody notices, because the human has no reason to look at the board
+again and the pipeline has no way to report that it is still waiting. Two halves are needed:
+
+- **Give the agent an exact command to run**, in the card body and in the skill, with the answer
+  as an argument (`rx.py labs-confirm`, `rx.py regimen-confirm --item ... --answer ...`).
+  A model that has to invent the state transition will summarise the conversation instead and
+  move on. Do not describe the outcome — name the command.
+- **The command writes the answer down where the card can see it, and COMPLETES the card.**
+  Completion is what the dependency graph waits on.
+
+**Never resolve a gate by unblocking it.** Unblock *re-runs* the card, and the card's whole job
+is to ask — so it asks again, blocks again, trips `block_loop_detected` (limit 2), and lands in
+triage *"where it satisfies nothing and the research stage waits forever. That is exactly what
+happened at 13:30."*
+
+**Make the gate answerable from wherever the human actually is.** If they read the question in
+Discord, answering in Discord has to clear it. A gate that can only be cleared from a terminal
+is a gate that stays shut.
 
 **Guards fail closed, and say what is outstanding.** Refusing to proceed is correct; refusing
 without naming what is missing sends the human to read the code.
