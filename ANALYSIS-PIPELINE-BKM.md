@@ -112,6 +112,11 @@ any subscription whose owner has no running gateway, which silently dropped ever
 Per-*card* notifications turn a run into narration of its own bookkeeping — subscribe gates and
 phase boundaries, not everything.
 
+**Know which card bodies are `.format()`ed and which are not.** A template passed straight to
+`create()` reaches the model verbatim, so `{reports}/` stays a literal placeholder and the
+doubled braces you wrote to escape a JSON example (`{{"lenses": 4}}`) arrive doubled. Both
+render as instructions the model cannot follow. Render one body and read it before shipping.
+
 **A worker that exits 0 without a terminal `kanban_complete`/`kanban_block` is a protocol
 violation** and counts as failed regardless of what it accomplished. Say so in the card body.
 
@@ -158,6 +163,16 @@ context_length is a claim about the model, not a measurement of it."* Fall back 
 **Measure real sizes by fetching, once, per unique source.** A domain lookup table cannot know
 that one PMC article is an abstract stub and the next is 40 pages, and it silently mis-sizes
 every host nobody has added to it. Cache the measurement.
+
+**`n_ctx` is in TOKENS; your corpus is in BYTES. Convert, and say which unit you are in.**
+Conflating them is not a rounding error — it silently sized every chunk at ~2.5% of the window
+and turned 26 reports into 104 cards. Multiply by ~4 chars/token, then take a fraction of
+*that*. Print the arithmetic (`64000 tokens (~256000 chars) -> budget 64000 chars (25% of
+window)`) so the mistake is visible in the log rather than only in the card count.
+
+**Leave real headroom — a quarter of the window, not all of it.** The failure being prevented is
+not "did not fit" but *"fit, and compacted anyway"*. The model needs room to reason over the
+text, not merely room to hold it.
 
 **Bound each card by BOTH a character budget and an item count, whichever binds first.**
 rx-review uses `CARD_BUDGET_CHARS = 36_000` (~9k tokens of sections) and
@@ -344,7 +359,18 @@ supported; setting them against each other produces rhetoric, not a check.
 
 **Use ONE severity scale across every lens, and make the survival rule consume all of it.**
 Divergent vocabularies (`fatal`/`qualifying` in one lens, `fatal`/`minor` in another) mean the
-middle grades are invisible to the gate that decides what ships.
+middle grades are invisible to the gate that decides what ships. A workable scale:
+
+| | |
+|---|---|
+| `fatal` | the claim cannot stand |
+| `serious` | the claim must be weakened before it is used |
+| `minor` | imprecision worth fixing; carried as a correction, not a reason to drop |
+| `clean` | challenged under this lens and held |
+
+**`clean` is a result, not padding — and should be common.** State that in the card body. A
+critic that believes silence looks lazy will manufacture findings, which is the failure the
+lens exists to catch in others.
 
 **Reporting weakness is a success; manufacturing a finding is a failure.** Say this in the card
 body, or a critic with nothing to report will invent something.
