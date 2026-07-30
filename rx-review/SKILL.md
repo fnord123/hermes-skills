@@ -60,6 +60,7 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `staged` | What is waiting to be transcribed, across upload rounds. |
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
+| `doctor` | Explains why a regimen item is still held: the answers on record, whether each item's answer matched, which manufacturer file resolved, and the gate card's state. Run this when the user says an answer "didn't work" or an item keeps re-asking. |
 | `regimen-confirm` | Records an answer to a regimen question and closes the gate card. Use this instead of unblocking. |
 | `labs-confirm` | Records that the user confirmed the labs and closes the gate card. Use this instead of unblocking. |
 | `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
