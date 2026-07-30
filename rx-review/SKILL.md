@@ -203,6 +203,10 @@ Record each answer with:
 
     python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "<product>" --answer "<what they said>"
 
+The gate notification already prints this command with `--item` filled in for each product — copy
+that line and fill in `--answer` from their reply, rather than typing the product name yourself.
+Recording the answer is what makes it stick; a reply that is only spoken back in chat does not.
+
 If they genuinely do not know a value, use `--accept-all` and tell them it will be researched
 with the gap noted.
 
