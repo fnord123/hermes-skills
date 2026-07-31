@@ -28,6 +28,7 @@ milliseconds, which is why it is opt-in rather than automatic.
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -48,7 +49,35 @@ import rxfetch                                                # noqa: E402
 # The escalation makes the first harmless, so the conservative default is the correct one.
 # --min-chars lowers it deliberately for a caller that knows it wants short pages.
 
-SEARXNG_URL = os.environ.get("SEARXNG_URL", "").rstrip("/")
+def _searxng_url():
+    """The search endpoint: the environment first, then the Hermes env files.
+
+    Reading the files matters. The environment is populated by whichever Hermes profile
+    launched the caller, so a script run from a different profile, a cron job, or a plain shell
+    would otherwise report "search is not available" while a perfectly good endpoint sat
+    configured on disk. The value is an endpoint, not a credential.
+    """
+    v = os.environ.get("SEARXNG_URL", "").strip()
+    if v:
+        return v.rstrip("/")
+    home = os.environ.get("HERMES_HOME", "")
+    candidates = ([os.path.join(home, ".env")] if home else []) + [
+        os.path.expanduser("~/.hermes/.env")]
+    candidates += sorted(glob.glob(os.path.expanduser("~/.hermes/profiles/*/.env")))
+    for path in candidates:
+        try:
+            for line in open(path, encoding="utf-8", errors="ignore"):
+                line = line.strip()
+                if line.startswith("SEARXNG_URL="):
+                    v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if v:
+                        return v.rstrip("/")
+        except OSError:
+            continue
+    return ""
+
+
+SEARXNG_URL = _searxng_url()
 DEFAULT_MAX = 10
 # Enough to answer from, small enough that a worker's context survives several of them.
 DEFAULT_MAX_CHARS = 20000
