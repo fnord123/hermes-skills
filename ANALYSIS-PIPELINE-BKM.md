@@ -120,6 +120,28 @@ render as instructions the model cannot follow. Render one body and read it befo
 **A worker that exits 0 without a terminal `kanban_complete`/`kanban_block` is a protocol
 violation** and counts as failed regardless of what it accomplished. Say so in the card body.
 
+**The per-profile config is the real config; the global one is decoration.**
+`~/.hermes/config.yaml` and `~/.hermes/.env` do **not** reach `~/.hermes/profiles/<p>/`, and a
+dispatched worker reads the profile. This cost a full day twice over in one session: research
+cards died all afternoon against a context ceiling that had been raised globally hours earlier,
+and later the entire research stage failed on a search backend that had been switched away from
+weeks before — the global file said `searxng`, all ten profiles said `tavily`, and none of them
+carried the endpoint variables. **Any claim of the form "we already changed that" is a claim
+about `profiles/*/`, and must be checked there.** Verify what a worker actually resolves rather
+than reading the global file:
+
+```bash
+HERMES_HOME=~/.hermes/profiles/<p> ~/.hermes/hermes-agent/venv/bin/python -c \
+  "import os,sys; sys.path.insert(0,'/home/you/.hermes/hermes-agent'); \
+   from hermes_cli.env_loader import load_hermes_dotenv; load_hermes_dotenv(); \
+   print(os.environ.get('SEARXNG_URL'))"
+```
+
+Two corollaries. A search-and-replace across profiles silently skips any profile whose block
+lacks the key entirely — **check the keys exist, not just their values**. And `profiles/*` is
+gitignored, so every fix applied there is invisible to version control and dies on a profile
+rebuild; if it matters, it needs a provisioning script, not an edit.
+
 ---
 
 ## 2. Fitting the work into the context you actually have
@@ -193,7 +215,63 @@ everything" when it did not, which is indistinguishable from success at every la
 **Items go to a file; the card names the file.** A card that inlines its work list *"is one
 incurious worker away from silently auditing 2 of 25 citations and reporting done."*
 
-### 2c. Sizing the runtime
+### 2c. Measuring how close a card actually came
+
+**The agent's own token estimate is not evidence.** Hermes reported peaks of ~104k and ~96k
+tokens for cards whose real prompts, per the provider, were 146k–153k — roughly 40% low, and
+low in the direction that hides the problem. Sizing decisions taken from those logs put cards
+at "58% of the window" when they were at 85%.
+
+**Worker logs print token counts only inside WARNINGS**, so the only cards you can measure from
+logs are the ones that already went wrong. Nothing durable records how close a *successful*
+card came to the wall, which is exactly the number you need to size the next fan-out.
+
+**Tag every request with the card id at the proxy.** One header makes per-card context exact,
+from the provider's own accounting rather than the agent's estimate:
+
+```yaml
+model:
+  default_headers:
+    x-litellm-tags: "rxcard=${HERMES_KANBAN_TASK}"
+```
+
+Hermes expands `${VAR}` from the worker environment, where the dispatcher has already set the
+task id; litellm stores it in `LiteLLM_SpendLogs.request_tags`. Without it, attribution by
+timestamp collapses under concurrency — with six workers running, 75 of 77 runs overlapped
+another and four different cards were each credited with the same 149,550-token peak.
+Compactions can then be inferred from sharp drops in `prompt_tokens` within a card's sequence,
+since context only falls when history is discarded. **Do this before you need it: nothing
+recovers attribution for runs already finished.**
+
+### 2d. Compaction fails because of your own concurrency
+
+The cards that died were not merely oversized. They crossed the threshold, tried to compact,
+and **compaction — itself a large model call — was rate-limited or timed out** because six
+workers were saturating one backend. Twelve compaction attempts on one card, six 429s and five
+timeouts, until the runtime cap killed it.
+
+**The recovery mechanism competes for the resource that is already exhausted**, so it cannot
+self-heal, and the failure presents as a timeout rather than as a context error. Size
+`max_in_progress` against what the backend can actually serve, not against the card count, and
+give the compression call a timeout appropriate to summarising ~100k tokens on a busy server —
+not the default two minutes.
+
+### 2e. Measure the document before designing the splitter
+
+Every assumption worth making about a source is checkable in a minute, and the real one broke
+three of them at once. On a 29-page lab panel: the text extracts **one cell per line** (marker
+name, value and reference range arrive as three separate lines, so "count the rows" is
+ill-defined); it is **two different reports bound into one file**, with the seam visible only in
+the page footers; and the **largest font on all 16 pages of the first report is the patient's
+name**, so heading detection by font size finds exactly nothing.
+
+**Take cut points from the document's own identity strings** — `Page N of M`, an appendix
+banner, a change in column geometry — never from styling. And note the corollary for any
+frequency-based cleanup: page footers vary per page (`PAGE 1 OF 13`), so they escape exact-line
+matching entirely; normalise digits before counting, and compute per **segment**, because a
+footer on 13 of 29 pages is 45% of the file and 100% of its own report.
+
+### 2f. Sizing the runtime
 
 **Size from the median and the p90 — not the worst case, and never from the failures.** One
 version took 10 min/item from *the single card that had failed*: sizing a fleet from its slowest
@@ -322,6 +400,38 @@ about a different indication — and the heading is exactly what catches scope e
 pattern perfectly, and a junk heading is worse than none because it actively misleads about
 scope.
 
+**Shard on boundaries the artifact already has.** A research card asking four numbered
+questions is already sharded — by whoever numbered them. Those boundaries are grouped by
+meaning, and the wording of each was usually written against a specific past failure. Inventing
+new ones (a discovery phase, a per-source fan-out) is more machinery for a worse split, and
+rewording while resharding quietly discards the history each line was carrying. **Move the
+questions; do not paraphrase them.** Where one question genuinely reasons over the others'
+answers, that one is the synthesis card, gated on the rest.
+
+**Overlap the shards so the split is checkable.** Give adjacent shards one shared unit — a page,
+a section — transcribed twice by workers that never see each other, then compare. Agreement is
+real evidence the split lost nothing, and it is far stronger than counting rows, which is
+ill-defined the moment a layout puts one field per line. Two traps, both hit live:
+
+- **Compare on identity plus unit, never on the name alone.** A comprehensive panel measures
+  glucose in blood *and* in urine; keyed on name, two correct transcriptions look like one
+  reading with two contradictory values. Do not put the reference range in the key either —
+  two workers write the same range differently (`< or = 2` and `< or = 2 IU/mL`) and both are
+  right.
+- **An empty overlap is suspicion, not proof.** The shared unit may hold only narrative. Report
+  it; never block on it. A false block on a heuristic is how a check stops being trusted — this
+  one halted a live pipeline within an hour of shipping.
+
+**When you add a file type to a shared directory, enumerate every glob over that directory.**
+Sharded research fragments were written as `marker-x-part1.md` into the reports directory, which
+four later stages read as "the research reports" — the adversarial lenses, the citation audit,
+the interactions card and the status count. The corpus would have quadrupled, and deliberately
+*partial* fragments would have been judged for gaps and overreach, producing findings that look
+real but are artifacts of the split. The convention to follow already existed in the same file
+(intermediates carry a `LENS-` prefix and every consumer skips it); the new writer used a
+suffix and nothing skipped it. **A dry run and a green test suite both passed this** — only
+reading the consumers found it.
+
 ---
 
 ## 6. Human gates
@@ -359,6 +469,14 @@ is a gate that stays shut.
 
 **Guards fail closed, and say what is outstanding.** Refusing to proceed is correct; refusing
 without naming what is missing sends the human to read the code.
+
+**Never put a partial set to a human.** Inputs arrive in rounds, so a stage that plans over
+"everything it can see" runs several times, and an early merge card completes over the subset
+that existed then — advancing the pipeline and posting the gate. We asked for confirmation of
+600 markers from 20 PDFs while two were still being transcribed. **A confirmation is the one
+step that cannot be retracted:** "these match my results" does not become true for the files
+nobody saw. Do not reason about which planning round fired; ask the inputs directory whether
+every staged item has landed, and stay silent until it has.
 
 ---
 
@@ -418,6 +536,29 @@ never 'nothing found'"* in its docstring while failing open in three separate pl
   finding is the worst outcome available to a filter.
 - A pipeline that fails quietly is worse than one that fails loudly.
 
+**A gather must assert the count the fan-out planned.** Globbing what exists cannot distinguish
+"part 7 has not finished" from "part 7 finished and wrote nothing" — both merges here errored
+only at *zero* parts and otherwise published `N findings across 11 parts` when twelve were
+planned, which reads as complete at every later stage. The number is known at fan-out time and
+was only ever printed to stdout, where nothing consumed it. Write a manifest of expected part
+files before the cards run, and refuse when any are missing. Store it as `.json` so no `*.md`
+glob mistakes it for a report, accumulate it across rounds, and treat "no manifest" as "do not
+refuse" so the upgrade is not a flag day. This also catches the archived-parent race for free.
+
+**Never silently drop a record you cannot parse — count it and refuse.** Both merges discarded
+any line whose first field was not in their vocabulary, in silence. The prompt says "append ONE
+line per finding" and a model bullets by reflex, so `- fatal | …` lost the finding entirely
+while counts, totals and body all agreed with each other and were all wrong. A dropped `fatal`
+is an unsound claim reaching the final brief with nothing marking it.
+
+**If two code paths decide "is this record valid", they must share the predicate.** The audit's
+sweep accepted any line with three fields, a filename and a number; its merge required the
+verdict vocabulary. So `context reversed` — a space instead of a hyphen — counted as *judged*
+by the sweep, which reported `SWEEP: CLEAN`, and was *discarded* by the merge. The citation was
+announced as fully audited and appeared nowhere in the audit. Two validity tests for one record
+type is the same defect as two implementations of one question (§9), and it fails the same way:
+silently, in the direction of false completeness.
+
 ---
 
 ## 9. Anti-patterns
@@ -452,5 +593,33 @@ never 'nothing found'"* in its docstring while failing open in three separate pl
 - **Copying inputs without content-hash dedupe.** Copying is not idempotent when each copy gets
   a fresh random prefix: one retry landed the whole set twice, five documents became ten, and
   the confirmed summary was drawn from doubled data.
+
+  **Content-hash dedupe is only half of it — you must also decide which copy SURVIVES.**
+  Keeping "the first in sorted order" is a coin flip when the filenames carry random prefixes.
+  Re-uploading 21 already-transcribed documents, 12 of them drew a lower prefix than their
+  original, displaced it as canonical, and were reported as still needing work; every one of
+  those then entered the merged output twice. The rule that holds: **once content has been
+  processed, its identity is frozen** — prefer the copy that already has output, then the
+  oldest, never the one that happens to sort first. And quarantine the losers (move, do not
+  delete) rather than leaving them beside the survivor for the next stage to rediscover.
+- **A membership test keyed on the entity instead of the row.** "Is this *marker* out of range"
+  rather than "is this *reading* out of range" meant one abnormal cholesterol in December
+  flagged every later cholesterol as well — so a single message told the user a value was
+  flagged out of range *and* was no longer out of range, and 10 of 14 findings on the newest
+  draw were normal values. A finding is a property of a reading: key on (date, entity, value).
+  Partition in a second pass, too — deciding "resolved" needs to know whether the *newest*
+  reading is itself flagged, which is unknowable while still walking the rows.
+- **Flagging to stdout is not flagging.** A constant was declared with a comment promising that
+  an over-budget report "is split at its own headings instead"; it was referenced nowhere and
+  the split was never written. Oversized reports were passed whole to cards that could not hold
+  them — the exact failure the module existed to prevent — and the only trace was a print
+  statement no caller consumed, while the function's own docstring asserted the opposite of what
+  it did. **A guard whose only output is a log line is not a guard**, and a docstring describing
+  a defence is not evidence the defence exists (§0). Grep for every constant that a comment
+  says is enforced.
+- **A heuristic counter that blocks.** An approximate completeness check must warn, never hold
+  up the review: one that counted a marker's own per-demographic reference brackets as separate
+  markers declared a correct two-row transcription "short". Advisory was the right call — the
+  same check, made blocking, would have stalled the pipeline over an approximation.
 - **Making yourself the recovery mechanism.** If the answer to "what happens when this fails at
   3am" is "I notice and re-run it", the pipeline is not finished.
