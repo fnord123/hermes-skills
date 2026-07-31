@@ -6,13 +6,17 @@ description: >
   found or did. PREFER THIS SKILL when the user wants something *done on a
   website* that takes several steps: checking live price or availability by
   working through a site's own filters, looking something up that needs
-  navigating menus or forms, or operating a web app on their behalf. It is
+  navigating menus or forms, or operating a web app on their behalf, or reading a
+  single page that JavaScript renders or a bot wall guards. It is
   read-only by default; a task that must sign in, submit, buy, book, post, or
   send requires explicit user approval first. Do NOT use it for a single web
-  search or reading one page — the ordinary web tools handle those better.
+  search — the ordinary web search tool handles that better. DO use it to read a
+  single page the ordinary fetch could not: one that renders its content with
+  JavaScript, sits behind a bot wall or CAPTCHA, or returns almost nothing.
   Activate on any of: "browse to", "go to X and …", "on the website …", "check
   the site for …", "look up … on <site>", "find the … and tell me", "work
-  through …", "operate …", "fill out …", "navigate …".
+  through …", "operate …", "fill out …", "navigate …", and on a page the ordinary
+  fetch returned empty, truncated, or as a CAPTCHA.
 version: 0.1.0
 license: MIT
 metadata:
@@ -28,11 +32,18 @@ metadata:
   steps**: apply filters and read the outcome, page through listings, follow a
   flow across screens, use an interactive web app.
 - The answer isn't on one page — it takes navigating menus, forms, or results.
+- **A single page the ordinary fetch could not read.** A real browser runs the
+  page's JavaScript and behaves like a browser, so it reaches content that a
+  plain fetch returns empty, truncated, or as a bot wall. Reading one page is in
+  scope; try the ordinary fetch first, and come here when it fails.
 
 ## When NOT to use
 
-- A **single web search** or reading **one page's text** — those are faster and
-  cheaper with the ordinary web search / fetch tools.
+- A **web search**. Searching is out of scope: use the ordinary web search tool.
+  This skill operates pages, it does not find them.
+- Reading a page the **ordinary fetch already handles** — that is faster and
+  cheaper. The test is whether the plain fetch actually returned the content,
+  not how many pages are involved.
 - A task that would **change something** (sign in, submit a form, buy, book,
   post, send) unless the user has **explicitly approved that exact task** — then
   run it with `--confirm`.
