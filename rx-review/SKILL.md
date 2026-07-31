@@ -103,25 +103,20 @@ drifting inside its reference range is invisible without them.
 Take whichever the user offers:
 
 **A source they already keep** — "it's in my regimen doc", "search my docs", "~/notes/meds.md".
-Resolve it with whatever skill fits, then pipe it straight in. `regimen --stdin` accepts either
-plain text or a skill's JSON output, so no unwrapping step is needed.
 
-For a Google Doc, two commands. Never pipe them together:
+For a Google Doc: find the doc id (the google-docs skill's `docs.py find "<title>"` does this),
+then record it with ONE command — it reads the doc itself:
 
-    python3 ${HERMES_SKILL_DIR}/../google-docs/scripts/docs.py read <doc-id> --out /tmp/regimen.txt
-    python3 ~/.hermes/rx-review/rx.py regimen --from /tmp/regimen.txt
+    python3 ~/.hermes/rx-review/rx.py regimen --from-gdoc <doc-id>
 
 For a local file:
 
     python3 ~/.hermes/rx-review/rx.py regimen --from ~/notes/meds.md
 
-Do NOT pipe one python3 command into another. `python3 ... | python3 ...` is flagged as a
-pipe-to-interpreter by the security scanner and stops the run with a manual approval prompt.
-Use `--out` and then `--from`, as above.
+If either command reports an error, show the error to the user and ask how to proceed.
 
-Finding the source is your job. That command only accepts a path or stdin.
-
-**Typed in chat** — write their words to a file, pass it the same way.
+**Typed in chat** — write their words to a file with the file tool, then use `--from` with
+that file.
 
 **Not written down** — ask. Per item: product, dose with unit, time of day. Prescriptions
 matter as much as supplements; drug-supplement interactions are the most valuable finding.
