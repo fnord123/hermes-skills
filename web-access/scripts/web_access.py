@@ -98,8 +98,11 @@ def cmd_search(args):
     url = "%s/search?%s" % (SEARXNG_URL, urllib.parse.urlencode(
         {"q": args.query, "format": "json"}))
     try:
-        with urllib.request.urlopen(url, timeout=args.timeout) as fh:
-            data = json.loads(fh.read().decode("utf-8", "replace"))
+        # Through the same per-host gate as every fetch. The search engine is a website too, and
+        # a burst of queries is exactly the shape of traffic that gets a client suspended.
+        with rxfetch.host_gate(rxfetch._host_of(SEARXNG_URL)):
+            with urllib.request.urlopen(url, timeout=args.timeout) as fh:
+                data = json.loads(fh.read().decode("utf-8", "replace"))
     except Exception as exc:                                   # noqa: BLE001
         return out({"ok": False, "query": args.query,
                     "error": "search backend unreachable: %s: %s" % (type(exc).__name__, exc)})

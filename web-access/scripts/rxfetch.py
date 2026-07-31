@@ -151,10 +151,19 @@ def looks_unusable(text):
 
 
 def _host_of(url):
+    """The throttle identity of a URL: one WEBSITE, one timer.
+
+    A leading `www.` is dropped because www.example.com and example.com are one server being
+    asked to serve one client, and giving them separate timers hands out double the intended
+    request rate to whoever happens to mix the two forms - which search results routinely do.
+    Subdomains are NOT collapsed: api.example.com really is a different host.
+    """
     try:
-        return url.split("/")[2].lower()
+        host = url.split("/")[2].lower()
     except Exception:                                          # noqa: BLE001
         return "?"
+    host = host.split("@")[-1]                                 # strip any userinfo
+    return host[4:] if host.startswith("www.") else host
 
 
 def _interval_for(host):
@@ -348,9 +357,15 @@ def _browser_attempt(url, timeout):
     if not os.path.exists(BROWSE_TASK):
         return Result("", "unreadable", "browser tier unavailable (browse-task not installed)")
     cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--start-url", url]
+    host = _host_of(url)
+    # browse_task.py takes this host's gate when it is run on its own. Here it is a CHILD of a
+    # gate we already hold, and flock is per-process: without this hand-off it would block on
+    # its own parent until the timeout, every single time. Name the host rather than passing a
+    # bare flag so a stale value cannot disable throttling for some other site.
+    env = dict(os.environ, RXFETCH_GATE_HELD=host)
     try:
-        with host_gate(_host_of(url)):
-            proc = subprocess.run(cmd, capture_output=True, text=True,
+        with host_gate(host):
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                   timeout=max(timeout, BROWSER_TIMEOUT_FLOOR))
     except subprocess.TimeoutExpired:
         return Result("", "unreadable", "browser timed out")

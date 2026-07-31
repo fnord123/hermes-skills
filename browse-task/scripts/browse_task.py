@@ -16,6 +16,8 @@ import argparse
 import datetime
 import glob
 import json
+import contextlib
+import importlib.util
 import os
 import shutil
 import signal
@@ -232,14 +234,42 @@ asyncio.run(_main())
 """
 
 
+# Throttling lives in the web-access skill's fetcher, so that EVERY route to a site - a plain
+# fetch, an escalation to a browser, or this script run on its own - is spaced by one shared
+# per-host timer. Without this, driving a browser directly was the one escalation level that
+# ignored the rate limit entirely.
+@contextlib.contextmanager
+def host_gate(url):
+    """Hold the shared per-host gate for `url`, if the shared fetcher is installed."""
+    impl = os.path.expanduser("~/hermes-skills/web-access/scripts/rxfetch.py")
+    try:
+        # Loaded by PATH, not imported as a package: it is a file in a sibling skill, not a
+        # dependency on PyPI, and sys.path stays untouched.
+        spec = importlib.util.spec_from_file_location("rxfetch_gate", impl)
+        rxfetch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rxfetch)
+    except Exception:                                          # noqa: BLE001
+        yield                                                  # not installed: do not block work
+        return
+    host = rxfetch._host_of(url)
+    # Our caller may already hold this host's gate (rxfetch spawns us for its browser tier).
+    # flock is per-process, so taking it again would block on our own parent until the timeout.
+    if os.environ.get("RXFETCH_GATE_HELD") == host:
+        yield
+        return
+    with rxfetch.host_gate(host):
+        yield
+
+
 def run_dump(url, mode, xvfb, fara_python, wait_ms):
     """Rendered page text via the browser, with no agent. Returns a dict."""
     base = [str(fara_python), "-c", DUMP_SRC, url,
             ("headful" if mode == "headful" else "headless"), str(wait_ms)]
     cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
     try:
-        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                           text=True, timeout=120)
+        with host_gate(url):
+            r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=120)
     except Exception as exc:  # noqa: BLE001
         return {"error": "%s: %s" % (type(exc).__name__, exc)}
     for ln in (r.stdout or "").splitlines():
@@ -486,6 +516,13 @@ def main():
             redacted.append("<redacted>" if skip else a)
             skip = (a == "--api_key")
         log("CMD " + " ".join(redacted))
+        # Take the host's gate and release it immediately, rather than holding it for the whole
+        # session. The gate means "one request in flight, spaced by an interval"; an agent
+        # session is minutes of many page loads, so holding it would stall every other caller
+        # for the duration. Ticking it here still spaces one session's START from the last
+        # request to that site, which is the part a rate limit actually counts.
+        with host_gate(args.start_url):
+            pass
         try:
             # Own session so a timeout can kill the WHOLE tree (xvfb-run -> Xvfb,
             # fara-cli -> chromium), not just the direct child. /dev/null stdin so
