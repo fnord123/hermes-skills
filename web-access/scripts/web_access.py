@@ -55,8 +55,11 @@ DEFAULT_MAX_CHARS = 20000
 
 
 def out(obj):
+    """Print the one JSON object and exit: 0 on success, 1 on failure."""
     print(json.dumps(obj, indent=2))
-    return 0 if obj.get("ok") else 1
+    if not obj.get("ok"):
+        sys.exit(1)
+    sys.exit(0)
 
 
 def cmd_search(args):

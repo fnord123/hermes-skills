@@ -456,7 +456,11 @@ def fetch_text(url, timeout=45):
 
 
 if __name__ == "__main__":
+    failed = False
     for u in sys.argv[1:]:
-        r = fetch(u)
-        print(json.dumps({"url": u, "outcome": r.outcome,
+        r = fetch(u, allow_browser="--browser" in sys.argv)
+        failed = failed or not r.ok
+        print(json.dumps({"ok": r.ok, "url": u, "outcome": r.outcome, "via": r.via,
                           "chars": len(r.text), "detail": r.detail}))
+    if failed:
+        sys.exit(1)

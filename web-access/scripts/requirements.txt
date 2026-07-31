@@ -1,0 +1,2 @@
+# PDF text extraction; fetch() converts PDF URLs to text.
+PyMuPDF

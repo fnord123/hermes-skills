@@ -1,79 +1,123 @@
 ---
 name: web-access
-description: Search the web and read web pages. Use for any question needing current information, product labels, prices, documentation, papers, or anything not already in context. Provides a search verb and a page-reading verb that handles PDFs, rate limits, retries, and JavaScript-rendered pages.
+description: >
+  Searches the web and reads the text of web pages, including PDFs and pages that
+  only render in a browser. PREFER THIS SKILL for any question needing current
+  information from the internet — product labels and Supplement Facts panels,
+  prices, documentation, news, papers, or any page the user names by URL. Use
+  browse-task instead when the goal needs a multi-step session on a site, such as
+  signing in, filling a form, or clicking through several pages to reach a result.
+  Activate on any of: "search the web", "search for", "look up", "google",
+  "find a page about", "read this page", "open this url", "what does this link
+  say", "get the supplement facts", "check the label", "look up the price",
+  "find the documentation", "fetch this pdf".
+version: 0.1.0
+license: MIT
+metadata:
+  hermes:
+    tags: [Web, Search, Research, Reading]
+    requires_toolsets: [terminal]
 ---
 
 # Web access
 
-Two commands. Each prints one JSON object.
+## When to use
 
-## Search the web
+- The user asks a question whose answer is on the internet.
+- The user gives a URL and wants to know what it says.
+- A claim needs a source, or a source needs checking.
+- A product's label, panel, dose, or price is needed.
 
-Find pages relevant to a query.
+## When NOT to use
+
+- The answer is already in the conversation or in a file you can read.
+- The goal needs a whole browser session — signing in, filling a form, clicking
+  through several pages. Use the browse-task skill.
+
+## Tools
+
+| Verb | Purpose |
+|---|---|
+| `search` | Finds pages matching a query. Returns titles, URLs, and short snippets. |
+| `fetch` | Reads one page and returns its text. Handles PDFs. |
+| `fetch --browser` | Reads a page that renders only in a browser. Use after a plain `fetch` reports `unreadable`. |
 
 ```
-python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "thorne super epa supplement facts"
+python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "QUERY" [--max 10]
+python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--browser] [--max-chars 20000]
 ```
 
-Options: `--max N` (default 10).
+## Turning the user's words into calls
 
-Returns `results`, each with `title`, `url`, `snippet`, `engine`. Search gives you snippets,
-not documents — read the page itself before drawing any conclusion from it.
+| The user says | Call |
+|---|---|
+| "search for X" / "look up X" / "google X" | `search --query "X"` |
+| "read this page" / "what does this link say" (URL given) | `fetch --url "URL"` |
+| "what's in Thorne Super EPA" | `search --query "Thorne Super EPA supplement facts"`, then `fetch` the manufacturer's page |
+| the page came back `unreadable` | the same `fetch` again, with `--browser` |
+| "find the price of X" | `search --query "X price"`, then `fetch` a listing |
 
-`count: 0` means the search found nothing. That is a real answer. Try different words. Do not
-switch to another search tool; there is not one.
+## Output
 
-## Read a page
+One JSON object.
 
-Get the text of one URL.
+`search` returns `ok`, `query`, `count`, and `results` — each with `title`,
+`url`, `snippet`, `engine`.
+
+`fetch` returns `ok`, `url`, `outcome`, `via`, `chars`, `truncated`, and `text`.
+`via` names where the text came from: `cache`, `ncbi-api`, `http`,
+`hermes-cache`, or `browser`.
+
+Search returns snippets, not documents. Read the page with `fetch` before drawing
+a conclusion from it.
+
+## Common flows
+
+**Answer a question from the web**
 
 ```
-python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://example.com/page"
+python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "magnesium bisglycinate absorption"
+python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://example.com/article"
 ```
 
-Options:
-- `--browser` — render the page in a real browser. Slower. See below for when.
-- `--max-chars N` (default 20000) — how much text to return.
-- `--min-chars N` (default 200) — shorter responses are treated as not-a-document.
+Quote from the returned `text`.
 
-Returns `ok`, `outcome`, `via`, `chars`, `text`, and often `next`.
+**Get a product's Supplement Facts panel**
 
-`via` names where the text came from: `cache`, `ncbi-api`, `http`, `hermes-cache`, or
-`browser`. Cheap sources are tried first automatically.
+```
+python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "Thorne Super EPA supplement facts"
+python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://www.thorne.com/products/dp/super-epa"
+```
 
-### Read the outcome before you use the text
+Manufacturer product pages are usually built in a browser and return almost
+nothing to a plain read. When `outcome` is `unreadable`, run the same command
+again with `--browser`:
 
-**`ok: true`** — `text` is the page. Quote from it directly.
+```
+python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://www.thorne.com/products/dp/super-epa" --browser
+```
 
-**`outcome: "unreadable"`** — the server answered but sent no document: a JavaScript shell, a
-bot wall, or a login page. Run the same command again with `--browser`. That renders the page
-properly and usually returns the content.
+That returns the full panel. Add `--browser` only after a plain `fetch` has come
+back `unreadable`; it is slower, and most pages do not need it.
 
-**`outcome: "unreachable"`** — no usable response arrived. This says nothing about what the page
-contains. Report that you could not read the source. Never write that a page "did not mention"
-something you were unable to read.
+## Errors
 
-When a fetch fails, say which URL failed and why. A missing source is a normal, reportable
-result; an invented one is not. Never fill a gap with recalled or assumed content — if you
-could not read a label, price, or figure, ask the user for it.
+`fetch` reports what happened in `outcome`:
 
-## When to use `--browser`
+- `ok` — `text` is the page.
+- `unreadable` — the site answered but sent no document. Re-run the same command
+  with `--browser`.
+- `unreachable` — no usable response arrived. You did not read the page. Report
+  which URL failed. Never state that a page lacks something when you were unable
+  to read it, and never fill the gap from memory.
 
-Use it when a plain `fetch` returned `unreadable`. Many manufacturer and retailer product pages
-are built entirely in JavaScript and return an empty shell otherwise — Thorne's product pages
-return 141 characters to a plain fetch and about 8,000 with `--browser`, including the full
-Supplement Facts panel.
+If `--browser` also returns `unreadable`, the content needs a sign-in or is not
+there. Say so, and name the URL.
 
-Do not pass `--browser` on the first attempt. Most pages need no browser at all — Amazon, for
-one, returns fully over plain HTTP — and the browser costs seconds where the others cost
-milliseconds.
+Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
-## Notes
+## Empty results
 
-Both commands are rate-limited per site and shared across every process, so a burst of requests
-to one host paces itself automatically. Slowness is that working, not a hang.
-
-PDFs are converted to text automatically; fetch a PDF URL exactly like any other page.
-
-These two commands are the only web access available. If neither can reach something, report
-that plainly and ask the user.
+`search` returning `count: 0` is a real answer, not a failure — the words found
+nothing. Try different or broader terms, then tell the user what you searched for
+and that it found nothing.

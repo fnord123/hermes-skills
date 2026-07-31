@@ -68,6 +68,9 @@ STDLIB = {
     "contextlib", "copy", "difflib", "struct", "binascii", "getpass", "platform", "signal",
     "atexit", "secrets", "http", "unittest", "asyncio", "inspect", "zipfile", "mimetypes",
     "stat", "curses", "decimal", "fractions", "pprint", "shlex", "enum", "abc", "__future__",
+    # Unix-only, but stdlib: their absence on Windows is a portability question, not a missing
+    # dependency, and flagging them as third-party sends you to add a nonexistent package.
+    "fcntl", "termios", "tty", "pwd", "grp", "resource", "select", "importlib",
 }
 
 # Import name -> distribution name, where they differ.
