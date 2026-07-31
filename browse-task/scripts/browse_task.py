@@ -202,6 +202,56 @@ asyncio.run(_main())
 """
 
 
+# Raw text dump: navigate, let the page render, return inner_text. Deliberately NO agent in
+# the loop — the moment a model summarises, the text stops being verbatim, and the citation
+# audit downstream works by locating an exact quote inside fetched text. A paraphrase breaks
+# that silently, which is the worst way for it to break.
+DUMP_SRC = r"""
+import sys, asyncio, json
+from playwright.async_api import async_playwright
+_url = sys.argv[1]
+_headful = len(sys.argv) > 2 and sys.argv[2] == "headful"
+_wait = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
+async def _main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(headless=not _headful)
+        try:
+            pg = await (await b.new_context()).new_page()
+            r = await pg.goto(_url, wait_until="domcontentloaded", timeout=45000)
+            await pg.wait_for_timeout(_wait)
+            body = await pg.inner_text("body")
+            print("__DUMP__" + json.dumps({
+                "status": (r.status if r is not None else 0),
+                "title": await pg.title(),
+                "text": body}))
+        except Exception as e:
+            print("__DUMP__" + json.dumps({"error": str(e).splitlines()[0][:200]}))
+        finally:
+            await b.close()
+asyncio.run(_main())
+"""
+
+
+def run_dump(url, mode, xvfb, fara_python, wait_ms):
+    """Rendered page text via the browser, with no agent. Returns a dict."""
+    base = [str(fara_python), "-c", DUMP_SRC, url,
+            ("headful" if mode == "headful" else "headless"), str(wait_ms)]
+    cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=120)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "%s: %s" % (type(exc).__name__, exc)}
+    for ln in (r.stdout or "").splitlines():
+        if ln.startswith("__DUMP__"):
+            try:
+                return json.loads(ln[len("__DUMP__"):])
+            except Exception:  # noqa: BLE001
+                break
+    return {"error": (r.stderr or r.stdout or "no output").strip().splitlines()[-1][:200]
+            if (r.stderr or r.stdout) else "no output"}
+
+
 def _learned_path(cfg):
     return (cfg.get("BROWSE_LEARNED_POLICY") or os.environ.get("BROWSE_LEARNED_POLICY")
             or str(Path.home() / ".config" / "browse-task" / "learned.json"))
@@ -299,7 +349,13 @@ def read_result(output_dir, stdout):
 
 def main():
     p = argparse.ArgumentParser(prog="browse_task")
-    p.add_argument("--task", required=True, help="plain-English web task to carry out")
+    p.add_argument("--task", help="plain-English web task to carry out "
+                                  "(not needed with --dump-text)")
+    p.add_argument("--dump-text", dest="dump_text", action="store_true",
+                   help="return the page's RENDERED TEXT verbatim, with no agent in the loop. "
+                        "For a caller that wants the document, not an answer.")
+    p.add_argument("--wait-ms", dest="wait_ms", type=int, default=3000,
+                   help="how long to let the page settle before reading it")
     p.add_argument("--start-url", dest="start_url", default="https://www.bing.com/",
                    help="page to open first (default: a search engine)")
     p.add_argument("--max-steps", dest="max_steps", type=int, default=25,
@@ -323,9 +379,33 @@ def main():
     global LOG
     if cfg.get("BROWSE_LOG"):
         LOG = Path(cfg["BROWSE_LOG"])
+    if not args.dump_text and not args.task:
+        fail("--task is required (or use --dump-text to get the page's text verbatim)")
+
+    fara_home = cfg.get("FARA_HOME") or ""
+
+    # --dump-text needs a browser but NOT the agent, so it runs before the model config is
+    # required and never loads fara-cli. It reuses the per-host mode ladder, which is the part
+    # worth reusing: this skill already knows which sites need headful or browserbase.
+    if args.dump_text:
+        fara_python = Path(fara_home) / ".venv" / "bin" / "python"
+        if not fara_python.exists():
+            fail("browser not installed at %s — run the setup in README." % fara_python)
+        xvfb0 = shutil.which("xvfb-run")
+        mode0, why0 = resolve_mode(args, cfg, args.start_url, xvfb0)
+        log("DUMP " + json.dumps({"url": args.start_url, "mode": mode0, "why": why0}))
+        d = run_dump(args.start_url, mode0, xvfb0, fara_python, args.wait_ms)
+        if d.get("error"):
+            out({"ok": False, "url": args.start_url, "mode": mode0,
+                 "error": d["error"]}, 1)
+        text = d.get("text") or ""
+        out({"ok": bool(text.strip()), "url": args.start_url, "mode": mode0,
+             "http_status": d.get("status"), "title": d.get("title") or "",
+             "chars": len(text), "text": text})
+        return
+
     log("START " + json.dumps({"task": args.task, "acted": bool(args.confirm),
                                "start_url": args.start_url, "max_steps": args.max_steps}))
-    fara_home = cfg.get("FARA_HOME") or ""
     base_url = cfg.get("BROWSE_BASE_URL") or ""
     model = cfg.get("BROWSE_MODEL") or ""
     api_key = cfg.get("BROWSE_API_KEY") or "none"
