@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Install this repo's git hooks. Run once per clone:
+#
+#     bash tools/install-git-hooks.sh
+#
+# .git/hooks is not version-controlled, so a hook that exists only on one machine protects only
+# that machine. This script is the tracked copy.
+set -euo pipefail
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HOOK="$REPO/.git/hooks/pre-push"
+
+cat > "$HOOK" <<'EOF'
+#!/usr/bin/env bash
+# Run what CI runs, before it becomes public. On 2026-07-31 a skill was pushed with three
+# critical findings (no PREFER clause, no trigger list, an undeclared dependency) and the break
+# was noticed only because someone asked. This takes about a second.
+set -uo pipefail
+REPO="$(git rev-parse --show-toplevel)"
+cd "$REPO" || exit 0
+
+fail=0
+if ! python3 tools/lint_skills.py --severity critical >/tmp/hs-lint.log 2>&1; then
+    echo; sed -n '1,25p' /tmp/hs-lint.log; fail=1
+fi
+if ! python3 tools/vendor.py check >/tmp/hs-vendor.log 2>&1; then
+    echo; sed -n '1,15p' /tmp/hs-vendor.log; fail=1
+fi
+if ! python3 tools/run_tests.py >/tmp/hs-tests.log 2>&1; then
+    echo; tail -20 /tmp/hs-tests.log; fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo
+    echo "pre-push: CI would fail on this — push aborted."
+    echo "          override with: git push --no-verify"
+    exit 1
+fi
+echo "pre-push: lint, vendor and tests ok"
+EOF
+
+chmod +x "$HOOK"
+echo "installed: $HOOK"

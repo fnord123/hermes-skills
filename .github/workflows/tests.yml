@@ -1,0 +1,33 @@
+name: tests
+
+# Four files named *_test.py sat in this repo and CI ran none of them - it checked conventions
+# and vendored copies only. Tests nothing runs are not a safety net, they are a claim of one.
+# Two of the four had in fact stopped being tests at all: zero assertions, driving a live
+# browser at a vendor's site. They are named *_probe.py now and this job ignores them.
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install, deliberately. Every suite here is stdlib-only and offline: a test that
+      # needs a wheel or a live third party is a test that quietly stops running, which is
+      # exactly how this repo accumulated four unrun files. A suite whose imports are missing is
+      # reported as SKIP, loudly, and never counted as a pass.
+      - name: Skill test suites
+        run: python3 tools/run_tests.py
+
+      # Catches a syntax error in the scripts no test imports - which would otherwise surface
+      # only when an agent ran one, mid-task, an hour in.
+      - name: Every skill script compiles
+        run: |
+          set -e
+          find . -path ./node_modules -prune -o -name '.venv' -prune -o \
+                 -name '*.py' -print0 | xargs -0 python3 -m py_compile
