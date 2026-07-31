@@ -51,6 +51,19 @@ chk("--min-chars is honoured when lowered deliberately",
 rxfetch.configure(min_chars=200)
 chk("and restored afterwards", rxfetch.looks_unusable("short but real"))
 
+# Moved here from the rx-review pipeline's suite when the fetcher moved into this skill: these
+# test the fetcher, so they belong with it. The pipeline could no longer run them anyway - it
+# binds to this file, and CI has no skills directory.
+chk("a short bot wall is rejected",
+    rxfetch.looks_unusable("Checking your browser before accessing pubmed..."))
+chk("a long document is NOT rejected for merely mentioning JavaScript",
+    not rxfetch.looks_unusable("This site requires JavaScript. "
+                               + "polycythemia hematocrit criteria " * 1200),
+    "judging on the marker alone once rejected a 35KB Bookshelf chapter")
+chk("a genuine shell IS rejected despite being long-ish",
+    rxfetch.looks_unusable("This site needs JavaScript to work properly. "
+                           + "clipboard search history " * 400))
+
 
 # ── one website, one throttle timer ───────────────────────────────────────────────────────────
 # www.thorne.com and thorne.com were throttled independently: one server, one client, double the
@@ -154,6 +167,12 @@ with tempfile.TemporaryDirectory() as td:
     open(p, "w").write(SHELL[:141])
     chk("a cached shell would be rejected on read",
         rxfetch.looks_unusable(open(p).read()))
+
+# An unidentifiable URL must never be answered with some other document from the same host.
+# Returning the largest cached page for a host once had 53 of 69 PMC citations audited against
+# the wrong article, and it recurred with a nine-character Bookshelf id.
+chk("no host-only cache fallback",
+    rxfetch.hermes_cache_text("https://example.com/no-identifier-here") == "")
 
 
 # ── throttling ────────────────────────────────────────────────────────────────────────────────
