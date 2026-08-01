@@ -71,20 +71,24 @@ them itself, on its own schedule.
 
 ## 1. Collect the labs — over as many rounds as they need
 
-Ask for the lab PDFs. Attachments arrive as local paths — copy each into the intake folder,
-keeping its name:
+Ask for the lab PDFs. After every message that carries attachments, run:
 
-    cp "<attached path>" ~/.hermes/rx-review/inputs/raw/
+    python3 ~/.hermes/rx-review/rx.py stage
 
-If a copy fails, say which file and ask for it again. Never continue with a missing lab.
+It copies every PDF Hermes has received into the intake folder and names each one it staged.
+Run it again whenever more arrive; already-staged files are skipped, so running it twice costs
+nothing.
 
 **Chat platforms cap attachments per message — Discord allows 10 — so a full lab history
-usually arrives in several rounds.** After copying each round, run:
+usually arrives in several rounds.** After each round, run:
 
     python3 ~/.hermes/rx-review/rx.py staged
 
-Report what it says: how many are waiting, and any it recognised as duplicates. Then **ask
-whether more are coming, and wait.** Re-sending the same PDF is free — files are matched by
+Report what it says: how many are waiting, and any it recognised as duplicates. If it warns
+that PDFs were received but not staged, run `stage` again and re-check.
+
+Then **ask whether more are coming, and wait.** Ask in plain text rather than a choice form:
+the answer often arrives as another batch of attachments, and a form has nowhere to put them. Re-sending the same PDF is free — files are matched by
 content, so a duplicate is ignored rather than transcribed twice.
 
 **If any file is marked `CHECK`, raise it before starting.** That file does not look like a lab
