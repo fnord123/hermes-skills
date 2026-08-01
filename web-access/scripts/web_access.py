@@ -49,6 +49,12 @@ import rxfetch                                                # noqa: E402
 # The escalation makes the first harmless, so the conservative default is the correct one.
 # --min-chars lowers it deliberately for a caller that knows it wants short pages.
 
+# The one open-web engine worth asking first: a real keyed API, so it answers consistently
+# instead of being rate-limited or CAPTCHA-walled like the scraped engines. If it is absent or
+# unhealthy the search widens automatically, so nothing depends on it being configured.
+PRIMARY_WEB_ENGINE = "brave api"
+
+
 def _searxng_url():
     """The search endpoint: the environment first, then the Hermes env files.
 
@@ -88,10 +94,22 @@ SEARXNG_URL = _searxng_url()
 # is bing and duckduckgo. Meanwhile pubmed, openalex, crossref, semantic scholar and arxiv sat
 # in `science` waiting. Cards were told to prefer PubMed and Cochrane while the backend was
 # structurally unable to ask them, which is a fair part of why they cited healthline and worse.
+# What KIND of question is being asked, in the caller's vocabulary rather than the engine's.
+# The mapping lives here so it can change - swap an engine, add a key - without touching a
+# caller or a card body.
+#
+# `literature` MERGES its engines deliberately: PubMed, Semantic Scholar, OpenAlex, Crossref and
+# arXiv index different corpora, so blending them is additive.
+#
+# The open-web scopes do the opposite. The `general` category has 64 engines enabled, including
+# regional ones (baidu, sogou, quark, naver, seznam), and merging them dilutes a product lookup
+# rather than strengthening it. So they ask ONE good engine first and only widen when it returns
+# nothing - which also covers the cases where it is rate-limited, suspended, out of quota, or
+# simply not configured on this instance.
 SCOPES = {
-    "literature": "science",   # pubmed, semantic scholar, openalex, crossref, arxiv
-    "products": "general",     # manufacturer pages, retailers, the open web
-    "web": "",                 # whatever the instance queries by default
+    "literature": {"categories": "science"},
+    "products": {"engines": PRIMARY_WEB_ENGINE, "widen": {"categories": "general"}},
+    "web": {"engines": PRIMARY_WEB_ENGINE, "widen": {"categories": "general"}},
 }
 DEFAULT_SCOPE = "web"
 DEFAULT_MAX = 10
@@ -107,21 +125,45 @@ def out(obj):
     sys.exit(0)
 
 
+def _ask(query, selector, timeout):
+    """One search against a given engine/category selector. Returns the parsed body.
+
+    Through the same per-host gate as every fetch: the search engine is a website too, and a
+    burst of queries is exactly the shape of traffic that gets a client suspended.
+    """
+    params = dict({"q": query, "format": "json"}, **selector)
+    url = "%s/search?%s" % (SEARXNG_URL, urllib.parse.urlencode(params))
+    with rxfetch.host_gate(rxfetch._host_of(SEARXNG_URL)):
+        with urllib.request.urlopen(url, timeout=timeout) as fh:
+            return json.loads(fh.read().decode("utf-8", "replace"))
+
+
+def run_search(query, scope, timeout=30):
+    """Search once, widening only if the preferred engine returned nothing.
+
+    Returns (body, widened). Split out from cmd_search so the widen decision can be tested
+    without a network: the preferred engine answers even nonsense queries, so the fallback is
+    unreachable from a live query and would otherwise only ever be exercised in production.
+
+    NOTE: an unknown engine name does NOT produce an empty result set - SearXNG silently falls
+    back to its default engines. So a missing or misnamed primary is already handled upstream,
+    and this widen exists for the case that matters: a configured engine that answers nothing
+    because it is suspended, rate-limited, or out of quota.
+    """
+    spec = SCOPES.get(scope) or {}
+    primary = {k: v for k, v in spec.items() if k != "widen"}
+    data = _ask(query, primary, timeout)
+    if (data.get("results") or []) or not spec.get("widen"):
+        return data, False
+    return _ask(query, spec["widen"], timeout), True
+
+
 def cmd_search(args):
     if not SEARXNG_URL:
         return out({"ok": False, "error": "SEARXNG_URL is not set for this profile. Search is "
                                           "not available; do not fall back to another engine."})
-    params = {"q": args.query, "format": "json"}
-    category = SCOPES.get(args.scope, "")
-    if category:
-        params["categories"] = category
-    url = "%s/search?%s" % (SEARXNG_URL, urllib.parse.urlencode(params))
     try:
-        # Through the same per-host gate as every fetch. The search engine is a website too, and
-        # a burst of queries is exactly the shape of traffic that gets a client suspended.
-        with rxfetch.host_gate(rxfetch._host_of(SEARXNG_URL)):
-            with urllib.request.urlopen(url, timeout=args.timeout) as fh:
-                data = json.loads(fh.read().decode("utf-8", "replace"))
+        data, widened = run_search(args.query, args.scope, args.timeout)
     except Exception as exc:                                   # noqa: BLE001
         return out({"ok": False, "query": args.query,
                     "error": "search backend unreachable: %s: %s" % (type(exc).__name__, exc)})
@@ -134,8 +176,8 @@ def cmd_search(args):
                         "engine": r.get("engine") or ""})
     # An empty result set is a FACT, not an error: say so plainly rather than leaving the
     # caller to infer that the backend broke and try to work around it.
-    return out({"ok": True, "query": args.query, "scope": args.scope, "count": len(results),
-                "results": results,
+    return out({"ok": True, "query": args.query, "scope": args.scope, "widened": widened,
+                "count": len(results), "results": results,
                 "note": ("no results — try different terms" if not results else
                          "read a page with `fetch`; if that returns unreadable, the page needs "
                          "the browse-task skill")})

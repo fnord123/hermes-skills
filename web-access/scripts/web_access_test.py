@@ -95,15 +95,58 @@ _spec = _ilu.spec_from_file_location("wa", os.path.join(os.path.dirname(os.path.
                                                         "web_access.py"))
 _wa = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_wa)
-chk("literature searches the science category", _wa.SCOPES["literature"] == "science",
+chk("literature merges the science engines",
+    _wa.SCOPES["literature"].get("categories") == "science",
     "(%r)" % _wa.SCOPES.get("literature"))
-chk("products searches the open web", _wa.SCOPES["products"] == "general",
-    "(%r)" % _wa.SCOPES.get("products"))
-chk("web leaves the instance default alone", _wa.SCOPES["web"] == "")
-chk("omitting --scope keeps the old behaviour", _wa.DEFAULT_SCOPE == "web")
+chk("literature does NOT widen", "widen" not in _wa.SCOPES["literature"],
+    "pubmed, openalex and arxiv index different corpora, so merging them is additive")
+for _s in ("products", "web"):
+    chk("%s asks one good engine first" % _s,
+        _wa.SCOPES[_s].get("engines") == _wa.PRIMARY_WEB_ENGINE, "(%r)" % _wa.SCOPES[_s])
+    chk("%s widens to the whole category when that is empty" % _s,
+        _wa.SCOPES[_s]["widen"].get("categories") == "general")
+chk("omitting --scope still works", _wa.DEFAULT_SCOPE in _wa.SCOPES)
+# The widen path cannot be reached from a live query - the preferred engine answers even
+# nonsense - so it is exercised here with the network stubbed out. Otherwise its first real
+# run would be in production, on the day the engine is suspended or out of quota.
+_calls = []
+
+
+def _fake_ask(query, selector, timeout):
+    _calls.append(selector)
+    if "engines" in selector:                 # the preferred engine: pretend it has nothing
+        return {"results": []}
+    return {"results": [{"title": "t", "url": "u", "content": "c", "engine": "bing"}]}
+
+
+_real_ask = _wa._ask
+_wa._ask = _fake_ask
+try:
+    _calls.clear()
+    body, widened = _wa.run_search("q", "products")
+    chk("an empty primary widens", widened and len(body["results"]) == 1)
+    chk("it tried the preferred engine first", _calls[0].get("engines") == _wa.PRIMARY_WEB_ENGINE,
+        "(%s)" % _calls[0])
+    chk("then the wider category", _calls[1].get("categories") == "general", "(%s)" % _calls[1])
+
+    _calls.clear()
+    _wa._ask = lambda q, sel, t: (_calls.append(sel) or
+                                  {"results": [{"url": "u", "engine": "brave api"}]})
+    body, widened = _wa.run_search("q", "products")
+    chk("a primary WITH results does not widen", not widened and len(_calls) == 1,
+        "(%d call(s))" % len(_calls))
+
+    _calls.clear()
+    _wa._ask = _fake_ask
+    body, widened = _wa.run_search("q", "literature")
+    chk("literature never widens", not widened and len(_calls) == 1,
+        "science engines are complementary, so a merge is correct there")
+finally:
+    _wa._ask = _real_ask
+
 chk("the vocabulary is the caller's, not the engine's",
     not any(v in _wa.SCOPES for v in ("science", "general")),
-    "callers say what they want, not which SearXNG category serves it")
+    "callers say what they want, not which SearXNG category or engine serves it")
 
 
 # ── the outcome taxonomy ──────────────────────────────────────────────────────────────────────

@@ -54,7 +54,11 @@ python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--b
 - `literature` — the research databases: PubMed, Semantic Scholar, OpenAlex, Crossref, arXiv.
   Use it for evidence, trials, reviews, mechanisms and adverse effects.
 - `products` — the open web: manufacturer pages, retailers, labels.
-- `web` — the default mix, used when `--scope` is omitted.
+- `web` — the open web, used when `--scope` is omitted.
+
+The open-web scopes ask one high-quality engine first and broaden automatically if it returns
+nothing, so results stay clean without you choosing an engine. `widened` in the output records
+which happened.
 
 ## Turning the user's words into calls
 
