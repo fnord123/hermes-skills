@@ -200,11 +200,20 @@ undetermined thing:
 
 Record each answer with:
 
-    python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "<product>" --answer "<what they said>"
+    python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "PRODUCT" --answer "THEIR EXACT WORDS"
 
 The gate notification already prints this command with `--item` filled in for each product — copy
 that line and fill in `--answer` from their reply, rather than typing the product name yourself.
-Recording the answer is what makes it stick; a reply that is only spoken back in chat does not.
+
+**Run it before you reply.** Recording the answer is what makes it stick; a reply that is only
+spoken back in chat does not. Say "recorded" only after the command has printed its confirmation,
+and quote what it said. If the user's answer arrives in a session that has lost the earlier
+context — an overnight reset, a new thread — run `python3 ~/.hermes/rx-review/rx.py confirm` first
+to see what is outstanding, then record against that.
+
+Copy their words verbatim rather than paraphrasing. "Super EPA (regular)" and "Super EPA
+(NSF Certified for Sport)" are two products; answering with both names joined by a slash records
+an answer that names neither.
 
 If they genuinely do not know a value, use `--accept-all` and tell them it will be researched
 with the gap noted.
