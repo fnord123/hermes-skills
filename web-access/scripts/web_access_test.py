@@ -84,6 +84,28 @@ chk("case is normalised", h("https://WWW.Thorne.COM/j") == "thorne.com")
 chk("a malformed url still yields something", h("not a url") == "?")
 
 
+# ── search scope ──────────────────────────────────────────────────────────────────────────────
+# SearXNG dispatches by CATEGORY. A search with no category hits `general` only - bing and
+# duckduckgo - so pubmed, openalex, crossref, semantic scholar and arxiv were installed,
+# enabled, and never queried. Cards were told to prefer PubMed while the backend could not
+# reach it.
+section("search scope maps to the right engines")
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("wa", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                        "web_access.py"))
+_wa = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_wa)
+chk("literature searches the science category", _wa.SCOPES["literature"] == "science",
+    "(%r)" % _wa.SCOPES.get("literature"))
+chk("products searches the open web", _wa.SCOPES["products"] == "general",
+    "(%r)" % _wa.SCOPES.get("products"))
+chk("web leaves the instance default alone", _wa.SCOPES["web"] == "")
+chk("omitting --scope keeps the old behaviour", _wa.DEFAULT_SCOPE == "web")
+chk("the vocabulary is the caller's, not the engine's",
+    not any(v in _wa.SCOPES for v in ("science", "general")),
+    "callers say what they want, not which SearXNG category serves it")
+
+
 # ── the outcome taxonomy ──────────────────────────────────────────────────────────────────────
 # A caller that cannot tell "the server refused us" from "we never reached it" writes "the
 # source does not support this claim" when the truth is "we were throttled". One citation audit

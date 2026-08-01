@@ -78,6 +78,22 @@ def _searxng_url():
 
 
 SEARXNG_URL = _searxng_url()
+
+# What KIND of question is being asked, in the caller's vocabulary rather than the search
+# engine's. The mapping to SearXNG categories lives here so it can change - add an engine, split
+# a category - without touching a single caller.
+#
+# This exists because the science engines were installed, enabled, and never once queried.
+# SearXNG dispatches by CATEGORY, and a search with no category set hits `general` only, which
+# is bing and duckduckgo. Meanwhile pubmed, openalex, crossref, semantic scholar and arxiv sat
+# in `science` waiting. Cards were told to prefer PubMed and Cochrane while the backend was
+# structurally unable to ask them, which is a fair part of why they cited healthline and worse.
+SCOPES = {
+    "literature": "science",   # pubmed, semantic scholar, openalex, crossref, arxiv
+    "products": "general",     # manufacturer pages, retailers, the open web
+    "web": "",                 # whatever the instance queries by default
+}
+DEFAULT_SCOPE = "web"
 DEFAULT_MAX = 10
 # Enough to answer from, small enough that a worker's context survives several of them.
 DEFAULT_MAX_CHARS = 20000
@@ -95,8 +111,11 @@ def cmd_search(args):
     if not SEARXNG_URL:
         return out({"ok": False, "error": "SEARXNG_URL is not set for this profile. Search is "
                                           "not available; do not fall back to another engine."})
-    url = "%s/search?%s" % (SEARXNG_URL, urllib.parse.urlencode(
-        {"q": args.query, "format": "json"}))
+    params = {"q": args.query, "format": "json"}
+    category = SCOPES.get(args.scope, "")
+    if category:
+        params["categories"] = category
+    url = "%s/search?%s" % (SEARXNG_URL, urllib.parse.urlencode(params))
     try:
         # Through the same per-host gate as every fetch. The search engine is a website too, and
         # a burst of queries is exactly the shape of traffic that gets a client suspended.
@@ -115,7 +134,7 @@ def cmd_search(args):
                         "engine": r.get("engine") or ""})
     # An empty result set is a FACT, not an error: say so plainly rather than leaving the
     # caller to infer that the backend broke and try to work around it.
-    return out({"ok": True, "query": args.query, "count": len(results),
+    return out({"ok": True, "query": args.query, "scope": args.scope, "count": len(results),
                 "results": results,
                 "note": ("no results — try different terms" if not results else
                          "read a page with `fetch`; if that returns unreadable, the page needs "
@@ -153,6 +172,10 @@ def main():
 
     p = sub.add_parser("search", help="search the web via the self-hosted engine")
     p.add_argument("--query", required=True)
+    p.add_argument("--scope", choices=sorted(SCOPES), default=DEFAULT_SCOPE,
+                   help="what kind of question this is. `literature` searches the research "
+                        "databases (papers, trials, reviews). `products` searches the open web "
+                        "for manufacturer and retailer pages. `web` uses the default mix.")
     p.add_argument("--max", type=int, default=DEFAULT_MAX)
     p.add_argument("--timeout", type=int, default=30)
     p.set_defaults(fn=cmd_search)

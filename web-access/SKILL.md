@@ -39,19 +39,30 @@ metadata:
 | Verb | Purpose |
 |---|---|
 | `search` | Finds pages matching a query. Returns titles, URLs, and short snippets. |
+| `search --scope literature` | Searches the research databases for papers, trials and reviews. |
+| `search --scope products` | Searches the open web for manufacturer and retailer pages. |
 | `fetch` | Reads one page and returns its text. Handles PDFs. |
 | `fetch --browser` | Reads a page that renders only in a browser. Use after a plain `fetch` reports `unreadable`. |
 
 ```
-python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "QUERY" [--max 10]
+python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "QUERY" [--scope literature|products|web] [--max 10]
 python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--browser] [--max-chars 20000]
 ```
+
+`--scope` picks where to search:
+
+- `literature` — the research databases: PubMed, Semantic Scholar, OpenAlex, Crossref, arXiv.
+  Use it for evidence, trials, reviews, mechanisms and adverse effects.
+- `products` — the open web: manufacturer pages, retailers, labels.
+- `web` — the default mix, used when `--scope` is omitted.
 
 ## Turning the user's words into calls
 
 | The user says | Call |
 |---|---|
 | "search for X" / "look up X" / "google X" | `search --query "X"` |
+| "what does the research say about X" | `search --query "X" --scope literature` |
+| "find the label or panel for X" | `search --query "X supplement facts" --scope products` |
 | "read this page" / "what does this link say" (URL given) | `fetch --url "URL"` |
 | "what's in Thorne Super EPA" | `search --query "Thorne Super EPA supplement facts"`, then `fetch` the manufacturer's page |
 | the page came back `unreadable` | the same `fetch` again, with `--browser` |
