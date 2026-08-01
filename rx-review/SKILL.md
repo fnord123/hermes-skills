@@ -56,7 +56,8 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | Verb | Purpose |
 |---|---|
 | `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
-| `intake` | Starts the pipeline over whatever is in the inputs folder. Run it once to begin, and once again after you apply the user's answers. |
+| `stage` | Copies every document Hermes has received into the intake folder. Run after **every** message that carries attachments. Creates nothing, so it is safe to repeat. |
+| `start` | Begins the review. Run **once**, after the user says the labs are complete and you have resolved the regimen. |
 | `staged` | What is waiting to be transcribed, across upload rounds. |
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
@@ -98,6 +99,9 @@ has no marker table, so the transcriber has nothing to read and a card is spent 
 This is a warning, not a refusal: if the user says it is a lab, include it. If it was a
 mistake, delete just that file from `~/.hermes/rx-review/inputs/raw/` and run `staged` again.
 
+`stage` only copies — it does not begin the review, so running it after every round is free
+and cannot start anything early. `start` is what begins it, and that comes later.
+
 **Do not start the pipeline while labs are still arriving.** More history is strictly better
 here: three or more readings of the same marker let the pipeline detect a TREND, and a marker
 drifting inside its reference range is invisible without them.
@@ -134,10 +138,12 @@ Wait for the user to say they are done uploading. Confirm the count back to them
 (`rx.py staged`), then:
 
     python3 ~/.hermes/rx-review/rx.py stage
+    python3 ~/.hermes/rx-review/rx.py start
 
-That is the only time you push. It is stage 1 of 5: it copies every PDF Hermes received into
-the intake folder and creates the card that runs the next stage. Each stage creates the one
-after it, so this single command is the whole start. Tell the user what it created and that
+That is the only time you push. `start` is stage 1 of 5, and it refuses if anything Hermes
+received is still unstaged, if no lab PDFs are staged at all, or if you have not resolved the
+regimen yet — it will name which. Each stage creates the one after it, so `start` is the whole
+beginning. Tell the user what it created and that
 it runs on its own — transcription takes a while, a large panel can take an hour.
 
 From here the pipeline transcribes each lab, builds the regimen inventory, looks up product
@@ -245,8 +251,8 @@ waiting. Do not run anything else to "help it along".
 
 ## Adding labs later
 
-Copy the new PDFs into `inputs/raw/`, run `rx.py staged` to confirm what arrived, and run
-`rx.py stage` once when they say that is all. Only the new work is created; finished work is
+Run `rx.py stage` to copy them in and `rx.py staged` to confirm what arrived, then
+`rx.py start` once when they say that is all. Only the new work is created; finished work is
 never repeated, and a re-sent file is recognised by content and ignored.
 
 ## If something fails
