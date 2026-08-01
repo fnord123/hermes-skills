@@ -12,6 +12,11 @@ of the pipeline, not from medicine or municipal bonds.
 Sources: the `rx-review` pipeline (`~/.hermes/rx-review/` — `rx.py`, `fanout.py`, `verify.py`,
 `rxfetch.py`), and the retired `analysis-engine` extraction (in git history, `c6bfd7a^`).
 
+**A worked example of everything below is `~/.hermes/rx-review/ARCHITECTURE.md`** — the same
+ideas as concrete cards: what each of its 21 card types does, how they chain, where the human
+gates sit, and which knobs were tuned to what. Read it when a rule here is too abstract to act
+on. This document says *why* the shape is like that; that one says *what* the shape is.
+
 > **Why a document and not a library.** A shared engine was extracted and abandoned. Two
 > reasons. It could not run until every domain-neutral abstraction existed, so it sat at one
 > phase of six while the working pipeline accumulated fixes it did not have. And the copy went
