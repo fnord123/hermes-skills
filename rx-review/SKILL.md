@@ -133,10 +133,12 @@ looks products up and asks about the rest.
 Wait for the user to say they are done uploading. Confirm the count back to them first
 (`rx.py staged`), then:
 
-    python3 ~/.hermes/rx-review/rx.py intake
+    python3 ~/.hermes/rx-review/rx.py stage
 
-That is the only time you push. Tell the user what it created and that it runs on its own —
-transcription takes a while, a large panel can take an hour.
+That is the only time you push. It is stage 1 of 5: it copies every PDF Hermes received into
+the intake folder and creates the card that runs the next stage. Each stage creates the one
+after it, so this single command is the whole start. Tell the user what it created and that
+it runs on its own — transcription takes a while, a large panel can take an hour.
 
 From here the pipeline transcribes each lab, builds the regimen inventory, looks up product
 Supplement Facts, and posts its own checkpoints. **Nothing below is something you trigger.**
@@ -244,7 +246,7 @@ waiting. Do not run anything else to "help it along".
 ## Adding labs later
 
 Copy the new PDFs into `inputs/raw/`, run `rx.py staged` to confirm what arrived, and run
-`rx.py intake` once when they say that is all. Only the new work is created; finished work is
+`rx.py stage` once when they say that is all. Only the new work is created; finished work is
 never repeated, and a re-sent file is recognised by content and ignored.
 
 ## If something fails
