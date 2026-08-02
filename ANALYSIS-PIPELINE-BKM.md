@@ -9,21 +9,28 @@ of the pipeline, not from medicine or municipal bonds.
 
 **Read this before writing a new pipeline, and after any run that surprised you.**
 
-Sources: the `rx-review` pipeline (`~/.hermes/rx-review/` — `rx.py`, `fanout.py`, `verify.py`,
-`rxfetch.py`), and the retired `analysis-engine` extraction (in git history, `c6bfd7a^`).
+**This document is domain-neutral on purpose. It names no card title, no domain entity and no
+project-specific constant.** Every incident below happened to a real pipeline and is described
+in terms of the ROLE the failing component played — "the fetcher", "the merge", "the gate" —
+because the next pipeline will have a component in that role under a different name. When you
+find yourself wanting to add a card title or a domain noun here, that is a sign the lesson
+belongs in that pipeline's own architecture document instead.
 
-**A worked example of everything below is `~/.hermes/rx-review/ARCHITECTURE.md`** — the same
-ideas as concrete cards: what each of its 21 card types does, how they chain, where the human
-gates sit, and which knobs were tuned to what. Read it when a rule here is too abstract to act
-on. This document says *why* the shape is like that; that one says *what* the shape is.
+**A worked example of everything below is a pipeline's own `ARCHITECTURE.md`** — the same ideas
+as concrete cards: what each card type does, how they chain, where the human gates sit, and which
+knobs were tuned to what. Read one when a rule here is too abstract to act on. This document says
+*why* the shape is like that; that one says *what* the shape is.
+
+Sources: a production multi-card review pipeline, and a retired attempt to extract a shared
+engine from it.
 
 > **Why a document and not a library.** A shared engine was extracted and abandoned. Two
 > reasons. It could not run until every domain-neutral abstraction existed, so it sat at one
 > phase of six while the working pipeline accumulated fixes it did not have. And the copy went
-> stale in the direction that matters: three defects fixed in `rx-review` in a single week were
-> already re-created in the engine, including one where `pipeline.py` stated *"Guards fail
-> closed"* in its own docstring while failing open in three places. A document cannot silently
-> diverge from an implementation it never claimed to be.
+> stale in the direction that matters: three defects fixed in the working pipeline in a single
+> week were already re-created in the engine, including one whose own docstring stated *"Guards
+> fail closed"* while failing open in three places. A document cannot silently diverge from an
+> implementation it never claimed to be.
 
 ---
 
@@ -34,14 +41,14 @@ here, and it is invisible in code review because **the new module always looks r
 
 | When | What |
 |---|---|
-| 11:17 | Throttling + interstitial detection hardened in `citations.py` after NCBI rate-limited 41 URLs |
-| 15:04 *(same day)* | `verify.py` written fresh — 591 new lines, a bare parallel `urllib` GET — and the pipeline pointed at it |
-| later | An entire citation audit judged claims against *"Checking your browser before accessing pubmed.ncbi.nlm.nih.gov"* |
+| 11:17 | Throttling + interstitial detection hardened in the fetch module after a source rate-limited 41 URLs |
+| 15:04 *(same day)* | A replacement fetch/verify module written fresh — 591 new lines, a bare parallel `urllib` GET — and the pipeline pointed at it |
+| later | An entire citation audit judged claims against *"Checking your browser before accessing…"* |
 
-Nothing was deleted. `citations.py` still contains the fix today. The pipeline simply moved to
-a module that never inherited it. The same thing then happened to `announce()` (copied without
-the helper it calls, `NameError`, a completed run reported as failed), and again in
-`analysis-engine` (three fixes pre-broken before it ever ran).
+Nothing was deleted. The hardened module still contains the fix today. The pipeline simply moved
+to a module that never inherited it. The same thing then happened to an announcement helper
+(copied without the function it calls, `NameError`, a completed run reported as failed), and
+again in the extracted engine (three fixes pre-broken before it ever ran).
 
 **Rules that follow from this:**
 
@@ -49,8 +56,8 @@ the helper it calls, `NameError`, a completed run reported as failed), and again
   `sleep`, `retry`, `lock`, `attempt`, `cap`, `guard`, `dedupe`, and for comments containing
   "which is how", "precisely how", "that is what happened". Each one is a bug someone already
   paid for.
-- **Write the incident into the code, not the commit message.** Every defence in `rx-review`
-  carries the failure that motivated it in a comment. That is why this document could be
+- **Write the incident into the code, not the commit message.** Every defence in the working
+  pipeline carries the failure that motivated it in a comment. That is why this document could be
   written at all, and why the losses above were recoverable. A defence whose reason is only in
   a commit message is a defence the next author will tidy away.
 - **A second copy is the failure mode, not the drift.** Vendoring with a CI drift check makes
@@ -68,11 +75,17 @@ published docs.
 worker that hits a network outage and calls `kanban_block` produces a card that will sit there
 forever. `transient` is *"treated like a generic block for routing"* — the kind is advisory.
 
+**A card that is merely waiting on other work must express an EDGE, never block.** Hermes does
+not auto-promote a card a worker blocked itself when its parents complete (upstream
+`_has_sticky_block`), so "block until the thing I need is ready" is a permanent stop. A stage
+that discovers a precondition it cannot satisfy should complete honestly and leave a fresh card
+behind an edge to the thing that will satisfy it.
+
 **There is no timer. `scheduled_at` does not exist.** The docs describe deferred dispatch with
 `hermes kanban schedule <id> --at <ISO8601>`. Across all of upstream `main`, `scheduled_at`
-appears in exactly one file: the documentation. It was implemented (#24429), recorded as merged
-(#28384), and **the diff was dropped in the rebase** — the re-land PR (#45504) is still open and
-conflicting. `scheduled` is an inert parking status; `kanban_db.py` says so plainly: *"scheduled
+appears in exactly one file: the documentation. It was implemented, recorded as merged, and
+**the diff was dropped in a rebase** — the re-land PR is still open and conflicting.
+`scheduled` is an inert parking status; the kanban DB layer says so plainly: *"scheduled
 tasks are intentionally not dispatchable; an external cron, human action, or automation can
 later call unblock_task."* **Design for no timer.**
 
@@ -86,36 +99,58 @@ job is to ask for confirmation asks again, blocks again, trips the loop detector
 triage where it satisfies nothing. **Write the answer down and `complete` the card** — completion
 is what the dependency graph waits on.
 
-**Block reasons are truncated to 160 characters** by `gateway/kanban_watchers.py` before the
-Discord adapter (which chunks correctly at 2000) ever sees them. Anything longer is lost
-mid-word. Put a fitted summary in the reason; put the detail in the card body or a file.
+**Block reasons are truncated to 160 characters** by the gateway's kanban watchers before the
+chat adapter (which chunks correctly at 2000) ever sees them. Anything longer is lost mid-word.
+Put a fitted summary in the reason; put the detail in the card body or a file.
+
+**Creation order is not execution order — only an edge is.** A card created with no parents is
+`ready` the instant it exists. A stage that creates the next stage's card without naming itself
+as that card's parent has not sequenced anything: in one run that put an entire downstream fan-out
+on the board, running, beside the upstream stage that was still executing. Every command that
+creates a successor should pass its own card id — the dispatcher sets it in the worker
+environment — and pass it unconditionally.
+
+**Conditional creation is where an empty parent list hides.** When a card is created only
+sometimes, the card behind it has a parent list that reads `[x]` on one run and `[]` on the next,
+and the empty case is the one that races. Prefer a **fixed-shape graph**: every stage creates its
+full card set on every run, and a card with nothing to do reports that and completes. Staleness
+then decides what a card *does*, never whether it exists. Idempotency keys make this free.
 
 **Create barriers with the graph, never splice them in later.** Linking a new parent onto a
 card that has already started does nothing — kanban does not un-start a running card. That is
-how a reconciler once ran three hours ahead of its evidence, and how a brief was assembled from
-an audit still in progress. Corollary: when you *do* splice, splice only into cards that have
-not started, and check.
+how a reconciler once ran three hours ahead of its evidence, and how a conclusion was assembled
+from an audit still in progress. Corollary: when you *do* splice — a gate linked in front of an
+already-created downstream card is a legitimate reason to — splice only into cards that have not
+started, **and write down what guarantees that.** "It cannot have started because its other
+parent is the card doing the splicing" is a real argument; leaving it unstated means the next
+change quietly invalidates it.
 
 **An `archived` parent counts as satisfied, exactly like `done`.** A merge card that kept round
 1's parents became ready when those were archived and merged 88 of 303 verdicts mid-run.
 
 **The idempotency key is usually derived from the title, so titles must carry the round.**
 Re-planning with the same title returns the *existing* card and **silently discards the new
-`--parent` arguments**. Suffix round-dependent titles (`... (round 2)`), and keep the reason
-next to the suffix or someone will tidy it away.
+`--parent` arguments**. Either suffix round-dependent titles (`... (round 2)`), keeping the reason
+next to the suffix or someone will tidy it away, or key explicitly on a content hash. If you key
+explicitly, **titles are no longer unique** — say so, and audit every lookup that searches by
+title, because those become set-valued whether or not their callers expect it.
+
+**Derive keys from a stable hash, never from the language's built-in `hash()`**, which is salted
+per interpreter run and therefore produces a new key — and a duplicate card — on every invocation.
 
 **Set `--workspace dir:<reports>`.** The default scratch workspace is deleted on completion and
 no consumer looks there; one run lost ~120KB of finished work that way.
 
-**Card bodies are capped at 8KB** (`_CTX_MAX_BODY_BYTES`) and `build_worker_context()` appends a
+**Card bodies are capped at 8KB** (`_CTX_MAX_BODY_BYTES`) and the worker-context builder appends a
 truncation marker rather than failing — so a 36KB body silently delivers its first two items.
 **Refuse to create an oversized card** rather than let it be clipped. Enforce this in your
 `create()` so it guards every card, not just the ones you remembered.
 
 **Subscribe the cards that block for a human**, and pin `--notifier-profile`: the notifier skips
 any subscription whose owner has no running gateway, which silently dropped every one of them.
-Per-*card* notifications turn a run into narration of its own bookkeeping — subscribe gates and
-phase boundaries, not everything.
+This is the failure that makes a correct gate design useless — the board looks right and the
+human is never asked. Per-*card* notifications turn a run into narration of its own bookkeeping;
+subscribe gates and phase boundaries, not everything.
 
 **Know which card bodies are `.format()`ed and which are not.** A template passed straight to
 `create()` reaches the model verbatim, so `{reports}/` stays a literal placeholder and the
@@ -129,8 +164,8 @@ violation** and counts as failed regardless of what it accomplished. Say so in t
 `~/.hermes/config.yaml` and `~/.hermes/.env` do **not** reach `~/.hermes/profiles/<p>/`, and a
 dispatched worker reads the profile. This cost a full day twice over in one session: research
 cards died all afternoon against a context ceiling that had been raised globally hours earlier,
-and later the entire research stage failed on a search backend that had been switched away from
-weeks before — the global file said `searxng`, all ten profiles said `tavily`, and none of them
+and later an entire research stage failed on a search backend that had been switched away from
+weeks before — the global file named one, all ten profiles named another, and none of them
 carried the endpoint variables. **Any claim of the form "we already changed that" is a claim
 about `profiles/*/`, and must be checked there.** Verify what a worker actually resolves rather
 than reading the global file:
@@ -141,6 +176,11 @@ HERMES_HOME=~/.hermes/profiles/<p> ~/.hermes/hermes-agent/venv/bin/python -c \
    from hermes_cli.env_loader import load_hermes_dotenv; load_hermes_dotenv(); \
    print(os.environ.get('SEARXNG_URL'))"
 ```
+
+The same applies to **toolsets** and **hooks**: a worker resolves its tools from
+`platform_toolsets.cli`, so setting only the obvious `toolsets:` key produces a config that reads
+correctly and behaves otherwise, and a hook registered globally protects nothing a worker does.
+Set both, in the profile.
 
 Two corollaries. A search-and-replace across profiles silently skips any profile whose block
 lacks the key entirely — **check the keys exist, not just their values**. And `profiles/*` is
@@ -161,24 +201,24 @@ never letting a worker see more than it can hold.
 Never hand a worker a document. Hand it the smallest span that can answer the question, in this
 cascade:
 
-1. **Locate first, then extract the ENCLOSING SECTION.** For the quote in a 90-page drug label,
-   the enclosing section is ~630 tokens against ~52,000 for the document. This is what makes a
-   full re-audit affordable at all — and the heading is what catches scope errors, so it is more
-   accurate *and* smaller.
-2. **If the section itself is oversized, centre a window on the match** (`MAX_SECTION_CHARS`,
-   5,000 in rx-review). Some documents have one enormous "Adverse Reactions" section, and
-   *"one fat item drags a whole card past its budget."*
+1. **Locate first, then extract the ENCLOSING SECTION.** For a quote in a 90-page regulatory
+   document, the enclosing section is ~630 tokens against ~52,000 for the document. This is what
+   makes a full re-audit affordable at all — and the heading is what catches scope errors, so it
+   is more accurate *and* smaller.
+2. **If the section itself is oversized, centre a window on the match** (a max-section-chars
+   constant; 5,000 worked). Some documents have one enormous section, and *"one fat item drags a
+   whole card past its budget."*
 3. **If the document has no heading structure, fall back to a plain window** centred on the match
-   (`CONTEXT_IF_NO_SECTION`, 3,000).
-4. **Mark every truncation in the text itself** — rx-review prepends
+   (3,000 worked).
+4. **Mark every truncation in the text itself** — prepend something like
    `[section truncated around the quote]`. A judge that cannot tell it is looking at a window
    will treat absence of context as absence of support.
 
 Structure is worth protecting upstream of all this: convert block-level tags to newlines
-**before** stripping tags, and re-extract PDFs with PyMuPDF rather than reusing flattened
-markdown. Firecrawl markdown arrives with zero newlines and zero headings, which destroys
-section detection and silently forces every item down to step 3. PyMuPDF keeps 5,915 line
-breaks and 166 numbered sections on the same file.
+**before** stripping tags, and re-extract PDFs with a layout-preserving library rather than
+reusing flattened markdown. Scraper markdown can arrive with zero newlines and zero headings,
+which destroys section detection and silently forces every item down to step 3. A proper PDF
+extractor kept 5,915 line breaks and 166 numbered sections on the same file.
 
 ### 2b. Many sources packed into cards
 
@@ -188,15 +228,15 @@ context_length is a claim, not a measurement." That reasoning is wrong twice ove
 operative number is what the client is *configured to send*: cards are executed by agent
 workers through a proxy, and the agent will not send more than its own configured window
 whatever the backend loaded. And pinning a backend address means the pipeline inherits every
-migration — this one hardcoded `192.168.1.4:10400`, serving moved to another host, every probe
-failed, and the pipeline quietly planned against a quarter of the real window with one warning
-line as the only trace. If your infrastructure says *"clients never talk to a GPU host
-directly; the proxy is the only front door"*, that applies to your pipeline too. Read the
-configured window; keep a conservative floor for when even that is unreadable.
+migration — one pipeline hardcoded a GPU host's address, serving moved elsewhere, every probe
+failed, and it quietly planned against a quarter of the real window with one warning line as the
+only trace. If your infrastructure says *"clients never talk to a GPU host directly; the proxy is
+the only front door"*, that applies to your pipeline too. Read the configured window; keep a
+conservative floor for when even that is unreadable.
 
 **Measure real sizes by fetching, once, per unique source.** A domain lookup table cannot know
-that one PMC article is an abstract stub and the next is 40 pages, and it silently mis-sizes
-every host nobody has added to it. Cache the measurement.
+that one article from a host is an abstract stub and the next is 40 pages, and it silently
+mis-sizes every host nobody has added to it. Cache the measurement.
 
 **`n_ctx` is in TOKENS; your corpus is in BYTES. Convert, and say which unit you are in.**
 Conflating them is not a rounding error — it silently sized every chunk at ~2.5% of the window
@@ -208,14 +248,14 @@ window)`) so the mistake is visible in the log rather than only in the card coun
 not "did not fit" but *"fit, and compacted anyway"*. The model needs room to reason over the
 text, not merely room to hold it.
 
-**Bound each card by BOTH a character budget and an item count, whichever binds first.**
-rx-review uses `CARD_BUDGET_CHARS = 36_000` (~9k tokens of sections) and
-`MAX_CITATIONS_PER_CARD = 10`. The character budget stops one fat item from blowing the card;
-the item cap stops thirty tiny ones from blowing the wall clock.
+**Bound each card by BOTH a character budget and an item count, whichever binds first.** One
+pipeline uses ~36,000 chars (~9k tokens of extracted sections) and a cap of 10 items. The
+character budget stops one fat item from blowing the card; the item cap stops thirty tiny ones
+from blowing the wall clock.
 
-**When something will not fit, flag it — never pack it silently.** rx-review's chunker records
-`oversized: true` on the chunk rather than pretending. Silent truncation reads as "covered
-everything" when it did not, which is indistinguishable from success at every later stage.
+**When something will not fit, flag it — never pack it silently.** Record an `oversized` marker
+on the chunk rather than pretending. Silent truncation reads as "covered everything" when it did
+not, which is indistinguishable from success at every later stage.
 
 **Items go to a file; the card names the file.** A card that inlines its work list *"is one
 incurious worker away from silently auditing 2 of 25 citations and reporting done."*
@@ -225,7 +265,8 @@ incurious worker away from silently auditing 2 of 25 citations and reporting don
 **The agent's own token estimate is not evidence.** Hermes reported peaks of ~104k and ~96k
 tokens for cards whose real prompts, per the provider, were 146k–153k — roughly 40% low, and
 low in the direction that hides the problem. Sizing decisions taken from those logs put cards
-at "58% of the window" when they were at 85%.
+at "58% of the window" when they were at 85%. Whatever compression threshold you set, do the
+arithmetic against the undercount, not against the estimate.
 
 **Worker logs print token counts only inside WARNINGS**, so the only cards you can measure from
 logs are the ones that already went wrong. Nothing durable records how close a *successful*
@@ -237,7 +278,7 @@ from the provider's own accounting rather than the agent's estimate:
 ```yaml
 model:
   default_headers:
-    x-litellm-tags: "rxcard=${HERMES_KANBAN_TASK}"
+    x-litellm-tags: "card=${HERMES_KANBAN_TASK}"
 ```
 
 Hermes expands `${VAR}` from the worker environment, where the dispatcher has already set the
@@ -246,7 +287,8 @@ timestamp collapses under concurrency — with six workers running, 75 of 77 run
 another and four different cards were each credited with the same 149,550-token peak.
 Compactions can then be inferred from sharp drops in `prompt_tokens` within a card's sequence,
 since context only falls when history is discarded. **Do this before you need it: nothing
-recovers attribution for runs already finished.**
+recovers attribution for runs already finished.** Note that this lives in the per-profile config
+(§1), so it dies on a profile rebuild unless it is in the provisioning script.
 
 ### 2d. Compaction fails because of your own concurrency
 
@@ -264,11 +306,11 @@ not the default two minutes.
 ### 2e. Measure the document before designing the splitter
 
 Every assumption worth making about a source is checkable in a minute, and the real one broke
-three of them at once. On a 29-page lab panel: the text extracts **one cell per line** (marker
-name, value and reference range arrive as three separate lines, so "count the rows" is
+three of them at once. On a 29-page tabular report: the text extracts **one cell per line**
+(a row's name, value and expected range arrive as three separate lines, so "count the rows" is
 ill-defined); it is **two different reports bound into one file**, with the seam visible only in
-the page footers; and the **largest font on all 16 pages of the first report is the patient's
-name**, so heading detection by font size finds exactly nothing.
+the page footers; and the **largest font on all 16 pages of the first report is the subject's
+own identifier**, so heading detection by font size finds exactly nothing.
 
 **Take cut points from the document's own identity strings** — `Page N of M`, an appendix
 banner, a change in column geometry — never from styling. And note the corollary for any
@@ -284,7 +326,8 @@ member.
 
 **Set the runtime cap ABOVE the design target, not at it.** A cap equal to the expected duration
 turns ordinary variance into a timeout; two cards burned four attempts that way. Target 20
-minutes, cap at 30.
+minutes, cap at 30. Record the target alongside the cap, or the next person re-tunes the number
+without knowing which one it was.
 
 ---
 
@@ -292,17 +335,17 @@ minutes, cap at 30.
 
 The richest source of silent failure in the whole pipeline. Sources do not fail like HTTP.
 
-**A throttled failure is not a small document.** NCBI answers rate limiting with **HTTP 200** and
-a ~133-character interstitial. `urlopen` raises nothing, so a sizer recorded it as a successful
-measurement of a tiny page — 41 of 147 URLs — then packed 15 full-text articles into one card
-believing they totalled 2KB. That card timed out twice, tripped the circuit breaker, and
-stalled everything behind it. **The bug was that the failure was indistinguishable from
-success.**
+**A throttled failure is not a small document.** A major public literature API answers rate
+limiting with **HTTP 200** and a ~133-character interstitial. `urlopen` raises nothing, so a
+sizer recorded it as a successful measurement of a tiny page — 41 of 147 URLs — then packed 15
+full-text articles into one card believing they totalled 2KB. That card timed out twice, tripped
+the circuit breaker, and stalled everything behind it. **The bug was that the failure was
+indistinguishable from success.**
 
-**Detect interstitials by phrase, at any length — not by size.** PubMed's JavaScript shell is
-6–11KB of clipboard/search-history chrome carrying no abstract at all, so every length-gated
-test passes it. This mistake has been made three times, including once in a fix written
-*specifically for this problem* that then reported "8/8 USABLE" while returning zero abstracts.
+**Detect interstitials by phrase, at any length — not by size.** A large database's JavaScript
+shell can be 6–11KB of navigation chrome carrying no content at all, so every length-gated test
+passes it. This mistake has been made three times, including once in a fix written *specifically
+for this problem* that then reported "8/8 USABLE" while returning zero usable documents.
 **Read the text your fetcher returned before believing a size.**
 
 **Never cache an unusable response.** Writing one interstitial makes it permanent: the read path
@@ -310,14 +353,14 @@ trusts any non-empty cache file, so every later retry replays it. A sweep report
 not helping"* for nine rounds against 41 cached bot walls. Leaving no file costs one re-fetch;
 leaving a wall costs the citation.
 
-**Rate-limit per host, across processes.** A `threading.Lock` is not enough — `build`, `sweep`
-and the sizer run as separate processes, and a rate limit is enforced against the *client*.
-`fcntl.flock` on a per-host file, and **write the timestamp even when the request raises**: a 429
-consumed the quota exactly as a 200 did.
+**Rate-limit per host, across processes.** A `threading.Lock` is not enough — the planner, the
+sweep and the sizer run as separate processes, and a rate limit is enforced against the *client*.
+Use a file lock on a per-host file, and **write the timestamp even when the request raises**: a
+429 consumed the quota exactly as a 200 did.
 
-**Use the site's API when it has one.** PubMed and PMC HTML never yield an article to a
-non-browser; `eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi` returns the real text. 52 of 56
-sources recovered this way, averaging 12.5KB against 138-byte walls.
+**Use the site's API when it has one.** Some large repositories never yield an article to a
+non-browser through their HTML front end while their documented API returns the full text
+immediately. 52 of 56 sources recovered this way, averaging 12.5KB against 138-byte walls.
 
 **Return WHY it failed, not `""`.** A bot wall, a 429 and a read timeout all reach the caller as
 "no text", and a caller that cannot tell them apart writes *"the source does not support this
@@ -325,9 +368,9 @@ claim"* when the truth is *"we were throttled."* Downstream that becomes a findi
 at minimum: **`ok` / `unreadable` (reached it, got chrome) / `unreachable` (never got a
 response)**.
 
-**Match cached sources by document identifier, never by host.** Matching `pmc.ncbi.nlm.nih.gov`
-on host alone returned the largest cached article for every citation and checked 53 of 69
-against the wrong paper. **Returning nothing beats returning the wrong source.**
+**Match cached sources by document identifier, never by host.** Matching on host alone returned
+the largest cached article for every citation from that host and checked 53 of 69 against the
+wrong document. **Returning nothing beats returning the wrong source.**
 
 ---
 
@@ -337,7 +380,8 @@ against the wrong paper. **Returning nothing beats returning the wrong source.**
 different findings and only one is about the evidence. Measured over a full run, the split was
 **50 evidence findings and 78 unverified** out of 128 apparent failures — reported flat, that
 read as 128 refutations. *Conflating them is how a bot wall becomes "the literature contradicts
-this" in a document written for a professional.*
+this" in a document written for a professional.* **Report the two counts separately** wherever
+the audit is summarised; a single total is the thing that misleads.
 
 **Derive the distinction mechanically, not from the reason prose.** Cross the verdict with the
 locator's match type. Verdicts like `misquoted`, `scope-mismatch`, `overstated` and
@@ -368,7 +412,8 @@ instead of oscillating.
 
 **A judged-but-unfinished card looks exactly like a finished one on the board.** Sweep for items
 with no verdict, loop until dry, and guard on no-progress so a genuinely unjudgeable item cannot
-spin forever.
+spin forever. A one-shot fan-out with a barrier behind it does not give you this: the barrier
+fires when its parents are done, not when the work is complete.
 
 ---
 
@@ -378,9 +423,9 @@ spin forever.
 URLs compacted three times, *"which makes its verdicts worthless."* Split by natural unit —
 per source, per section, per claim — sized to the context the server actually serves.
 
-**This applies to adversarial lenses too, not just the obvious stages.** `rx-review` learned it
-for the citation audit and never carried it to the four lens cards sitting beside it, each of
-which is still handed the entire corpus. **When you fix a scoping bug, grep for every other card
+**This applies to adversarial lenses too, not just the obvious stages.** One pipeline learned it
+for its citation audit and did not carry it to the four lens cards sitting beside it, each of
+which was still handed the entire corpus. **When you fix a scoping bug, grep for every other card
 with the same shape.** The same applies to *conventions*, not just bugs: when a severity scale
 was unified across four lenses, the fifth consumer — a final review card in a different file —
 kept the old two-grade vocabulary and went on reporting in a language the survival rule no
@@ -398,8 +443,8 @@ the per-part convention lived in the old code and not in anyone's head.
 with the section's failed citations injected beats a corpus-scoped critic that compacts.
 
 **Judge the enclosing section, not a character window** (§2a). A ±200-char window cannot tell
-you the sentence sits under *"6.1 Adverse Reactions in Atopic Dermatitis"* while the claim is
-about a different indication — and the heading is exactly what catches scope errors.
+you the sentence sits under a heading scoping it to a different population, product or period
+than the claim — and the heading is exactly what catches scope errors.
 
 **Filter junk headings.** Site chrome ("JOIN NOW", "PERMALINK") matches an ALL-CAPS heading
 pattern perfectly, and a junk heading is worse than none because it actively misleads about
@@ -413,27 +458,32 @@ rewording while resharding quietly discards the history each line was carrying. 
 questions; do not paraphrase them.** Where one question genuinely reasons over the others'
 answers, that one is the synthesis card, gated on the rest.
 
+**Give each shard only the inputs its own questions need.** A shard reading a large shared input
+it never consults wastes tokens on every card in the fan-out; a shard silently missing one it
+does need answers a different question than the one asked. Make it explicit per shard, and
+default to *including* — the expensive error is the silent one.
+
 **Overlap the shards so the split is checkable.** Give adjacent shards one shared unit — a page,
 a section — transcribed twice by workers that never see each other, then compare. Agreement is
 real evidence the split lost nothing, and it is far stronger than counting rows, which is
 ill-defined the moment a layout puts one field per line. Two traps, both hit live:
 
-- **Compare on identity plus unit, never on the name alone.** A comprehensive panel measures
-  glucose in blood *and* in urine; keyed on name, two correct transcriptions look like one
-  reading with two contradictory values. Do not put the reference range in the key either —
-  two workers write the same range differently (`< or = 2` and `< or = 2 IU/mL`) and both are
-  right.
+- **Compare on identity plus unit, never on the name alone.** A comprehensive report may measure
+  the same named quantity in two different contexts; keyed on name, two correct transcriptions
+  look like one reading with two contradictory values. Do not put the expected range in the key
+  either — two workers write the same range differently (`< or = 2` and `< or = 2 IU/mL`) and
+  both are right.
 - **An empty overlap is suspicion, not proof.** The shared unit may hold only narrative. Report
   it; never block on it. A false block on a heuristic is how a check stops being trusted — this
   one halted a live pipeline within an hour of shipping.
 
 **When you add a file type to a shared directory, enumerate every glob over that directory.**
-Sharded research fragments were written as `marker-x-part1.md` into the reports directory, which
-four later stages read as "the research reports" — the adversarial lenses, the citation audit,
-the interactions card and the status count. The corpus would have quadrupled, and deliberately
-*partial* fragments would have been judged for gaps and overreach, producing findings that look
-real but are artifacts of the split. The convention to follow already existed in the same file
-(intermediates carry a `LENS-` prefix and every consumer skips it); the new writer used a
+Sharded fragments were written as `<topic>-part1.md` into the reports directory, which four later
+stages read as "the reports" — the adversarial lenses, the citation audit, the cross-cutting
+synthesis and the status count. The corpus would have quadrupled, and deliberately *partial*
+fragments would have been judged for gaps and overreach, producing findings that look real but
+are artifacts of the split. The convention to follow already existed in the same file
+(intermediates carry an agreed prefix and every consumer skips it); the new writer used a
 suffix and nothing skipped it. **A dry run and a green test suite both passed this** — only
 reading the consumers found it.
 
@@ -444,11 +494,22 @@ reading the consumers found it.
 **A gate is a card the pipeline waits on, created with the graph.** Never a prompt, never a
 file someone has to notice.
 
-**Verify before asking.** Ask the human to confirm something the pipeline has already checked
-mechanically — showing 258 markers verified against their source PDFs makes "do these look
-right?" answerable. An unverified question wastes the only human in the loop.
+**A gate is an EDGE, not a check inside the card it guards.** A precondition enforced by code
+that runs after the guarded card has started lets that card run, refuse, and block itself — and
+answering the question afterwards releases nothing, because a worker-blocked card is not
+auto-promoted when a parent completes (§1). Link the gate in front of the next card and let
+kanban hold it in `todo`. One pipeline had one gate wired as an edge and the other as an
+in-process check; only some orderings of the two answers ever finished by themselves.
 
-**Ask answerable questions.** *"Confirm the labs"* is not answerable; *"258 markers, 16 out of
+**Ask one question at a time.** Two gates outstanding at once multiplies the orderings you have
+to reason about, and each ordering is a chance to deadlock. Serialising the stages that raise
+them removes the problem rather than solving it.
+
+**Verify before asking.** Ask the human to confirm something the pipeline has already checked
+mechanically — showing that every record was verified against its source document makes "do
+these look right?" answerable. An unverified question wastes the only human in the loop.
+
+**Ask answerable questions.** *"Confirm the data"* is not answerable; *"258 records, 16 out of
 range, here they are"* is.
 
 **An answer given in chat is not a state change.** This is the most persistent bug in the whole
@@ -457,31 +518,44 @@ card sits blocked forever. Nobody notices, because the human has no reason to lo
 again and the pipeline has no way to report that it is still waiting. Two halves are needed:
 
 - **Give the agent an exact command to run**, in the card body and in the skill, with the answer
-  as an argument (`rx.py labs-confirm`, `rx.py regimen-confirm --item ... --answer ...`).
-  A model that has to invent the state transition will summarise the conversation instead and
-  move on. Do not describe the outcome — name the command.
+  as an argument. A model that has to invent the state transition will summarise the conversation
+  instead and move on. Do not describe the outcome — name the command.
 - **The command writes the answer down where the card can see it, and COMPLETES the card.**
   Completion is what the dependency graph waits on.
 
+**Store the answer and its scope in ONE receipt, fingerprinted to what it answers.** An answer
+split across files with independent lifetimes will be re-applied to inputs it was never given
+for: a list of exclusions written on one run silently suppressed the same items on the next,
+whose confirmation had never mentioned them. Keep the confirmation, its qualifications and a
+hash of the data it confirms in a single artifact, and treat the receipt as void when the hash
+no longer matches. That is a structural guarantee rather than a rule someone has to remember.
+
 **Never resolve a gate by unblocking it.** Unblock *re-runs* the card, and the card's whole job
 is to ask — so it asks again, blocks again, trips `block_loop_detected` (limit 2), and lands in
-triage *"where it satisfies nothing and the research stage waits forever. That is exactly what
+triage *"where it satisfies nothing and the pipeline waits forever. That is exactly what
 happened at 13:30."*
 
 **Make the gate answerable from wherever the human actually is.** If they read the question in
-Discord, answering in Discord has to clear it. A gate that can only be cleared from a terminal
-is a gate that stays shut.
+chat, answering in chat has to clear it. A gate that can only be cleared from a terminal is a
+gate that stays shut. In practice this means the worker runs the recording command on the user's
+behalf — so say that in the card body for *every* gate, not just the first one you wrote.
 
 **Guards fail closed, and say what is outstanding.** Refusing to proceed is correct; refusing
-without naming what is missing sends the human to read the code.
+without naming what is missing sends the human to read the code. Ship a diagnostic verb that
+explains why a gate is still shut — which answers are on record and how each was matched.
 
 **Never put a partial set to a human.** Inputs arrive in rounds, so a stage that plans over
 "everything it can see" runs several times, and an early merge card completes over the subset
-that existed then — advancing the pipeline and posting the gate. We asked for confirmation of
-600 markers from 20 PDFs while two were still being transcribed. **A confirmation is the one
-step that cannot be retracted:** "these match my results" does not become true for the files
+that existed then — advancing the pipeline and posting the gate. One run asked for confirmation
+of 600 records from 20 documents while two were still being transcribed. **A confirmation is the
+one step that cannot be retracted:** "these match my results" does not become true for the files
 nobody saw. Do not reason about which planning round fired; ask the inputs directory whether
-every staged item has landed, and stay silent until it has.
+every received item has landed, and stay silent until it has.
+
+**Make input staging its own stage, before anything reasons about the inputs.** A per-attachment
+copy done by hand is not idempotent and not checkable, and a document that arrives after the
+work has been planned is a source the conclusion quietly omits. Stage everything, verify the set
+is complete, and only then create the first card that reads it.
 
 ---
 
@@ -531,7 +605,7 @@ body, or a critic with nothing to report will invent something.
 ## 8. Failing closed
 
 State it as a principle *and* check it, because it is easy to violate while believing you
-haven't — `analysis-engine` asserted *"Guards fail closed. An unreadable input is an error,
+haven't — the extracted engine asserted *"Guards fail closed. An unreadable input is an error,
 never 'nothing found'"* in its docstring while failing open in three separate places.
 
 - An unreadable input is an error, never "nothing found".
@@ -540,6 +614,11 @@ never 'nothing found'"* in its docstring while failing open in three separate pl
 - When you cannot tell whether something applies, **keep it and flag it**. Dropping a real
   finding is the worst outcome available to a filter.
 - A pipeline that fails quietly is worse than one that fails loudly.
+
+**Enforce the gate in the code that builds the graph, not by asking a model to check for a
+file.** The stage that fans out should refuse to create its cards while a confirmation is
+missing. A card body that instructs a worker to verify a precondition is a precondition enforced
+by whichever model happened to read that paragraph.
 
 **A gather must assert the count the fan-out planned.** Globbing what exists cannot distinguish
 "part 7 has not finished" from "part 7 finished and wrote nothing" — both merges here errored
@@ -554,7 +633,7 @@ refuse" so the upgrade is not a flag day. This also catches the archived-parent 
 any line whose first field was not in their vocabulary, in silence. The prompt says "append ONE
 line per finding" and a model bullets by reflex, so `- fatal | …` lost the finding entirely
 while counts, totals and body all agreed with each other and were all wrong. A dropped `fatal`
-is an unsound claim reaching the final brief with nothing marking it.
+is an unsound claim reaching the final conclusion with nothing marking it.
 
 **If two code paths decide "is this record valid", they must share the predicate.** The audit's
 sweep accepted any line with three fields, a filename and a number; its merge required the
@@ -564,11 +643,18 @@ announced as fully audited and appeared nowhere in the audit. Two validity tests
 type is the same defect as two implementations of one question (§9), and it fails the same way:
 silently, in the direction of false completeness.
 
+**Open a live board read-only when you are only looking.** Inspection tooling that connects
+read-write leaves handles that can corrupt indexes, and index corruption presents as a board
+that answers status-filtered queries with nothing while the underlying table is intact — so a
+reset reports "0 cards deleted" against a board holding dozens, and card creation plans against
+a state that does not exist. Have exactly one script that opens it writable, and make it refuse
+to run while the gateway is up.
+
 ---
 
 ## 9. Anti-patterns
 
-- **Duplicating a helper across scripts.** Four implementations of "which markers are out of
+- **Duplicating a helper across scripts.** Four implementations of "which records are out of
   range" returned four different answers, and the one wired to the gate was the wrong one.
   *"Two answers to 'what is abnormal' means at least one is wrong, and the user is the one who
   has to notice."*
@@ -588,11 +674,11 @@ silently, in the direction of false completeness.
   never have existed, and each looked defensible on its own. **Consolidation's real value is
   not that the copies stop drifting; it is that putting them side by side forces the question
   none of them had to answer alone.**
-- **Two constants with one name.** `MAX_SECTION_CHARS` was 5,000 in one module and 12,000 in
-  another.
+- **Two constants with one name.** A max-section-chars constant was 5,000 in one module and
+  12,000 in another.
 - **Re-deriving a classification the upstream stage already made** by hand-parsing its output
   file. Consume the structure; do not re-infer it from prose.
-- **Letting a cosmetic step fail the run.** An unguarded Discord announcement raised, the script
+- **Letting a cosmetic step fail the run.** An unguarded chat announcement raised, the script
   exited 1, and a card blocked as though its work had failed — after all 22 of its cards had
   been created successfully. *Never fail a run over a message about the run.*
 - **Copying inputs without content-hash dedupe.** Copying is not idempotent when each copy gets
@@ -601,17 +687,17 @@ silently, in the direction of false completeness.
 
   **Content-hash dedupe is only half of it — you must also decide which copy SURVIVES.**
   Keeping "the first in sorted order" is a coin flip when the filenames carry random prefixes.
-  Re-uploading 21 already-transcribed documents, 12 of them drew a lower prefix than their
+  Re-uploading 21 already-processed documents, 12 of them drew a lower prefix than their
   original, displaced it as canonical, and were reported as still needing work; every one of
   those then entered the merged output twice. The rule that holds: **once content has been
   processed, its identity is frozen** — prefer the copy that already has output, then the
   oldest, never the one that happens to sort first. And quarantine the losers (move, do not
   delete) rather than leaving them beside the survivor for the next stage to rediscover.
-- **A membership test keyed on the entity instead of the row.** "Is this *marker* out of range"
-  rather than "is this *reading* out of range" meant one abnormal cholesterol in December
-  flagged every later cholesterol as well — so a single message told the user a value was
+- **A membership test keyed on the entity instead of the row.** "Is this *entity* out of range"
+  rather than "is this *reading* out of range" meant one abnormal reading in one month flagged
+  every later reading of the same entity — so a single message told the user a value was
   flagged out of range *and* was no longer out of range, and 10 of 14 findings on the newest
-  draw were normal values. A finding is a property of a reading: key on (date, entity, value).
+  batch were normal values. A finding is a property of a reading: key on (date, entity, value).
   Partition in a second pass, too — deciding "resolved" needs to know whether the *newest*
   reading is itself flagged, which is unknowable while still walking the rows.
 - **Flagging to stdout is not flagging.** A constant was declared with a comment promising that
@@ -623,8 +709,14 @@ silently, in the direction of false completeness.
   a defence is not evidence the defence exists (§0). Grep for every constant that a comment
   says is enforced.
 - **A heuristic counter that blocks.** An approximate completeness check must warn, never hold
-  up the review: one that counted a marker's own per-demographic reference brackets as separate
-  markers declared a correct two-row transcription "short". Advisory was the right call — the
-  same check, made blocking, would have stalled the pipeline over an approximation.
+  up the review: one that counted a record's own sub-rows as separate records declared a correct
+  transcription "short". Advisory was the right call — the same check, made blocking, would have
+  stalled the pipeline over an approximation.
+- **Testing that a stage creates its successor instead of that it ORDERS it.** Two ordering
+  defects reached production past a green suite: both stages created their cards correctly and
+  gave them the wrong parents. Run the stage as a real worker with a card id set, substitute a
+  stand-in board that dedupes on the idempotency key the way kanban does, and assert the
+  `parents` of what came out — including that nothing on the critical path was created with an
+  empty parent list, and that the graph has the same shape whatever the inputs are.
 - **Making yourself the recovery mechanism.** If the answer to "what happens when this fails at
   3am" is "I notice and re-run it", the pipeline is not finished.
