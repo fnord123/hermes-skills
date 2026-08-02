@@ -62,8 +62,10 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
 | `doctor` | Explains why a regimen item is still held: the answers on record, whether each item's answer matched, which manufacturer file resolved, and the gate card's state. Run this when the user says an answer "didn't work" or an item keeps re-asking. |
-| `regimen-confirm` | Records an answer to a regimen question and closes the gate card. Use this instead of unblocking. |
-| `labs-confirm` | Records that the user confirmed the labs and closes the gate card. Use this instead of unblocking. |
+| `regimen-confirm` | Records an answer to a regimen question. Closes the gate card only once nothing is outstanding, so answer each item. `--accept-all` takes the draft as written; `--unknown` is for an item they cannot place. |
+| `labs-confirm` | Records that the user confirmed the labs and closes the gate card. `--ignore "A, B"` leaves markers unresearched, and adds to anything already excluded; `--drop` starts that list over. |
+| `regimen-reject` | **Halts the review.** For an inventory that is wrong in a way answering cannot fix. Needs `--reason`. |
+| `labs-reject` | **Halts the review.** For a transcription the user says is wrong. Needs `--reason`. |
 | `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
 | `confirm --json` | Lists the items the "Confirm N item(s) before research" card is waiting on, with what intake already knows about each. |
 
@@ -182,7 +184,29 @@ re-runs it, the card asks for confirmation again, and Hermes treats the second b
 loop and moves the card to triage, where it satisfies nothing and the research stage waits
 forever.
 
-If they do not confirm, ask which marker looks wrong and re-run that lab's card.
+**If they confirm but do not want some markers researched** — "these are right, but don't
+bother with vitamin D" — put that on the same command; an exclusion is part of a confirmation:
+
+    python3 ~/.hermes/rx-review/rx.py labs-confirm --ignore "VITAMIN D, FERRITIN"
+
+Use the names exactly as the card listed them. A name that matches nothing refuses the whole
+command and names the closest matches — nothing is recorded, so fix the name and re-run. Saying
+"also skip ferritin" later ADDS to the list; `--drop` clears it and starts over. Excluded markers
+stay in the report and in `labs.md`; only their research cards are skipped.
+
+**If they say the transcription is WRONG** — a value misread, a marker that is not theirs — that
+is a rejection, not an exclusion, and it ends the review:
+
+    python3 ~/.hermes/rx-review/rx.py labs-reject --reason "THEIR EXACT WORDS"
+
+Do not offer to re-transcribe. They saw one bad row, not the set of bad rows, and re-running the
+same cards over the same PDFs asks the model that misread the document to check its own reading.
+The verb archives every open card, moves the transcriptions to `salvage/` and drops their cache
+entries so nothing replays them. Tell the user the review is halted, what it kept, and that a
+corrected upload starts a new one.
+
+Never use `--ignore` for a wrong value. It means "this number is right, don't research it", and
+the value still reaches the brief — so excluding a wrong value publishes it.
 
 ### "Confirm N item(s) before research"
 
@@ -212,6 +236,23 @@ Record each answer with:
 
 The gate notification already prints this command with `--item` filled in for each product — copy
 that line and fill in `--answer` from their reply, rather than typing the product name yourself.
+
+**The gate closes only when nothing is outstanding**, so answer every item — one command each.
+If the user cannot place an item at all ("that bottle is long gone"), record that rather than
+guessing:
+
+    python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "PRODUCT" --unknown
+
+That drops the item from the review: it gets no research card, and the brief says it was excluded
+for an unknown dose. A substance with no dose cannot be researched — every question about it is
+dose-dependent, so answering against a guess produces a confident brief about a regimen they do
+not have.
+
+If the inventory is wrong in a way answering cannot fix — the photo pass read the wrong bottles,
+half the regimen is missing — that is a rejection, and it ends the review the same way
+`labs-reject` does:
+
+    python3 ~/.hermes/rx-review/rx.py regimen-reject --reason "THEIR EXACT WORDS"
 
 **Run it before you reply.** Recording the answer is what makes it stick; a reply that is only
 spoken back in chat does not. Say "recorded" only after the command has printed its confirmation,
