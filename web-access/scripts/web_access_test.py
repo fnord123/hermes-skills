@@ -271,5 +271,30 @@ chk("a pubmed url yields an api url", bool(api) and "ncbi" in (api or ""))
 chk("an ordinary url does not", not rxfetch._ncbi_url("https://example.com/article"))
 
 
+# ── The browser tier fails on USE, not on IMPORT ──────────────────────────────────────────────
+# The browser driver now lives beside this module, but it is still reached as a path and a
+# subprocess. Its dependencies (playwright, the fara venv, xvfb) are not this module's. rx-review
+# imports rxfetch through verify.py in a CI container with no browser at all, so a driver that
+# was missing at import time would take every cheap tier down with it and stop the pipeline's
+# tests dead. Point BROWSE_TASK at nothing and confirm the damage stays inside its own tier.
+section("a missing browser driver costs one tier, not the module")
+_real_bt = rxfetch.BROWSE_TASK
+try:
+    rxfetch.BROWSE_TASK = os.path.join(tempfile.gettempdir(), "no-such-browser-driver.py")
+    res = rxfetch._browser_attempt("https://tier.example/page", 5)
+    chk("a missing driver reports unreadable rather than raising",
+        res.outcome == "unreadable" and not res.ok, "(outcome=%s)" % res.outcome)
+    chk("and says which tier is unavailable", "not installed" in (res.detail or ""),
+        "(detail=%r)" % res.detail)
+    r, n = run_fetch("ok", True)
+    chk("the cheap tiers still answer with no driver present", r.ok and r.via == "http",
+        "(via=%s)" % r.via)
+finally:
+    rxfetch.BROWSE_TASK = _real_bt
+
+chk("the driver path resolves beside this module",
+    os.path.dirname(rxfetch.BROWSE_TASK) == os.path.dirname(os.path.abspath(rxfetch.__file__)))
+
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
