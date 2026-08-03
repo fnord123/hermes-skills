@@ -36,7 +36,6 @@ request per host, no closer together than that host's minimum interval.
 
 import contextlib
 import fcntl
-import glob
 import hashlib
 import json
 import os
@@ -295,46 +294,6 @@ def _one_attempt(url, timeout, via='http'):
     return Result(text, "ok", "fetched %d chars" % len(text), via=via), False
 
 
-def hermes_cache_text(url):
-    """Text a Hermes worker already extracted for this URL, if any.
-
-    Matched by host then confirmed by identifier, because the cache filename hash is not
-    reproducible from here. Matching on host alone once returned the largest cached file for
-    pmc.ncbi.nlm.nih.gov — one paper standing in for forty — and 53 of 69 PMC citations were
-    checked against the wrong article. Returning nothing beats returning the wrong source.
-    """
-    host = _host_of(url)
-    ident = None
-    for pat in (r"(PMC\d{4,})", r"(NBK\d{4,})", r"[?&]setid=([0-9a-f-]{8,})", r"/(\d{6,})/?$",
-                r"/([A-Za-z0-9._-]{8,})\.pdf$", r"/([A-Za-z0-9-]{10,})/?$"):
-        m = re.search(pat, url, re.I)
-        if m:
-            ident = m.group(1).lower()
-            break
-    host_key = host.replace("www.", "")
-    best = ""
-    for p in (glob.glob(os.path.expanduser("~/.hermes/profiles/*/cache/web/*.md")) +
-              glob.glob(os.path.expanduser("~/.hermes/cache/web/*.md"))):
-        base = os.path.basename(p).lower()
-        if host_key[:18] not in base and host not in base:
-            continue
-        try:
-            t = open(p, encoding="utf-8", errors="ignore").read()
-        except Exception:                                      # noqa: BLE001
-            continue
-        low = t.lower()
-        if url.lower() in low:
-            return t
-        if ident and ident in low:
-            return t
-    # NO host-only fallback. Returning the largest cached document for a host is how 53 of 69
-    # PMC citations were once audited against the wrong article, and it recurred here: a
-    # Bookshelf id (NBK526081, nine characters) missed a ten-character identifier pattern, so a
-    # StatPearls citation was checked against an unrelated 573KB paper and reported absent. An
-    # unidentifiable URL now returns nothing - a miss is honest, a wrong source is not.
-    return ""
-
-
 # The browser driver, which owns the browser and remembers which sites need which mode. It now
 # sits beside this file rather than in a separate skill, but it is STILL reached as a path and a
 # subprocess rather than an import. Its dependencies (playwright, a fara-cli venv, xvfb) are not
@@ -403,7 +362,6 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
         cache        a file we already wrote               free
         ncbi-api     NCBI's own API, for NCBI URLs         one request, no bot wall
         http         the page itself, retried              one request
-        hermes-cache text some other worker extracted      free
         browser      a real browser renders it             seconds, a whole process
 
     The order is the point. Anything above the browser costs a request or nothing at all, so
@@ -443,12 +401,6 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
                 break
             time.sleep(delay)
             delay *= 2
-
-    cached = hermes_cache_text(url)
-    if cached and not looks_unusable(cached):
-        os.makedirs(SOURCES, exist_ok=True)
-        open(path, "w", encoding="utf-8").write(cached)
-        return Result(cached, "ok", "hermes web cache", via="hermes-cache")
 
     # Last, and only when asked: drive a real browser. This tier is ORDERS of magnitude more
     # expensive than the ones above - a browser process, a page render, seconds instead of

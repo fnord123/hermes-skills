@@ -22,9 +22,9 @@ support this claim" when the truth is "we were throttled" - which is how one cit
 came to judge claims against "Checking your browser before accessing pubmed".
 
 `fetch` tries the cheapest source that could work and stops at the first that yields text,
-reporting which one did in `via`: a cached file, NCBI's API, plain HTTP, another worker's
-extract, and finally a real rendered browser page. The last tier reads JavaScript sites that
-return an empty shell to plain HTTP, at a cost of seconds rather than milliseconds.
+reporting which one did in `via`: a cached file, NCBI's API, plain HTTP, and finally a real
+rendered browser page. The last tier reads JavaScript sites that return an empty shell to plain
+HTTP, at a cost of seconds rather than milliseconds.
 
 THE BROWSER TIER IS NO LONGER A FLAG. It used to be `--browser`, which the caller was expected
 to add after seeing `unreadable` come back. That seam is why this skill and browse-task were

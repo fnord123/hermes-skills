@@ -95,8 +95,7 @@ One JSON object.
 `url`, `snippet`, `engine`.
 
 `fetch` returns `ok`, `url`, `outcome`, `via`, `chars`, `truncated`, and `text`.
-`via` names where the text came from: `cache`, `ncbi-api`, `http`,
-`hermes-cache`, or `browser`.
+`via` names where the text came from: `cache`, `ncbi-api`, `http`, or `browser`.
 
 `do` returns `ok`, `status`, and `answer`:
 

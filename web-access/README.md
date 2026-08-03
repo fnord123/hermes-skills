@@ -50,8 +50,16 @@ text, reporting which one did in `via`:
 | `cache` | text we already extracted for this URL | free |
 | `ncbi-api` | NCBI's own API, for NCBI URLs | one request, no bot wall |
 | `http` | the page itself, retried with backoff | one request |
-| `hermes-cache` | text some other worker extracted | free |
 | `browser` | a real browser renders the page | seconds, a whole process |
+
+There used to be a `hermes-cache` tier between `http` and `browser`: it scavenged text that
+Hermes' own built-in `web` toolset had left in `~/.hermes/cache/web/`. It was removed on
+2026-08-03. The profiles that fed it — `rx-research`, `rx-audit`, `rx-redteam` — no longer carry
+the `web` toolset (removing it is the payoff described above), so those 601 files were frozen
+residue that could only ever answer for pages already read. It was also the one tier that
+matched fuzzily, by host plus a guessed identifier, which cost two incidents of auditing
+citations against the wrong document. A tier that cannot gain new entries is not worth the
+matching risk.
 
 The order is the point: everything above `browser` costs one request or nothing, so trying them
 first is nearly free. The browser is the only tier that can read a JavaScript-rendered page and

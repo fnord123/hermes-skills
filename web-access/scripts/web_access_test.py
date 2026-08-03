@@ -177,8 +177,7 @@ section("the browser tier is a last resort, not a retry")
 def run_fetch(http_outcome, allow_browser, browser_ok=True):
     """fetch() with both outer tiers replaced. Returns (result, browser_call_count)."""
     calls = {"n": 0}
-    real_attempt, real_browser, real_cache = (
-        rxfetch._one_attempt, rxfetch._browser_attempt, rxfetch.hermes_cache_text)
+    real_attempt, real_browser = rxfetch._one_attempt, rxfetch._browser_attempt
 
     def fake_attempt(url, timeout, via="http"):
         if http_outcome == "ok":
@@ -192,14 +191,12 @@ def run_fetch(http_outcome, allow_browser, browser_ok=True):
         return rxfetch.Result("", "unreadable", "stub: still a shell")
 
     rxfetch._one_attempt, rxfetch._browser_attempt = fake_attempt, fake_browser
-    rxfetch.hermes_cache_text = lambda url: ""
     try:
         with tempfile.TemporaryDirectory() as td2:
             rxfetch.configure(sources_dir=td2)
             return rxfetch.fetch("https://tier.example/page", allow_browser=allow_browser), calls["n"]
     finally:
         rxfetch._one_attempt, rxfetch._browser_attempt = real_attempt, real_browser
-        rxfetch.hermes_cache_text = real_cache
 
 
 r, n = run_fetch("unreadable", True)
@@ -232,12 +229,6 @@ with tempfile.TemporaryDirectory() as td:
     open(p, "w").write(SHELL[:141])
     chk("a cached shell would be rejected on read",
         rxfetch.looks_unusable(open(p).read()))
-
-# An unidentifiable URL must never be answered with some other document from the same host.
-# Returning the largest cached page for a host once had 53 of 69 PMC citations audited against
-# the wrong article, and it recurred with a nine-character Bookshelf id.
-chk("no host-only cache fallback",
-    rxfetch.hermes_cache_text("https://example.com/no-identifier-here") == "")
 
 
 # ── throttling ────────────────────────────────────────────────────────────────────────────────
