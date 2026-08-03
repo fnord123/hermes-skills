@@ -53,7 +53,7 @@ assuming it did. That is how a booking script reports success it never achieved.
 - [ ] `pallo-logistics` — 16 scripts
 - [ ] `square-appointments` — 6 scripts
 - [ ] `daily-briefing` — 3 scripts
-- [ ] `browse-task`, `whatsapp-backfill`, `google-docs` — 1-2 each
+- [ ] `web-access`, `whatsapp-backfill`, `google-docs` — 1-2 each
 
 ### Linter accuracy — fixed
 
@@ -78,9 +78,9 @@ screenshots. The ones that hide a real failure:
 
 - [ ] `square-book.py:523`, `square-cancel.py:265`, `square-find-slot.py:105,278,516,533`
 - [ ] `bambu_lib.py:116,119` — both OTP-fill attempts swallowed
-- [ ] `browse_task.py:149-150` — a malformed user `BROWSE_SITE_POLICY` override is ignored in
+- [ ] `web-access/scripts/browse_task.py:149-150` — a malformed user `BROWSE_SITE_POLICY` override is ignored in
       silence, so the wrong browser mode is used with zero signal
-- [ ] `browse_task.py:229-230` — unlocked read-modify-write on a shared JSON file; two
+- [ ] `web-access/scripts/browse_task.py:229-230` — unlocked read-modify-write on a shared JSON file; two
       concurrent runs lose an entry, and a permanently unwritable path re-probes every run
 
 ---
@@ -111,7 +111,7 @@ Backend vocabulary in model context. The model reasons about the words in front 
       give `pet-care-tracker` the `scripts/pet_care.py` it should have had (it currently hands
       the model raw `curl`, `jq` and a bearer token, which defeats the domain-abstraction rule
       wholesale).
-- [ ] `frontmatter/requires-toolsets` (3) — `browse-task`, `calendar`, `donations`.
+- [ ] `frontmatter/requires-toolsets` (2) — `calendar`, `donations`.
 - [ ] `body/error-sentence` (1), `body/section-flow` (1), `body/model-context` (1).
 - [ ] `body/explicit-verb` (6), `frontmatter/tags` (2), `frontmatter/version` (1) —
       `daily-briefing` is still `1.0.0`.
@@ -120,11 +120,11 @@ Backend vocabulary in model context. The model reasons about the words in front 
 
 ## 6. Conventions doc
 
-- [ ] The `--confirm` rule reads as "refuse without it". `browse-task` inverts this: it always
+- [ ] The `--confirm` rule reads as "refuse without it". `web-access`'s `do` inverts this: it always
       runs, and `--confirm` *widens* permission for act-verbs. That is reasonable for delegated
       long-running work, but the convention should say so, or the rule looks violated when it
       isn't.
-- [ ] `browse-task`'s `--confirm` is advisory — without it the script still runs, and safety is
+- [ ] `web-access`'s `do --confirm` is advisory — without it the script still runs, and safety is
       a prompt string sent to a remote model. Add a hard pre-check that refuses when the task
       text matches act-verbs and `--confirm` is absent.
 - [ ] `author:` appears in several frontmatters and is in neither the Hermes schema nor

@@ -440,8 +440,9 @@ def main():
     model = cfg.get("BROWSE_MODEL") or ""
     api_key = cfg.get("BROWSE_API_KEY") or "none"
     if not (fara_home and base_url and model):
-        fail("browse-task is not configured. Copy templates/config.env.example to scripts/config.env "
-             "and set FARA_HOME, BROWSE_BASE_URL, and BROWSE_MODEL (see README).")
+        fail("the browser agent is not configured. Copy templates/config.env.example to "
+             "scripts/config.env and set FARA_HOME, BROWSE_BASE_URL, and BROWSE_MODEL "
+             "(see README).")
     cli = Path(fara_home) / ".venv" / "bin" / "fara-cli"
     if not cli.exists():
         fail(f"browser agent not installed at {cli} — run the setup in README.")

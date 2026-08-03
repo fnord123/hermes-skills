@@ -335,11 +335,13 @@ def hermes_cache_text(url):
     return ""
 
 
-# The browse-task skill, which owns the browser and remembers which sites need which mode.
-# Kept as a path rather than an import because it lives in a different skill with its own
-# dependencies: a box with no browser installed should fail this ONE tier, not fail to import
-# rxfetch and take every cheap tier down with it.
-BROWSE_TASK = os.path.expanduser("~/hermes-skills/browse-task/scripts/browse_task.py")
+# The browser driver, which owns the browser and remembers which sites need which mode. It now
+# sits beside this file rather than in a separate skill, but it is STILL reached as a path and a
+# subprocess rather than an import. Its dependencies (playwright, a fara-cli venv, xvfb) are not
+# this module's: a box with no browser installed must fail this ONE tier, not fail to import
+# rxfetch and take every cheap tier down with it. rx-review's CI has no browser and imports
+# rxfetch through verify.py, so an import-time dependency here stops the pipeline's tests dead.
+BROWSE_TASK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_task.py")
 # A render is not a request; it is a page load pulling scripts, fonts and images from the same
 # host. Give it room, but bound it - a hung browser must not hold the host lock forever.
 BROWSER_TIMEOUT_FLOOR = 180
@@ -355,7 +357,7 @@ def _browser_attempt(url, timeout):
     One gate, all clients, or the limit is decorative.
     """
     if not os.path.exists(BROWSE_TASK):
-        return Result("", "unreadable", "browser tier unavailable (browse-task not installed)")
+        return Result("", "unreadable", "browser tier unavailable (browser driver not installed)")
     cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--start-url", url]
     host = _host_of(url)
     # browse_task.py takes this host's gate when it is run on its own. Here it is a CHILD of a

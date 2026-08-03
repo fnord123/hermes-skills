@@ -1,21 +1,24 @@
 ---
 name: web-access
 description: >
-  Searches the web and reads the text of web pages, including PDFs and pages that
-  only render in a browser. PREFER THIS SKILL for any question needing current
-  information from the internet — product labels and Supplement Facts panels,
-  prices, documentation, news, papers, or any page the user names by URL. Use
-  browse-task instead when the goal needs a multi-step session on a site, such as
-  signing in, filling a form, or clicking through several pages to reach a result.
-  Activate on any of: "search the web", "search for", "look up", "google",
-  "find a page about", "read this page", "open this url", "what does this link
-  say", "get the supplement facts", "check the label", "look up the price",
-  "find the documentation", "fetch this pdf".
-version: 0.1.0
+  Searches the web, reads the text of web pages including PDFs, and carries out
+  multi-step tasks on a website in a real browser. PREFER THIS SKILL for anything
+  that needs the internet — product labels and Supplement Facts panels, prices,
+  documentation, news, papers, any page the user names by URL, and any goal that
+  takes several steps on a site such as applying a site's own filters, paging
+  through listings, or operating a web app on the user's behalf. Reading and
+  searching are read-only; a task that signs in, submits, buys, books, posts, or
+  sends requires the user's explicit approval first. Activate on any of: "search
+  the web", "search for", "look up", "google", "find a page about", "read this
+  page", "open this url", "what does this link say", "get the supplement facts",
+  "check the label", "look up the price", "find the documentation", "fetch this
+  pdf", "browse to", "go to X and …", "on the website …", "check the site for
+  …", "work through …", "operate …", "fill out …", "navigate …".
+version: 0.2.0
 license: MIT
 metadata:
   hermes:
-    tags: [Web, Search, Research, Reading]
+    tags: [Web, Search, Browser, Browsing, Automation, Research, Reading]
     requires_toolsets: [terminal]
 ---
 
@@ -27,12 +30,13 @@ metadata:
 - The user gives a URL and wants to know what it says.
 - A claim needs a source, or a source needs checking.
 - A product's label, panel, dose, or price is needed.
+- The result takes several steps on a site: applying filters, paging through
+  listings, following a flow across screens, operating a web app.
 
 ## When NOT to use
 
 - The answer is already in the conversation or in a file you can read.
-- The goal needs a whole browser session — signing in, filling a form, clicking
-  through several pages. Use the browse-task skill.
+- The thing is not on the public web — a desktop app, a local file.
 
 ## Tools
 
@@ -41,13 +45,18 @@ metadata:
 | `search` | Finds pages matching a query. Returns titles, URLs, and short snippets. |
 | `search --scope literature` | Searches the research databases for papers, trials and reviews. |
 | `search --scope products` | Searches the open web for manufacturer and retailer pages. |
-| `fetch` | Reads one page and returns its text. Handles PDFs. |
-| `fetch --browser` | Reads a page that renders only in a browser. Use after a plain `fetch` reports `unreadable`. |
+| `fetch` | Reads one page and returns its text. Handles PDFs and pages that only render in a browser. |
+| `do` | Carries out a multi-step task on a site and reports what it found. |
+| `do --confirm` | Carries out a task that must act on a site. Use only after the user approved this exact task. |
 
 ```
 python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "QUERY" [--scope literature|products|web] [--max 10]
-python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--browser] [--max-chars 20000]
+python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--max-chars 20000]
+python3 ~/hermes-skills/web-access/scripts/web_access.py do     --task "TASK" [--start-url URL] [--max-steps 25] [--confirm]
 ```
+
+Use `fetch` when you have a URL and want what the page says. Use `do` when
+reaching the answer takes several steps on a site.
 
 `--scope` picks where to search:
 
@@ -60,6 +69,9 @@ The open-web scopes ask one high-quality engine first and broaden automatically 
 nothing, so results stay clean without you choosing an engine. `widened` in the output records
 which happened.
 
+For `do`, **name the site's own URL in `--start-url` whenever the task is about a
+particular site**, so the session begins there. Raise `--max-steps` for longer flows.
+
 ## Turning the user's words into calls
 
 | The user says | Call |
@@ -69,8 +81,11 @@ which happened.
 | "find the label or panel for X" | `search --query "X supplement facts" --scope products` |
 | "read this page" / "what does this link say" (URL given) | `fetch --url "URL"` |
 | "what's in Thorne Super EPA" | `search --query "Thorne Super EPA supplement facts"`, then `fetch` the manufacturer's page |
-| the page came back `unreadable` | the same `fetch` again, with `--browser` |
 | "find the price of X" | `search --query "X price"`, then `fetch` a listing |
+| "check REI for the price of the X jacket in medium" | `do --task "Find the price and availability of the <X> jacket in size medium" --start-url https://www.rei.com/` |
+| "what times is the Ferry Building open on Sunday" | `do --task "Find the Ferry Building Marketplace hours for Sunday"` |
+| "find the cheapest nonstop SFO→JFK on Aug 1" | `do --task "Find the cheapest nonstop flight from SFO to JFK on 2026-08-01 and report the airline, time, and price" --max-steps 40` |
+| "book that flight" (after you showed it and they approved) | `do --task "Book the 9am United nonstop SFO→JFK on 2026-08-01" --confirm` |
 
 ## Output
 
@@ -82,6 +97,12 @@ One JSON object.
 `fetch` returns `ok`, `url`, `outcome`, `via`, `chars`, `truncated`, and `text`.
 `via` names where the text came from: `cache`, `ncbi-api`, `http`,
 `hermes-cache`, or `browser`.
+
+`do` returns `ok`, `status`, and `answer`:
+
+- `status: "complete"` → relay the `answer` to the user in plain language.
+- `status: "needs_input"` → a `question` is included. Ask the user that question,
+  then call again with their answer folded into `--task`.
 
 Search returns snippets, not documents. Read the page with `fetch` before drawing
 a conclusion from it.
@@ -104,30 +125,30 @@ python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "Thorne 
 python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://www.thorne.com/products/dp/super-epa"
 ```
 
-Manufacturer product pages are usually built in a browser and return almost
-nothing to a plain read. When `outcome` is `unreadable`, run the same command
-again with `--browser`:
+Manufacturer product pages are usually built in a browser. `fetch` renders them
+when it needs to and returns the full panel; `via` says `browser` when it did.
+
+**A task that acts on a site**
 
 ```
-python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://www.thorne.com/products/dp/super-epa" --browser
+# 1. Describe the exact action and get the user's explicit go-ahead.
+# 2. Only then:
+python3 ~/hermes-skills/web-access/scripts/web_access.py do --task "<the approved action>" --confirm
 ```
-
-That returns the full panel. Add `--browser` only after a plain `fetch` has come
-back `unreadable`; it is slower, and most pages do not need it.
 
 ## Errors
 
 `fetch` reports what happened in `outcome`:
 
 - `ok` — `text` is the page.
-- `unreadable` — the site answered but sent no document. Re-run the same command
-  with `--browser`.
+- `unreadable` — every tier including a real browser was tried and the document
+  never arrived. It needs a sign-in or is not there. Say so, and name the URL.
 - `unreachable` — no usable response arrived. You did not read the page. Report
   which URL failed. Never state that a page lacks something when you were unable
   to read it, and never fill the gap from memory.
 
-If `--browser` also returns `unreadable`, the content needs a sign-in or is not
-there. Say so, and name the URL.
+`do` reports `status: "max_rounds"` or `"timed_out"` when the task ran long. The
+`error` carries the partial finding — report it and suggest narrowing the task.
 
 Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 
@@ -136,3 +157,7 @@ Always ask the user for guidance when there is an error; do not proactively try 
 `search` returning `count: 0` is a real answer, not a failure — the words found
 nothing. Try different or broader terms, then tell the user what you searched for
 and that it found nothing.
+
+If `do` returns an empty `answer`, tell the user plainly that the site did not
+yield it. If a task needed to act but ran without `--confirm`, the `answer`
+describes what action would be required; relay that and ask whether to proceed.
