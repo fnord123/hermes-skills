@@ -96,6 +96,30 @@ this, the browser driver ran at whatever rate an agent asked for while `rxfetch`
 spaced its own requests to the same host. Centralising the gate is the reason the browser tier
 lives in `rxfetch.py` rather than in each caller.
 
+### How the gate is built
+
+One file per host under `~/.hermes/.fetchlocks`, holding the timestamp of the last request to
+that host. To enter the gate a caller takes an **`flock`** on that file — an advisory lock the
+OS provides on an open file (`fcntl.flock`), taken here exclusively, so only one holder at a
+time. It is what makes the interval hold across *processes*; a `threading.Lock` would only
+serialise one program's own threads, and several rx-review cards run as separate processes
+against a rate limit that counts the client, not the process. "Advisory" means it constrains
+only those who also ask for the lock — it does not stop an unrelated program from opening the
+file — which is fine here, because every route to the network goes through this module.
+
+Once inside, the holder reads the stored timestamp, sleeps out any remainder of that host's
+interval, makes the request, and writes the new timestamp on the way out. The timestamp is
+written even when the request raises: a 429 consumed our quota just as surely as a 200, and
+retrying immediately is what earns the next one.
+
+The lock is held by the process that opened it, so a **child process is a separate holder and
+will queue behind its parent**. That matters because the browser tier spawns the driver as a
+subprocess while already inside the gate, and the driver takes the same gate when it is run on
+its own. Left alone it would wait for a lock its own parent is holding, until the timeout, every
+single time. So `rxfetch` passes `RXFETCH_GATE_HELD=<host>` and the child skips the gate for
+that host only. Naming the host rather than passing a bare flag means a stale value cannot
+silently disable throttling for some other site.
+
 ### Cache consistency is a separate problem, solved separately
 
 The cache needs no throttle, but it does need readers never to see a half-written file. That is
@@ -107,23 +131,6 @@ This mattered more than it looks. A plain truncating write leaves a window where
 holds a partial document, and `looks_unusable` declares anything at or above `SUBSTANTIAL_CHARS`
 (20,000) a document without further inspection — so a large page torn mid-write would read back
 as complete. In this pipeline that is a citation judged against half a source.
-
-`flock` is per-process, so when `rxfetch` invokes the browser driver as a child while already
-holding a host's gate, it passes `RXFETCH_GATE_HELD=<host>`. Without that hand-off the child
-would block on its own parent until the timeout, every single time. The host is named rather
-than a bare flag so a stale value cannot silently disable throttling for some other site.
-
-## Consumers
-
-`~/.hermes/rx-review/rxfetch.py` is a thin binding that loads this skill's `rxfetch.py` via
-`importlib` and re-exports it — there is deliberately only one implementation. It resolves
-`RXFETCH_IMPL` or the default path `~/hermes-skills/web-access/scripts/rxfetch.py`, which is why
-this skill kept its name through the merge. The pipeline keeps its own `sources_dir` (its cached
-corpus is auditable evidence tied to a run) but deliberately shares the lock directory, because
-a rate limit counts the client, not the pipeline.
-
-rx-review's card templates invoke `web_access.py search` and `fetch` by absolute path. They pass
-no `--browser`, so the merge required no pipeline change.
 
 ## The 200-character floor
 

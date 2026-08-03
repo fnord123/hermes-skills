@@ -241,10 +241,12 @@ asyncio.run(_main())
 @contextlib.contextmanager
 def host_gate(url):
     """Hold the shared per-host gate for `url`, if the shared fetcher is installed."""
-    impl = os.path.expanduser("~/hermes-skills/web-access/scripts/rxfetch.py")
+    impl = str(HERE / "rxfetch.py")
     try:
-        # Loaded by PATH, not imported as a package: it is a file in a sibling skill, not a
-        # dependency on PyPI, and sys.path stays untouched.
+        # Loaded by path, not imported as a package: it is a file beside this one, not a
+        # dependency on PyPI, and sys.path stays untouched. Resolved relative to __file__ so a
+        # relocated skill directory still finds it — this used to be an absolute path into
+        # ~/hermes-skills, which only worked where the repo happened to be checked out.
         spec = importlib.util.spec_from_file_location("rxfetch_gate", impl)
         rxfetch = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(rxfetch)
