@@ -287,5 +287,45 @@ chk("the driver path resolves beside this module",
     os.path.dirname(rxfetch.BROWSE_TASK) == os.path.dirname(os.path.abspath(rxfetch.__file__)))
 
 
+# ── the cache is published atomically ─────────────────────────────────────────────────────────
+# A plain open(path,"w") truncates first, so a concurrent reader sees a partial document. The
+# dangerous partials are the big ones: looks_unusable declares anything at or above
+# SUBSTANTIAL_CHARS a document without further inspection, so a large page torn mid-write reads
+# as complete — a citation judged against half a source. Readers must see all or nothing.
+section("cached text is published whole or not at all")
+with tempfile.TemporaryDirectory() as td3:
+    rxfetch.configure(sources_dir=td3)
+    cp = rxfetch.cache_path("https://atomic.example/doc")
+    rxfetch._write_cache(cp, "first " * 400)
+    chk("a write lands", os.path.exists(cp) and "first" in open(cp).read())
+    chk("no scratch file is left behind",
+        [f for f in os.listdir(td3) if f.endswith(".tmp")] == [],
+        "(%r)" % os.listdir(td3))
+
+    # The property that matters: at no instant does the target hold a partial document. Stat the
+    # target from inside the write and confirm it still holds the OLD text, not a truncation.
+    # Shadow `open` in rxfetch's own namespace rather than patching it globally: a module
+    # attribute is found before the builtin, so only the code under test is affected and a
+    # failure here cannot take the rest of the run down with it.
+    seen = {}
+    _real_open = open
+
+    def spy_open(p, *a, **kw):
+        fh = _real_open(p, *a, **kw)
+        if str(p).endswith(".tmp"):
+            seen["target_midwrite"] = (_real_open(cp).read() if os.path.exists(cp) else None)
+        return fh
+
+    rxfetch.open = spy_open
+    try:
+        rxfetch._write_cache(cp, "second " * 400)
+    finally:
+        del rxfetch.open
+    chk("the target is never truncated mid-write",
+        seen.get("target_midwrite", "").startswith("first"),
+        "(saw %r)" % (seen.get("target_midwrite") or "")[:20])
+    chk("and holds the new text afterwards", open(cp).read().startswith("second"))
+
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

@@ -354,15 +354,46 @@ def cache_path(url):
     return os.path.join(SOURCES, hashlib.sha1(url.encode()).hexdigest()[:16] + ".txt")
 
 
+def _write_cache(path, text):
+    """Publish cached text atomically: write a temp file, then rename over the target.
+
+    A plain open(path, "w") truncates first, so a reader arriving mid-write sees a partial
+    document. Most partials are caught by looks_unusable, but not the dangerous ones: anything
+    at or above SUBSTANTIAL_CHARS is declared a document without further inspection, so a large
+    page torn at 30KB reads as complete. In this pipeline that is a citation judged against half
+    a source.
+
+    os.replace is atomic on POSIX, so a reader sees either the whole old file or the whole new
+    one and never a seam. That is cheaper than a lock, which every reader would have to take,
+    and readers here are the common case. The temp name carries the pid so two writers racing on
+    the same URL cannot corrupt each other's scratch file.
+    """
+    os.makedirs(SOURCES, exist_ok=True)
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:                                          # noqa: BLE001
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
 def fetch(url, timeout=45, use_cache=True, allow_browser=False):
     """Usable text for a URL, or a Result saying why not.
 
     Tiers, cheapest first, stopping at the first that yields usable text:
 
-        cache        a file we already wrote               free
-        ncbi-api     NCBI's own API, for NCBI URLs         one request, no bot wall
+        cache        a file we already wrote               free, no request
+        ncbi-api     NCBI URLs ONLY - NCBI's own API       one request, no bot wall
         http         the page itself, retried              one request
         browser      a real browser renders it             seconds, a whole process
+
+    `ncbi-api` is conditional rather than a step every fetch walks: _ncbi_url() yields a target
+    only for a PubMed article or a PMC id on an NCBI host, so for every other URL `http` is the
+    first request made. Only the tiers that make a request take the host gate; reading the cache
+    is not traffic.
 
     The order is the point. Anything above the browser costs a request or nothing at all, so
     trying them first is nearly free; the browser is the only tier that can read a JavaScript
@@ -393,8 +424,7 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
         for attempt in range(ATTEMPTS):
             res, retryable = _one_attempt(target, timeout, via=via)
             if res.ok:
-                os.makedirs(SOURCES, exist_ok=True)
-                open(path, "w", encoding="utf-8").write(res.text)
+                _write_cache(path, res.text)
                 return res
             last = res
             if not retryable or attempt == ATTEMPTS - 1:
@@ -410,8 +440,7 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
     if allow_browser and last.outcome == "unreadable":
         res = _browser_attempt(url, timeout)
         if res.ok:
-            os.makedirs(SOURCES, exist_ok=True)
-            open(path, "w", encoding="utf-8").write(res.text)
+            _write_cache(path, res.text)
             return res
         # Keep the cheaper tier's diagnosis: it says what the SERVER did, which is more useful
         # than "the browser also could not read it".

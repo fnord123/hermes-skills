@@ -47,10 +47,16 @@ text, reporting which one did in `via`:
 
 | `via` | Source | Cost |
 |---|---|---|
-| `cache` | text we already extracted for this URL | free |
-| `ncbi-api` | NCBI's own API, for NCBI URLs | one request, no bot wall |
+| `cache` | text we already extracted for this URL | free, no request |
+| `ncbi-api` | **NCBI URLs only** — NCBI's own API | one request, no bot wall |
 | `http` | the page itself, retried with backoff | one request |
 | `browser` | a real browser renders the page | seconds, a whole process |
+
+`ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL only
+for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not exist and
+`http` is the first request made. NCBI Bookshelf (StatPearls) is deliberately excluded — `efetch
+db=books` answers with a 193-byte id list while a plain GET of the page returns ~94KB of real
+text, so routing it would swap working content for an empty request.
 
 There used to be a `hermes-cache` tier between `http` and `browser`: it scavenged text that
 Hermes' own built-in `web` toolset had left in `~/.hermes/cache/web/`. It was removed on
@@ -80,11 +86,27 @@ through `verify.py`, so an import-time dependency there stops the pipeline's tes
 
 ## Throttling
 
-Every tier, including the browser, runs inside one cross-process host gate. A politeness
-interval that one client honours and another ignores is not a rate limit; before this, the
-browser driver ran at whatever rate an agent asked for while `rxfetch` carefully spaced its own
-requests to the same host. Centralising the gate is the reason the browser tier lives in
-`rxfetch.py` rather than in each caller.
+Every tier that makes a **request** runs inside one cross-process host gate — `ncbi-api`, `http`
+and `browser`, plus `search` in `web_access.py`. The `cache` tier takes no gate and should not:
+reading a local file is not traffic, and throttling it would make the cheap path pay for the
+expensive one's politeness. Rate limiting begins where the network does.
+
+A politeness interval that one client honours and another ignores is not a rate limit; before
+this, the browser driver ran at whatever rate an agent asked for while `rxfetch` carefully
+spaced its own requests to the same host. Centralising the gate is the reason the browser tier
+lives in `rxfetch.py` rather than in each caller.
+
+### Cache consistency is a separate problem, solved separately
+
+The cache needs no throttle, but it does need readers never to see a half-written file. That is
+handled by writing a temp file and `os.replace`-ing it over the target, which is atomic on
+POSIX — not by a lock. A lock would have to be taken by every reader, and readers are the common
+case; an atomic rename costs them nothing.
+
+This mattered more than it looks. A plain truncating write leaves a window where the target
+holds a partial document, and `looks_unusable` declares anything at or above `SUBSTANTIAL_CHARS`
+(20,000) a document without further inspection — so a large page torn mid-write would read back
+as complete. In this pipeline that is a citation judged against half a source.
 
 `flock` is per-process, so when `rxfetch` invokes the browser driver as a child while already
 holding a host's gate, it passes `RXFETCH_GATE_HELD=<host>`. Without that hand-off the child
