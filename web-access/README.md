@@ -181,6 +181,14 @@ and dead-ended at the precise point rendering would have helped. 429 stays in
 `TRANSIENT_STATUS` too, so it is retried with backoff first and only escalates once the retries
 are spent; 403 is not retried, because a wall does not soften.
 
+The *browser* rungs apply the same judgement one level up, with `BLOCKED_STATUS = {401, 403,
+429, 503}` in `browse_task.py`: a render that comes back with one of these has **not** got the
+document, however many characters of refusal it printed. lowes.com answers a blocked product
+page with a 403 and a 240-character "Access Denied" body — over the 200-char floor — so a length
+test alone accepted a bot wall as success and stopped climbing. `503` is included here (but not
+in `WITHHELD_STATUS`) because a render seeing a 503 has already spent the render; there is
+nothing cheaper left to retry, only the next rung.
+
 **A read timeout escalates too.** A silent drop is a bot wall in its own right: Best Buy accepts
 the connection and never answers a plain client, while the same URL loads in a browser. So a
 timeout is a fact about *this* client, not about the host being gone, and a local render is a
@@ -481,14 +489,28 @@ cheapest rung was manufacturing the block the dearer one then measured.
 
 ## Timeout budget
 
-The browser tier's budget covers the WHOLE ladder — headless, headful, agent — not one render.
-`RXFETCH_BROWSER_TIMEOUT` (default 1200s) bounds the tier; `BROWSE_AGENT_TIMEOUT` (default 900s)
-bounds the agent rung and is deliberately **smaller**, so a slow agent dies with its own
-diagnostics rather than being killed blind by the parent. The floor was 180s when the tier was a
-single render, and became a bug the moment the agent joined it: a run was cut off 173 seconds in
-and reported a bare "browser timed out" with every per-rung detail lost.
+There are **two** agent budgets, because there are two code paths and they are not the same run.
+
+The **`fetch` ladder** — headless, headful, then the agent-as-navigator rung — is bounded by
+`RXFETCH_BROWSER_TIMEOUT` (default 1200s) for the whole tier, with `BROWSE_AGENT_TIMEOUT`
+(default 900s) bounding the agent rung inside it. The agent's limit is deliberately **smaller**
+than the tier's, so a slow agent dies with its own diagnostics rather than being killed blind by
+the parent. The floor was 180s when the tier was a single render, and became a bug the moment
+the agent joined it: a run was cut off 173 seconds in and reported a bare "browser timed out"
+with every per-rung detail lost.
+
+The **`do` verb** is a different, longer-lived path — the agent is the whole point of the run,
+not a last resort — and has its own **30-minute** cap (`communicate(timeout=1800)` in `main()`),
+the one the *Notes* section refers to. So "agent 900s" and "caps a run at 30 minutes" are both
+correct and describe different verbs: 900s is `fetch`'s escalation into the agent, 1800s is a
+standalone `do`.
 
 ## Browser modes — per-site policy
+
+This section describes how a **single** browser mode is chosen — which is what the `do` verb and
+the legacy single-shot path do. `fetch` no longer picks one mode; it *climbs* them (see *How
+`fetch` climbs*), using the policy below only as the rung to start on. The mode table, overrides
+and probe still apply; they just seed the ladder rather than cap it.
 
 Sites differ in how aggressively they block automated browsers, so the wrapper
 picks the lightest mode that actually works, **transparently, by target site**:
@@ -523,15 +545,21 @@ the part worth reusing — this skill already knows which sites need headful or 
 
 ### Auto-detect for unknown sites
 
-For a site with **no** rule (not in the table, learned cache, or an override), the
-wrapper runs a quick pre-flight **probe** of the start URL — load it headless; if
-that's blocked (403/503/429 or a bot-wall page), try headful; if that's blocked
-too, use browserbase (when configured). It then **remembers** the winning mode
-per-domain in the learned cache (`BROWSE_LEARNED_POLICY`), so later runs skip
-straight to it. This grows the policy automatically. Disable with
-`BROWSE_AUTOPROBE=false`. (Caveat: the probe checks the *start URL*; a site whose
-homepage loads but whose deeper pages are blocked — like Costco — still needs an
-explicit rule, which is why Costco is in the built-in table.)
+For a site with **no** rule (not in the table, learned cache, or an override), the wrapper runs
+a quick pre-flight **probe** of the start URL — headless, then headful, then browserbase when
+configured — and remembers the winning mode per-domain in the learned cache
+(`BROWSE_LEARNED_POLICY`). Disable with `BROWSE_AUTOPROBE=false`.
+
+**What gets remembered is narrower than "the winning mode", and deliberately so** — see *Probing
+is evidence, and only sometimes* above. Only a mode that actually **loaded** the page (`OK`) is
+recorded. A `BLOCKED` refusal is real evidence but not a winner; an `ERR` (no xvfb, a launch
+failure, a timeout) says nothing about the site at all; and a fallback the ladder lands on
+without probing is marked `probe-inconclusive` and never written. The cache must not learn a bug
+as if it were the site's behaviour.
+
+Caveat unchanged: the probe checks the *start URL*, so a site whose homepage loads but whose
+deeper pages are blocked — Costco, and as of 2026-08-03 Lowe's — still needs an explicit rule.
+That is why Costco is in the built-in table.
 
 ### Switching the managed browser off
 
@@ -571,8 +599,11 @@ order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
   can take minutes. `--max-steps` (default 25) bounds cost; the script also caps a
   run at 30 minutes and, on timeout, kills the **whole** browser process group
   (`start_new_session` + `killpg`) so no `Xvfb`/`chromium` is left orphaned.
-- Trajectories (screenshots + `data_point.json`) are written to a temp folder and
-  discarded after the result is read.
+- Trajectories (per-round screenshots + `data_point.json`) are written to a temp folder and
+  discarded after the result is read — **unless** a trace is enabled. `trace_rounds()` reads the
+  per-round actions, the model's own reasoning, and the screenshot paths into the trace before
+  the folder is deleted, and `--keep-trajectory <dir>` copies the whole folder out. This is what
+  makes "what did the agent see, round by round" answerable after a run rather than lost.
 - `data_point.json` fields consumed: `status` (`complete` / `waiting_for_user` /
   `max_rounds` / `timed_out` / `aborted`) and `outcome.answer`.
 

@@ -128,7 +128,8 @@ python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://ww
 ```
 
 Manufacturer product pages are usually built in a browser. `fetch` renders them
-when it needs to and returns the full panel; `via` says `browser` when it did.
+when it needs to and returns the full panel; `via` then names the rung that got
+it — `browser:headless`, `browser:headful`, or `agent:headful`.
 
 **A task that acts on a site**
 
