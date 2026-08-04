@@ -154,11 +154,36 @@ def load_policy(cfg, xvfb):
     return rules, (default or ("headful" if xvfb else "headless"))
 
 
+def browserbase_disabled(args, cfg):
+    """True when the managed remote browser is off limits for this run.
+
+    `browserbase` is the only rung that leaves the machine and costs money, so it is worth being
+    able to switch off independently of the free local ones — both to test the cheaper layers
+    honestly, and to keep a metered account from being spent by an automatic escalation nobody
+    watched. `--no-browserbase` beats config; config is BROWSE_NO_BROWSERBASE.
+    """
+    if getattr(args, "no_browserbase", False):
+        return True
+    v = (cfg.get("BROWSE_NO_BROWSERBASE")
+         or os.environ.get("BROWSE_NO_BROWSERBASE") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 def resolve_mode(args, cfg, start_url, xvfb):
     """Pick browser mode (headless|headful|browserbase) and why, for this site."""
+    no_bb = browserbase_disabled(args, cfg)
+
+    def _demote(mode, why):
+        """browserbase is off: fall back to the best local mode instead."""
+        if mode == "browserbase" and no_bb:
+            local = "headful" if xvfb else "headless"
+            log(f"browserbase disabled; {why} wanted browserbase, using {local}")
+            return local, why + "+no-browserbase"
+        return mode, why
+
     override = (getattr(args, "mode", None) or cfg.get("BROWSE_MODE") or "").strip().lower()
     if override in ("headless", "headful", "browserbase"):
-        return override, "override"
+        return _demote(override, "override")
     legacy = (cfg.get("BROWSE_HEADFUL") or os.environ.get("BROWSE_HEADFUL") or "").strip().lower()
     if legacy in ("false", "0", "no"):
         return "headless", "BROWSE_HEADFUL"
@@ -168,11 +193,11 @@ def resolve_mode(args, cfg, start_url, xvfb):
     host = _host(start_url)
     for pat, mode in rules:
         if pat and pat in host:
-            return mode, f"policy:{pat}"
+            return _demote(mode, f"policy:{pat}")
     for pat, mode in load_learned(cfg):   # previously auto-detected sites
         if pat and pat in host:
-            return mode, "learned"
-    return default, "default"
+            return _demote(mode, "learned")
+    return _demote(default, "default")
 
 
 # A tiny loadability probe: open the start URL and report OK / BLOCKED. Run via
@@ -331,7 +356,11 @@ def run_probe(url, mode, xvfb, fara_python):
 
 
 def probe_ladder(url, xvfb, has_bb, fara_python):
-    """Try headless, then headful; fall to browserbase if both are blocked."""
+    """Try headless, then headful; fall to browserbase if both are blocked.
+
+    `has_bb` is False when browserbase is unconfigured OR switched off, so a disabled managed
+    browser simply ends the ladder at the best local mode.
+    """
     for m in ("headless", "headful"):
         if m == "headful" and not xvfb:
             continue
@@ -401,6 +430,10 @@ def main():
                         "the agent starts (e.g. a site's delivery location or login) "
                         "so it need not click through that setup. Overrides "
                         "BROWSE_COOKIES from config.")
+    p.add_argument("--no-browserbase", dest="no_browserbase", action="store_true",
+                   help="stay on the free local browser modes. browserbase is a paid remote "
+                        "service; this keeps a run from escalating onto it. Config equivalent: "
+                        "BROWSE_NO_BROWSERBASE=true")
     p.add_argument("--mode", choices=["auto", "headless", "headful", "browserbase"],
                    default="auto",
                    help="browser mode; 'auto' (default) picks the optimal one per "
@@ -465,7 +498,8 @@ def main():
         fara_python = Path(fara_home) / ".venv" / "bin" / "python"
         if fara_python.exists():
             has_bb = bool(bb_cred(cfg, "BROWSERBASE_API_KEY")
-                          and bb_cred(cfg, "BROWSERBASE_PROJECT_ID"))
+                          and bb_cred(cfg, "BROWSERBASE_PROJECT_ID")
+                          and not browserbase_disabled(args, cfg))
             log(f"unknown site {_host(args.start_url)} — probing browser modes")
             mode = probe_ladder(args.start_url, xvfb, has_bb, fara_python)
             save_learned(cfg, _host(args.start_url), mode)

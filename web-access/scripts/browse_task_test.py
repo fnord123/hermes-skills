@@ -165,6 +165,45 @@ class BrowseTaskTest(unittest.TestCase):
         rec = json.loads(self.__class__.record.read_text())
         self.assertTrue(rec["browserbase"])
 
+    # ── browserbase can be switched off independently ────────────────────────
+    # It is the only rung that leaves the machine and bills a metered account, so it has to be
+    # disableable without giving up the free local modes — both to test the cheaper layers
+    # honestly and to stop an unwatched escalation spending money.
+    def _log_tail(self, before):
+        """Only what THIS run appended. The log is shared by every test in the class, so a
+        bare assertNotIn trips over an earlier test that legitimately used browserbase."""
+        return self.__class__.log.read_text()[before:]
+
+    def test_no_browserbase_flag_demotes_to_local(self):
+        before = len(self.__class__.log.read_text())
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.costco.com/",
+                             "--no-browserbase", BROWSE_HEADFUL="", FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        tail = self._log_tail(before)
+        self.assertIn("no-browserbase", tail)
+        self.assertNotIn("browser mode=browserbase", tail)
+
+    def test_no_browserbase_via_config(self):
+        cfg = self.tmp / "nobb.env"
+        cfg.write_text(f"FARA_HOME={self.fara_home}\nBROWSE_BASE_URL=http://x/v1\n"
+                       "BROWSE_MODEL=fara\nBROWSE_NO_BROWSERBASE=true\n"
+                       "BROWSERBASE_API_KEY=bk\nBROWSERBASE_PROJECT_ID=bp\n")
+        before = len(self.__class__.log.read_text())
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.costco.com/",
+                             BROWSE_TASK_CONFIG=str(cfg), BROWSE_HEADFUL="",
+                             FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("browser mode=browserbase", self._log_tail(before))
+
+    def test_no_browserbase_leaves_local_policy_alone(self):
+        before = len(self.__class__.log.read_text())
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.amazon.com/s?k=lg",
+                             "--no-browserbase", BROWSE_HEADFUL="", FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        tail = self._log_tail(before)
+        self.assertIn("browser mode=headful (policy:amazon.)", tail)
+        self.assertNotIn("no-browserbase", tail)
+
     def test_mode_override_beats_policy(self):
         rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.amazon.com/s?k=lg",
                              "--mode", "headless", BROWSE_HEADFUL="", FAKE_STATUS="complete")

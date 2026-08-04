@@ -50,7 +50,15 @@ text, reporting which one did in `via`:
 | `cache` | text we already extracted for this URL | free, no request |
 | `ncbi-api` | **NCBI URLs only** — NCBI's own API | one request, no bot wall |
 | `http` | the page itself, retried with backoff | one request |
-| `browser` | a real browser renders the page | seconds, a whole process |
+| `browser` | a **local** browser renders the page — headless, or headful under xvfb | seconds, a whole process |
+| `browserbase` | a **remote managed** browser built to pass bot detection | seconds, plus money — a paid third-party service |
+
+`browserbase` is listed separately because it is a different kind of cost, not a heavier version
+of the same one. `browser` spends local CPU; `browserbase` sends the URL to an external company
+and bills a metered account (free tier: 1 browser-hour/month). It is the last rung and should
+stay the last rung. Both report `via: browser` today — the tier string does not yet distinguish
+them, which is worth fixing, since a caller cannot currently tell a free local render from a
+paid remote one.
 
 `ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL only
 for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not exist and
@@ -72,6 +80,30 @@ first is nearly free. The browser is the only tier that can read a JavaScript-re
 by far the most expensive, so it is reached only after a cheaper tier returned `unreadable` —
 the one failure rendering can fix. A page that never responded will not respond to a browser,
 and a 404 is an answer, not a bot wall; neither spends a render.
+
+### Which failures escalate
+
+`WITHHELD_STATUS = {401, 403, 429}` returns `unreadable`, so the browser tier fires. These are
+the statuses where the server *answered* and withheld the document, which is the definition of
+`unreadable` and exactly what a render fixes — Home Depot's Akamai edge returns 403 to a plain
+client and serves the page fine in a browser. Before this they were classified `unreachable`
+and dead-ended at the precise point rendering would have helped. 429 stays in
+`TRANSIENT_STATUS` too, so it is retried with backoff first and only escalates once the retries
+are spent; 403 is not retried, because a wall does not soften.
+
+**A connection timeout still does not escalate**, and that is a real gap rather than a decision
+to be proud of. Best Buy drops non-browser clients silently, so `fetch` sees `TimeoutError`,
+classifies it `unreachable`, and stops — even though a browser is exactly what would get in.
+The argument for leaving it is that a genuinely dead host would then cost a render on every
+attempt. Unresolved.
+
+**The browser tier never reaches `browserbase`.** `--dump-text` resolves one mode from the site
+policy and runs it; the headless → headful → browserbase probe ladder is wired only into the
+agent path (`do`). So `fetch` effectively stops at the `browser` rung: a site whose policy
+resolves to the default `headful` but which actually needs the managed browser — Home Depot,
+verified 2026-08-03, `mode=headful why=default` returning a 155-character shell — gives up
+there. The last rung exists but `fetch` cannot climb to it, so no BrowserBase fix helps until
+either the ladder is shared with the dump path or the site gets an explicit policy rule.
 
 The browser tier runs `scripts/browse_task.py` with `--dump-text`, which returns the rendered
 text with no agent in the loop — deliberately, because a citation audit locates exact quotes and
@@ -280,6 +312,33 @@ if _os.environ.get("FARA_INIT_COOKIES"):
 ```
 The wrapper sets `FARA_INIT_COOKIES` when `--cookies`/`BROWSE_COOKIES` is given.
 
+## Local patches to the Fara scaffold
+
+`~/fara` is a clone of `microsoft/fara`. These edits live in that working tree and are **lost on
+any re-clone or upgrade** — re-apply them and re-run the checks below.
+
+**1. `src/fara/environments/playwright/environment.py` — `_connect_browserbase_once`.** The
+session was created with `browser_settings={"advanced_stealth": True, ...}` hardcoded.
+`advanced_stealth` is BrowserBase's *Verified mode*, an Enterprise-plan feature, so on any
+lesser plan every session failed with `403 Forbidden — "Verified mode is only available on the
+Enterprise plan"`, retried five times, and crashed. `BROWSERBASE_ADVANCED_STEALTH=false` in
+`~/.hermes/.env` was ignored outright: the config lied. Now `proxies` and `advanced_stealth`
+both come from the environment (defaults `true` / `false`) and the chosen values are logged.
+
+**2. `src/fara/fara_7b/browser/browser_bb.py` — `_init_browser_base`.** The same hardcode in a
+second, older BrowserBase path. Patched identically. Note the *live* path is (1): the traceback
+names `environment.py`. Patching only (2) changes nothing — that mistake cost a debug cycle.
+
+**3. `src/fara/environments/playwright/environment.py` — `_setup_browser` cookie hook.** See
+*Pre-seeding cookies* below.
+
+Check both settings are honoured:
+
+```
+grep -n "advanced_stealth" ~/fara/src/fara/environments/playwright/environment.py
+grep -a "BrowserBase session: proxies=" /tmp/browse-task/browse-task-*.log | tail -1
+```
+
 ## Browser modes — per-site policy
 
 Sites differ in how aggressively they block automated browsers, so the wrapper
@@ -324,6 +383,22 @@ straight to it. This grows the policy automatically. Disable with
 `BROWSE_AUTOPROBE=false`. (Caveat: the probe checks the *start URL*; a site whose
 homepage loads but whose deeper pages are blocked — like Costco — still needs an
 explicit rule, which is why Costco is in the built-in table.)
+
+### Switching the managed browser off
+
+`--no-browserbase`, or `BROWSE_NO_BROWSERBASE=true` in `config.env`, keeps a run on the free
+local modes. Anything that resolves to `browserbase` — a policy rule, a learned rule, even an
+explicit `--mode browserbase` — is demoted to `headful` (or `headless` without xvfb), and the
+probe ladder ends locally rather than escalating. The reason is logged:
+
+```
+browserbase disabled; policy:costco.com wanted browserbase, using headful
+browser mode=headful (policy:costco.com+no-browserbase)
+```
+
+It is the only rung that leaves the machine and bills a metered account, so it deserves a
+switch independent of the free ones — both to exercise the cheaper layers honestly and to stop
+an unwatched escalation spending money. **Currently set to `true` in this installation.**
 
 **BrowserBase** (for `browserbase` mode) is a paid service with a small free tier
 (1 browser-hour/month). Sign up at [browserbase.com](https://www.browserbase.com),

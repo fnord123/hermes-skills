@@ -327,5 +327,64 @@ with tempfile.TemporaryDirectory() as td3:
     chk("and holds the new text afterwards", open(cp).read().startswith("second"))
 
 
+# ── a bot wall is an answer, and a browser can fix it ─────────────────────────────────────────
+# Home Depot's edge returns 403 to a plain client and serves the page fine in a browser. That
+# used to be classified `unreachable`, which is the one outcome the browser tier never fires on,
+# so the request dead-ended at the exact point rendering would have worked. 404 must keep the
+# old behaviour: the page is not there, and no render invents it.
+section("HTTP status maps to the right outcome")
+import urllib.error                                              # noqa: E402
+
+
+def run_status(code):
+    """One _one_attempt against a stubbed server returning `code`. Returns the Result."""
+    real = rxfetch.urllib.request.urlopen
+
+    def boom(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, code, "stub", {}, None)
+
+    rxfetch.urllib.request.urlopen = boom
+    try:
+        res, retryable = rxfetch._one_attempt("https://wall.example/page", 5)
+        return res, retryable
+    finally:
+        rxfetch.urllib.request.urlopen = real
+
+
+for code, want in ((403, "unreadable"), (401, "unreadable"), (429, "unreadable"),
+                   (404, "unreachable"), (500, "unreachable")):
+    r, _ = run_status(code)
+    chk("HTTP %d is %s" % (code, want), r.outcome == want, "(got %s)" % r.outcome)
+
+r, retryable = run_status(429)
+chk("429 is still retried before it escalates", retryable)
+r, retryable = run_status(403)
+chk("403 is not retried — a wall does not soften", not retryable)
+
+# End to end: the tier now fires on a 403 and does not on a 404.
+_real_attempt = rxfetch._one_attempt
+for code, want_render in ((403, 1), (404, 0)):
+    rxfetch._one_attempt = (lambda c: lambda url, timeout, via="http": (
+        rxfetch.Result("", "unreadable" if c in rxfetch.WITHHELD_STATUS else "unreachable",
+                       "HTTP %d" % c), False))(code)
+    calls = {"n": 0}
+
+    def fake_browser(url, timeout, _c=calls):
+        _c["n"] += 1
+        return rxfetch.Result("rendered " * 100, "ok", "stub", via="browser")
+
+    _real_browser = rxfetch._browser_attempt
+    rxfetch._browser_attempt = fake_browser
+    try:
+        with tempfile.TemporaryDirectory() as td4:
+            rxfetch.configure(sources_dir=td4)
+            rxfetch.fetch("https://wall.example/p", allow_browser=True)
+    finally:
+        rxfetch._browser_attempt = _real_browser
+    chk("HTTP %d spends %d render(s)" % (code, want_render), calls["n"] == want_render,
+        "(spent %d)" % calls["n"])
+rxfetch._one_attempt = _real_attempt
+
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

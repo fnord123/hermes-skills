@@ -233,6 +233,8 @@ def cmd_do(args):
         argv.append("--confirm")
     if args.cookies:
         argv += ["--cookies", args.cookies]
+    if args.no_browserbase:
+        argv.append("--no-browserbase")
     sys.argv = argv
     return browse_task.main()
 
@@ -281,6 +283,10 @@ def main():
     p.add_argument("--cookies", default=None,
                    help="path to a JSON list of cookies to pre-seed (a delivery location, a "
                         "logged-in session) so the agent need not click through that setup")
+    p.add_argument("--no-browserbase", dest="no_browserbase", action="store_true",
+                   help="stay on the free local browser modes. browserbase is a paid remote "
+                        "service; this keeps a run from escalating onto it. Config equivalent: "
+                        "BROWSE_NO_BROWSERBASE=true")
     p.set_defaults(fn=cmd_do)
 
     args = ap.parse_args()

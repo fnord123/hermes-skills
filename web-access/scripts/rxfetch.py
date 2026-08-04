@@ -87,6 +87,21 @@ HOST_INTERVALS = {"eutils.ncbi.nlm.nih.gov": 0.35, "ncbi.nlm.nih.gov": 0.35}
 
 TRANSIENT_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
+# Statuses where the server ANSWERED and withheld the document, rather than failing to answer.
+# That is the definition of `unreadable`, and it is the one failure a rendered browser can fix,
+# so these escalate instead of dead-ending.
+#
+# 403 is how a bot wall says no: Home Depot's Akamai edge returns it to a plain client and the
+# page loads perfectly in a browser. 401 is the same shape for a login wall — worth the render,
+# because a browser carrying a session cookie may well be admitted. 429 stays in
+# TRANSIENT_STATUS above, so it is still retried with backoff first; only once the retries are
+# spent does it land here, and by then a browser is the last thing left to try.
+#
+# Everything else keeps its old meaning. A 404 is an ANSWER — the page is not there, and no
+# amount of rendering invents it — and a connection timeout is silence, with nothing for a
+# browser to render.
+WITHHELD_STATUS = {401, 403, 429}
+
 # Interstitials that mean "this is not the document", at any length: pubmed's JS shell is
 # 6-11KB of clipboard/search-history chrome and carries no abstract at all.
 BOT_WALL_STRONG_RE = re.compile(
@@ -272,7 +287,8 @@ def _one_attempt(url, timeout, via='http'):
                 ctype = (r.headers.get("Content-Type") or "").lower()
     except urllib.error.HTTPError as e:
         retryable = e.code in TRANSIENT_STATUS
-        return Result("", "unreachable", "HTTP %s" % e.code), retryable
+        outcome = "unreadable" if e.code in WITHHELD_STATUS else "unreachable"
+        return Result("", outcome, "HTTP %s" % e.code), retryable
     except Exception as e:                                     # noqa: BLE001
         return Result("", "unreachable", type(e).__name__), True
 
