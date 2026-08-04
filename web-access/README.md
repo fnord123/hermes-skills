@@ -444,6 +444,41 @@ characters of site navigation were accepted as the product page. `looks_unusable
 that: the dump is long and carries no bot-wall marker. `run_agent_dump` compares host and path
 and refuses a mismatch.
 
+## One identity, and why headful matters
+
+Every layer sends the same User-Agent (`RXFETCH_UA`, default a plain `Chrome/124.0` string).
+They did not: `search` went out as `Python-urllib/3.x` and the renders as
+`HeadlessChrome/134… ` with `navigator.webdriver` set true. One client telling a site three
+different stories is both rude and detectable, so the renders now set a real UA on the context
+and clear the webdriver flag.
+
+**That fix does not defeat bot walls, and it is worth being clear about it.** Measured against
+lowes.com on 2026-08-03: headless is refused with an `Access Denied` page (HTTP 200, 195 chars)
+under *every* UA tried — Linux Chrome 124, Windows Edge 122, Windows Chrome 134 — while headful
+under xvfb gets the real homepage (4,087 chars) even with no UA set at all. The signal is the
+headless browser itself, not the string it sends. Plain `urllib` also gets in, so on that site
+the ladder's cheapest and third-cheapest rungs work while the second does not.
+
+## Probing is evidence, and only sometimes
+
+`probe_ladder` returns `(mode, proven)`. Three outcomes, deliberately distinct:
+
+- `OK` — the page loaded in that mode. Recorded in the learned cache.
+- `BLOCKED` — the site refused us. Real evidence; climb.
+- `ERR` — no xvfb, a launch failure, a timeout. This says something about **us**, not the site,
+  and used to be indistinguishable from `BLOCKED`, so our own breakage was written into the
+  cache as though it were the site's behaviour.
+
+A fallback is never recorded either. When every rung is blocked the ladder still escalates, but
+the mode it lands on is marked `probe-inconclusive` because it was inferred, not tested — which
+is exactly how `www.bestbuy.com` came to be remembered as `browserbase` on the strength of a
+browserbase attempt that crashed on a plan error before it ever loaded a page.
+
+Probes go through the host gate and are spaced by `BROWSE_PROBE_COOLDOWN` (5s). A refused probe
+leaves a site warier of the next one: lowes.com refused headless at 20:15:53 and headful six
+seconds later, yet the same headful probe run alone minutes afterwards came back `OK`. The
+cheapest rung was manufacturing the block the dearer one then measured.
+
 ## Timeout budget
 
 The browser tier's budget covers the WHOLE ladder — headless, headful, agent — not one render.

@@ -270,9 +270,40 @@ class BrowseTaskTest(unittest.TestCase):
                              BROWSE_PROBE_MAP='{"headless":"BLOCKED","headful":"BLOCKED"}',
                              BROWSE_LEARNED_POLICY=str(learned), FAKE_STATUS="complete")
         self.assertEqual(rc, 0)
-        self.assertIn("browser mode=browserbase (probed)", self.__class__.log.read_text())
+        # It still escalates — but browserbase was never PROBED, only inferred from the two
+        # rungs below it failing. Recording that as site knowledge is how www.bestbuy.com came
+        # to be remembered as `browserbase` on the strength of an attempt that never ran.
+        self.assertIn("browser mode=browserbase (probe-inconclusive)",
+                      self.__class__.log.read_text())
         rec = json.loads(self.__class__.record.read_text())
         self.assertTrue(rec["browserbase"])
+        self.assertFalse(json.loads(learned.read_text()) if learned.exists() else {},
+                         "an unproven fallback must not be written to the learned cache")
+
+    def test_probe_error_is_not_site_knowledge(self):
+        """ERR says something about US — no xvfb, a launch failure, a timeout. It used to be
+        indistinguishable from BLOCKED, so our own breakage got recorded as the site's."""
+        learned = self.tmp / "learned3.json"
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.errsite.test/",
+                             BROWSE_HEADFUL="",
+                             BROWSE_PROBE_MAP='{"headless":"ERR","headful":"ERR"}',
+                             BROWSE_LEARNED_POLICY=str(learned), FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        log = self.__class__.log.read_text()
+        self.assertIn("probe-inconclusive", log)
+        self.assertIn("failed for our own reasons", log)
+        self.assertFalse(json.loads(learned.read_text()) if learned.exists() else {},
+                         "a probe that errored must not teach the cache anything")
+
+    def test_probe_success_is_recorded(self):
+        learned = self.tmp / "learned4.json"
+        rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.oksite.test/",
+                             BROWSE_HEADFUL="",
+                             BROWSE_PROBE_MAP='{"headless":"OK"}',
+                             BROWSE_LEARNED_POLICY=str(learned), FAKE_STATUS="complete")
+        self.assertEqual(rc, 0)
+        self.assertIn("browser mode=headless (probed)", self.__class__.log.read_text())
+        self.assertEqual(json.loads(learned.read_text()).get("www.oksite.test"), "headless")
 
     def test_cookies_passed_through(self):
         cfile = self.tmp / "cookies.json"

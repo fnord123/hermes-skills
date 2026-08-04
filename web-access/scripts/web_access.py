@@ -145,8 +145,11 @@ def _ask(query, selector, timeout):
     """
     params = dict({"q": query, "format": "json"}, **selector)
     url = "%s/search?%s" % (SEARXNG_URL, urllib.parse.urlencode(params))
+    # The same identity every other layer sends. This one went out as `Python-urllib/3.x`, which
+    # is both inconsistent and the sort of thing an engine blocks first.
+    req = urllib.request.Request(url, headers={"User-Agent": rxfetch.UA})
     with rxfetch.host_gate(rxfetch._host_of(SEARXNG_URL)):
-        with urllib.request.urlopen(url, timeout=timeout) as fh:
+        with urllib.request.urlopen(req, timeout=timeout) as fh:
             return json.loads(fh.read().decode("utf-8", "replace"))
 
 

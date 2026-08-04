@@ -19,17 +19,35 @@ import json
 import contextlib
 import importlib.util
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 HERE = Path(__file__).resolve().parent
 # Config path; overridable via env for testing.
 CONFIG = Path(os.environ.get("BROWSE_TASK_CONFIG", str(HERE / "config.env")))
+
+
+# ONE identity for every layer. rxfetch sends this from urllib; the renders below send it from
+# Playwright; fara sets its own in its environment. They must agree, because a site that sees
+# Chrome/124 on the cheap tier and HeadlessChrome on the render is being told two different
+# stories by one client — and on 2026-08-03 Lowe's answered the first with 393KB and the second
+# with a 195-character "Access Denied".
+UA = os.environ.get("RXFETCH_UA") or (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36")
+
+# Playwright announces automation twice over: `HeadlessChrome` in the UA and navigator.webdriver
+# set true. Both are trivially checked and both were being sent unmodified. Setting a real UA and
+# clearing the flag is the difference between the browser rungs being useful and being refused
+# on every bot-walled site.
+STEALTH_INIT = "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
 
 
 def _default_log():
@@ -248,6 +266,7 @@ def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
             return {"error": "agent rung failed: %s" % type(exc).__name__}
         # The agent narrates its rounds on stdout; keep the whole thing in the log and the tail
         # in the trace, so "what did fara actually do" is answerable after the fact.
+        trace_rounds(tmp)
         log("AGENT STDOUT:\n" + (proc.stdout or ""))
         if proc.stderr:
             log("AGENT STDERR:\n" + proc.stderr[-2000:])
@@ -354,6 +373,9 @@ def resolve_mode(args, cfg, start_url, xvfb):
 # the Fara venv's python (it has Playwright); headful is wrapped in xvfb-run.
 PROBE_SRC = r"""
 import sys, re, asyncio
+import os as _os
+_UA = _os.environ.get("RXFETCH_UA") or ""
+_STEALTH = _os.environ.get("RXFETCH_STEALTH") or ""
 from playwright.async_api import async_playwright
 _B = re.compile(r"access denied|robot check|are you a robot|unusual traffic|"
                 r"enter the characters|captcha|verify you are human|"
@@ -364,7 +386,10 @@ async def _main():
     async with async_playwright() as p:
         b = await p.chromium.launch(headless=not _headful)
         try:
-            pg = await (await b.new_context()).new_page()
+            _ctx = await b.new_context(user_agent=_UA, locale="en-US",
+                                       viewport={"width": 1440, "height": 900})
+            await _ctx.add_init_script(_STEALTH)
+            pg = await _ctx.new_page()
             r = await pg.goto(_url, wait_until="domcontentloaded", timeout=25000)
             await pg.wait_for_timeout(3000)
             body = (await pg.inner_text("body"))[:4000]
@@ -385,6 +410,9 @@ asyncio.run(_main())
 # that silently, which is the worst way for it to break.
 DUMP_SRC = r"""
 import os, sys, asyncio, json
+import os as _os
+_UA = _os.environ.get("RXFETCH_UA") or ""
+_STEALTH = _os.environ.get("RXFETCH_STEALTH") or ""
 from playwright.async_api import async_playwright
 _url = sys.argv[1]
 _mode = sys.argv[2] if len(sys.argv) > 2 else "headless"
@@ -414,7 +442,10 @@ async def _main():
     async with async_playwright() as p:
         b, _sid = await _launch(p)
         try:
-            pg = await (await b.new_context()).new_page()
+            _ctx = await b.new_context(user_agent=_UA, locale="en-US",
+                                       viewport={"width": 1440, "height": 900})
+            await _ctx.add_init_script(_STEALTH)
+            pg = await _ctx.new_page()
             r = await pg.goto(_url, wait_until="domcontentloaded", timeout=45000)
             await pg.wait_for_timeout(_wait)
             body = await pg.inner_text("body")
@@ -468,7 +499,7 @@ def run_dump(url, mode, xvfb, fara_python, wait_ms, cfg=None):
     # returned a shell. A downgrade that says nothing is worse than a failure that does.
     base = [str(fara_python), "-c", DUMP_SRC, url, mode, str(wait_ms)]
     cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
-    env = dict(os.environ)
+    env = dict(os.environ, RXFETCH_UA=UA, RXFETCH_STEALTH=STEALTH_INIT)
     if mode == "browserbase":
         for k in ("BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID",
                   "BROWSERBASE_PROXIES", "BROWSERBASE_ADVANCED_STEALTH"):
@@ -542,28 +573,115 @@ def run_probe(url, mode, xvfb, fara_python):
     base = [str(fara_python), "-c", PROBE_SRC, url] + (["headful"] if mode == "headful" else [])
     cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
     try:
-        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                           text=True, timeout=70)
+        # Through the host gate like every other request. A probe is a page load, and firing
+        # two of them at a site inside six seconds is exactly the traffic shape that earns the
+        # block the probe then goes on to measure.
+        with host_gate(url):
+            r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               env=dict(os.environ, RXFETCH_UA=UA, RXFETCH_STEALTH=STEALTH_INIT),
+                               timeout=70)
         lines = [ln for ln in (r.stdout or "").splitlines() if ln.strip()]
-        return lines[-1].strip() if lines else "ERR"
+        verdict = lines[-1].strip() if lines else "ERR"
+        return verdict if verdict in ("OK", "BLOCKED") else "ERR"
     except Exception:  # noqa: BLE001
         return "ERR"
 
 
+# A refused probe leaves a site warier of the next one. Space the rungs so the cheap attempt does
+# not manufacture the block the dear one then measures: on 2026-08-03 headless was refused by
+# lowes.com at 20:15:53 and headful was refused six seconds later, yet the same headful probe run
+# on its own minutes afterwards came back OK.
+PROBE_COOLDOWN = float(os.environ.get("BROWSE_PROBE_COOLDOWN") or 5)
+
+
 def probe_ladder(url, xvfb, has_bb, fara_python):
-    """Try headless, then headful; fall to browserbase if both are blocked.
+    """Try headless, then headful, then browserbase. Returns (mode, proven).
+
+    `proven` is True ONLY when a probe actually loaded the page in that mode. It is False when
+    every rung failed and we are returning a guess, and False when a rung failed for reasons that
+    are ours rather than the site's.
+
+    That distinction is the whole point. `ERR` — no xvfb, a launch failure, a timeout — says
+    nothing about the site, but it used to be indistinguishable from BLOCKED, so an infrastructure
+    problem got written into the learned cache as though it were the site's behaviour. And when
+    everything was blocked the fallback was saved too, which is how www.bestbuy.com came to be
+    remembered as `browserbase` on the strength of a browserbase attempt that never ran.
 
     `has_bb` is False when browserbase is unconfigured OR switched off, so a disabled managed
     browser simply ends the ladder at the best local mode.
     """
-    for m in ("headless", "headful"):
-        if m == "headful" and not xvfb:
-            continue
+    rungs = [m for m in ("headless", "headful") if m != "headful" or xvfb]
+    errors = []
+    for i, m in enumerate(rungs):
+        if i:
+            time.sleep(PROBE_COOLDOWN)
         res = run_probe(url, m, xvfb, fara_python)
         log(f"probe {m}: {res}")
         if res == "OK":
-            return m
-    return "browserbase" if has_bb else ("headful" if xvfb else "headless")
+            return m, True
+        if res == "ERR":
+            errors.append(m)
+    if errors:
+        log(f"probe: {', '.join(errors)} failed for our own reasons, not the site's — "
+            f"not recording this as site knowledge")
+    fallback = "browserbase" if has_bb else ("headful" if xvfb else "headless")
+    return fallback, False
+
+
+def trace_rounds(output_dir, keep_dir=None):
+    """Describe every page fara was shown, and what it decided to do about it.
+
+    The trajectory holds a pre/post screenshot per round and an events log carrying the model's
+    own reasoning. Both were being deleted with the temp dir, so "what did the agent actually
+    see" was unanswerable after the fact — which is how a run that wandered onto a homepage and
+    declared success went unnoticed. With a trace enabled this emits one record per round (the
+    action, the coordinates, the model's stated reasoning, the screenshot path) and optionally
+    keeps the images.
+    """
+    if not os.environ.get("RXFETCH_TRACE"):
+        return
+    evs = sorted(glob.glob(os.path.join(output_dir, "**", "solver_log", "events.jsonl"),
+                           recursive=True), key=os.path.getmtime)
+    if not evs:
+        trace("agent", "rounds", note="no events.jsonl in the trajectory")
+        return
+    run_dir = Path(evs[-1]).parent.parent
+    rounds = 0
+    for ln in Path(evs[-1]).read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not ln.strip():
+            continue
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        if r.get("type") != "action":
+            continue
+        # The event schema is action_name + action_nl_description + llm_conversation, NOT a
+        # nested {"action": {...}} — assuming the latter produced a trace of 13 empty rounds.
+        think = ""
+        for m in ((r.get("llm_conversation") or {}).get("messages") or []):
+            think = m.get("reasoning") or m.get("raw_response") or ""
+            if think:
+                break
+        think = re.sub(r"</?think>", "", think)
+        think = re.sub(r"<tool_call>.*", "", think, flags=re.S).strip()
+        shot = run_dir / ("screenshot_%d_pre.png" % rounds)
+        trace("agent", "round", n=rounds, action=r.get("action_name"),
+              did=(r.get("action_nl_description") or "")[:200],
+              # the model's own account of what it saw, which IS the page description
+              saw=think[:700],
+              screenshot=str(shot) if shot.exists() else None)
+        rounds += 1
+    if keep_dir:
+        try:
+            dest = Path(keep_dir)
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(run_dir, dest)
+            trace("agent", "trajectory-kept", path=str(dest), rounds=rounds)
+        except Exception as exc:                               # noqa: BLE001
+            trace("agent", "trajectory-keep-failed", exc=type(exc).__name__)
+    trace("agent", "rounds", total=rounds)
 
 
 def read_result(output_dir, stdout):
@@ -610,6 +728,9 @@ def main():
     p.add_argument("--dump-text", dest="dump_text", action="store_true",
                    help="return the page's RENDERED TEXT verbatim, with no agent in the loop. "
                         "For a caller that wants the document, not an answer.")
+    p.add_argument("--keep-trajectory", dest="keep_trajectory", default=None,
+                   help="copy the agent's trajectory (per-round screenshots and its own "
+                        "reasoning) to this directory instead of discarding it with the temp dir")
     p.add_argument("--all-layers", dest="all_layers", action="store_true",
                    help="ignore what was learned about this site and climb from the cheapest "
                         "rung. Use after fixing anything in the browser path, since a learned "
@@ -732,9 +853,12 @@ def main():
                           and bb_cred(cfg, "BROWSERBASE_PROJECT_ID")
                           and not browserbase_disabled(args, cfg))
             log(f"unknown site {_host(args.start_url)} — probing browser modes")
-            mode = probe_ladder(args.start_url, xvfb, has_bb, fara_python)
-            save_learned(cfg, _host(args.start_url), mode)
-            why = "probed"
+            mode, proven = probe_ladder(args.start_url, xvfb, has_bb, fara_python)
+            if proven:
+                save_learned(cfg, _host(args.start_url), mode)
+                why = "probed"
+            else:
+                why = "probe-inconclusive"
     if mode == "headful" and not xvfb:
         log("WARN: headful needs xvfb-run (not found); falling back to headless")
         mode = "headless"
@@ -784,6 +908,9 @@ def main():
             redacted.append("<redacted>" if skip else a)
             skip = (a == "--api_key")
         log("CMD " + " ".join(redacted))
+        trace("do:%s" % mode, "spawn", url=args.start_url, model=model, base_url=base_url,
+              max_rounds=args.max_steps, acted=bool(args.confirm), mode_why=why,
+              prompt=task, argv=redacted, cookies=cookies_file or None)
         # Take the host's gate and release it immediately, rather than holding it for the whole
         # session. The gate means "one request in flight, spaced by an interval"; an agent
         # session is minutes of many page loads, so holding it would stall every other caller
@@ -822,7 +949,11 @@ def main():
             log("STDOUT:\n" + stdout)
         if stderr:
             log("STDERR:\n" + stderr)
+        trace("do:%s" % mode, "exit", code=proc.returncode, timed_out=timed_out,
+              stdout_tail=(stdout or "")[-2000:], stderr_tail=(stderr or "")[-500:])
         status, answer, steps = read_result(tmp, stdout or "")
+        trace_rounds(tmp, args.keep_trajectory)
+        trace("do:%s" % mode, "result", status=status, steps=steps, answer=(answer or "")[:1200])
         if timed_out and (status or "").lower() not in ("complete", "waiting_for_user"):
             status = "timed_out"
 
