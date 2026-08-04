@@ -73,6 +73,13 @@ STDLIB = {
     "fcntl", "termios", "tty", "pwd", "grp", "resource", "select", "importlib",
 }
 
+# The hand-kept set above is a floor, not the truth. It has been wrong twice — `builtins` and
+# `types` are both stdlib and both got reported as "undeclared third-party imports", sending you
+# to add a package that does not exist. Python knows the real answer, so ask it: this can only
+# ever REMOVE false positives, since it adds names rather than dropping any. The literal set
+# stays as the fallback for a runtime old enough to lack the attribute (3.9 and earlier).
+STDLIB |= set(getattr(sys, "stdlib_module_names", ()))
+
 # Import name -> distribution name, where they differ.
 DIST = {
     "googleapiclient": "google-api-python-client", "google": "google-auth",

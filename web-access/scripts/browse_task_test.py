@@ -204,6 +204,39 @@ class BrowseTaskTest(unittest.TestCase):
         self.assertIn("browser mode=headful (policy:amazon.)", tail)
         self.assertNotIn("no-browserbase", tail)
 
+    # ── the dump ladder climbs, and prior experience only skips rungs below ──
+    def test_dump_ladder_climbs_and_experience_skips_below(self):
+        import importlib.util, types
+        spec = importlib.util.spec_from_file_location("bt_mod", SCRIPT)
+        bt = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bt)
+
+        def A(mode=None, no_browserbase=False, all_layers=False):
+            return types.SimpleNamespace(mode=mode, no_browserbase=no_browserbase,
+                                         all_layers=all_layers)
+
+        xv = "/usr/bin/xvfb-run"
+        bb = {"BROWSERBASE_API_KEY": "k", "BROWSERBASE_PROJECT_ID": "p",
+              "BROWSE_HERMES_ENV": str(self.tmp / "no-hermes-env")}
+        off = dict(bb, BROWSE_NO_BROWSERBASE="true")
+
+        # an unknown site climbs every rung, cheapest first
+        self.assertEqual(bt.dump_ladder_modes(A(), bb, "https://new.example/", xv)[0],
+                         ["headless", "headful", "browserbase"])
+        # experience skips the rungs BELOW it and keeps the dearer ones in reserve
+        self.assertEqual(bt.dump_ladder_modes(A(), bb, "https://www.amazon.com/x", xv)[0],
+                         ["headful", "browserbase"])
+        # --all-layers throws that away: a learned entry can record a bug as site behaviour
+        self.assertEqual(
+            bt.dump_ladder_modes(A(all_layers=True), bb, "https://www.amazon.com/x", xv)[0],
+            ["headless", "headful", "browserbase"])
+        # the paid rung never appears when it is switched off
+        self.assertNotIn("browserbase",
+                         bt.dump_ladder_modes(A(), off, "https://new.example/", xv)[0])
+        # an explicit --mode pins one rung and disables the ladder
+        self.assertEqual(bt.dump_ladder_modes(A(mode="headless"), bb,
+                                              "https://www.costco.com/x", xv)[0], ["headless"])
+
     def test_mode_override_beats_policy(self):
         rc, d = self.run_cmd("--task", "x", "--start-url", "https://www.amazon.com/s?k=lg",
                              "--mode", "headless", BROWSE_HEADFUL="", FAKE_STATUS="complete")

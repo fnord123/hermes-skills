@@ -1,13 +1,38 @@
 # web-access
 
 Search, page-reading, and multi-step web tasks, through tooling we control. Three verbs, one
-JSON object each:
+JSON object each.
+
+**`search`** — find pages. Asks the self-hosted SearXNG and returns titles, URLs and snippets;
+never page content. `--scope literature` reaches the research databases (PubMed, Semantic
+Scholar, OpenAlex, Crossref, arXiv), `--scope products` the open web for labels and retailers.
 
 ```
-python3 scripts/web_access.py search --query "..."
-python3 scripts/web_access.py fetch  --url "..."
-python3 scripts/web_access.py do     --task "..." [--confirm]
+python3 scripts/web_access.py search --query "..." [--scope literature|products|web]
 ```
+
+**`fetch`** — read one page and return **its verbatim text**. You give it a URL, it gives you
+the document. It climbs the layer ladder below by itself, from a cached copy up through a
+model-driven browser, and reports which layer produced the text in `via`. Handles PDFs. This is
+the verb whose output feeds rx-review's citation audit, which is why it returns the page rather
+than a summary of it.
+
+```
+python3 scripts/web_access.py fetch --url "..." [--max-chars 20000]
+```
+
+**`do`** — carry out a multi-step task on a site and return **an answer**, not a document. A
+browser session driven by the model: apply the site's own filters, page through listings, follow
+a flow across screens. It is the only verb that can change anything, and only with `--confirm`
+after the user approved that exact action.
+
+```
+python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 25] [--confirm]
+```
+
+The `fetch`/`do` split is text versus answer. Use `fetch` when you want what the page says; use
+`do` when reaching the answer takes several steps. Both can end up driving the same browser —
+they differ in what comes back.
 
 ## Why this exists
 
@@ -80,31 +105,50 @@ The ordering is enforced, not merely described: `rxfetch._browser_attempt` passe
 policy names browserbase (costco.com does). Without it, `http` would escalate straight to the
 paid remote browser past every free rung.
 
-### What each verb actually reaches today
+### How `fetch` climbs
+
+`fetch` walks every layer, cheapest first, and stops at the first that yields usable text —
+where "usable" means at least `--min-chars` (200 by default) and not an interstitial. Each rung
+it tried, and what that rung returned, comes back in `attempts`, so a failure says where it got
+to rather than just that it failed.
+
+`via` names the rung that produced the text: `cache`, `ncbi-api`, `http`, `browser:headless`,
+`browser:headful`, `agent:headful`, or `browserbase`. A caller can therefore tell a free local
+render from a paid remote one, and an audit that distrusts model-touched text can refuse
+anything prefixed `agent:`.
+
+**Prior experience skips rungs below, never replaces the ladder.** If a site is known to need
+headful, the ladder starts at headful and keeps browserbase above it in reserve; retrying a rung
+already known to fail for that host is pure latency. What worked is written back to the learned
+cache (`BROWSE_LEARNED_POLICY`, default `~/.config/browse-task/learned.json`) so the next fetch
+of that site starts there.
+
+**`--all-layers` ignores that knowledge and climbs from the bottom.** The learned cache is only
+as good as the code that wrote it: an entry recorded while a rung was broken says "this rung
+failed" when the truth was "we had a bug". A real example — `www.bestbuy.com` was learned as
+`browserbase` by a probe whose browserbase attempt then died on a plan error. A winner that
+never won. **Run with `--all-layers`, or clear the cache, after fixing anything in the browser
+path.** The 2026-08-03 cache was cleared for exactly this reason.
+
+Two other switches shape the ladder: `--no-agent` stops it at the plain renders, and
+`--no-browserbase` (currently on) removes the paid rung.
 
 | Layer | `fetch` | `do` |
 |---|---|---|
 | 1 `cache` | yes | no |
 | 2 `ncbi-api` | yes | no |
 | 3 `http` | yes | no |
-| 4/5 headless / headful | **one shot only** — a policy lookup picks one mode, with no probe and no retry | yes, with the probe ladder |
-| 6 agent (fara) | **not wired** | yes — this is what `do` is |
-| 7 browserbase | blocked by design (see above) | last rung, currently disabled |
+| 4/5 headless / headful | yes — climbs both | yes, with the probe ladder |
+| 6 agent (fara) | yes — navigates, then returns the landed page's markdown | yes; this *is* `do`, and it returns the answer instead |
+| 7 browserbase | yes when enabled, always last | last rung |
 
-Three honest gaps:
-
-- **`fetch` does not climb.** `run_dump` resolves exactly one mode from the site policy and runs
-  it once. The headless → headful → browserbase probe ladder, with its learned per-domain cache,
-  is wired only into the agent path. Home Depot showed this: `mode=headful why=default`, a
-  155-character shell, and no escalation — where `do` would have probed, escalated, and
-  remembered. Sharing `probe_ladder` with the dump path is the missing piece.
-- **Layer 6 is not reachable from `fetch`.** Wiring it needs a decision first: `do` returns the
-  model's *answer*, while `fetch` promises verbatim page text and the rx-review citation audit
-  depends on that. The right shape is to let the agent navigate and then return
-  `get_page_markdown()` from wherever it lands — the verbatim text already exists inside
-  `read_page_answer_question` and is currently discarded in favour of the answer.
-- **Layers 4, 5 and 7 all report `via: browser`.** A caller cannot tell a free local render from
-  a paid remote one, which is precisely the distinction `via` exists to make.
+**The same layer 6, used two different ways.** `do` lets the agent read the page and returns its
+answer. `fetch` uses the agent purely as a *navigator* — dismiss the consent wall, clear the
+interstitial, reach the real page — and then takes `get_page_markdown()` from the landed page in
+the same session, so cookies and JS state the agent just established still apply. What comes
+back is the document. That is what keeps the citation audit working, and it needs the
+`FARA_DUMP_MARKDOWN` patch listed below, because fara's own read action extracts that markdown
+and then discards it in favour of the model's prose.
 
 `ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL only
 for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not exist and
@@ -375,6 +419,15 @@ names `environment.py`. Patching only (2) changes nothing — that mistake cost 
 
 **3. `src/fara/environments/playwright/environment.py` — `_setup_browser` cookie hook.** See
 *Pre-seeding cookies* below.
+
+**4. `src/fara/run_fara.py` — `FARA_DUMP_MARKDOWN`.** Before the browser is torn down, if that
+env var names a path, write `await env.get_page_markdown()` to it. The capability was already
+there and unreachable: `get_page_markdown()` renders the live DOM through MarkItDown (and
+extracts PDFs), but `fara-cli` exposes no way to ask for it — the full option list is
+`--task --start_page --headful --output_folder --save_screenshots --max_rounds --browserbase
+--endpoint_config --api_key --base_url --model`. The agent's own `read_page_answer_question`
+calls it, then throws the markdown away and returns the model's answer. This patch is what lets
+layer 6 serve `fetch` with the document instead of a paraphrase.
 
 Check both settings are honoured:
 

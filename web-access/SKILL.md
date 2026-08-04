@@ -96,7 +96,9 @@ One JSON object.
 
 `fetch` returns `ok`, `url`, `outcome`, `via`, `chars`, `truncated`, and `text`.
 `via` names where the text came from: `cache` (already read once), `ncbi-api`
-(NCBI URLs only), `http`, or `browser`.
+(NCBI URLs only), `http`, `browser:headless`, `browser:headful`, `agent:headful`
+(a browser the model drove to reach the page), or `browserbase`. `attempts`
+lists each layer tried and what it returned.
 
 `do` returns `ok`, `status`, and `answer`:
 

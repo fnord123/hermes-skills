@@ -169,6 +169,93 @@ def browserbase_disabled(args, cfg):
     return v in ("1", "true", "yes", "on")
 
 
+def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
+    """Layer 6 as a TEXT source: let the agent navigate, then take the landed page verbatim.
+
+    The agent is used as a navigator, not a reader. It can dismiss a consent wall, clear an
+    interstitial or click through to the real page — things a plain render cannot — and then
+    FARA_DUMP_MARKDOWN makes it write the landed page's markdown before the browser closes.
+    What comes back is the document, not the model's prose, so a citation audit that locates
+    verbatim quotes still works. (The agent's own read action does the opposite: it extracts
+    the markdown and returns only an answer.)
+    """
+    fara_home = cfg.get("FARA_HOME") or ""
+    base_url, model = cfg.get("BROWSE_BASE_URL") or "", cfg.get("BROWSE_MODEL") or ""
+    cli = Path(fara_home) / ".venv" / "bin" / "fara-cli"
+    if not (fara_home and base_url and model and cli.exists()):
+        return {"error": "agent rung unavailable (browser agent not configured)"}
+    with tempfile.TemporaryDirectory(prefix="agent_dump_") as tmp:
+        md = Path(tmp) / "page.md"
+        cmd = [str(cli), "--task",
+               "Open the page and make its main content visible. Dismiss any cookie, consent or "
+               "location prompt that covers it. Do not sign in, buy, book or submit anything. "
+               "Then stop." + READONLY_DIRECTIVE,
+               "--start_page", url, "--output_folder", tmp,
+               "--base_url", base_url, "--api_key", cfg.get("BROWSE_API_KEY") or "none",
+               "--model", model, "--max_rounds", str(max_steps)]
+        if mode == "browserbase":
+            cmd.insert(1, "--browserbase")
+        elif mode == "headful":
+            cmd.insert(1, "--headful")
+            if xvfb:
+                cmd = [xvfb, "-a"] + cmd
+        env = dict(os.environ, FARA_DUMP_MARKDOWN=str(md), RXFETCH_GATE_HELD=_host(url))
+        try:
+            with host_gate(url):
+                subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, env=env, timeout=1800, start_new_session=True)
+        except subprocess.TimeoutExpired:
+            return {"error": "agent rung timed out"}
+        except Exception as exc:                               # noqa: BLE001
+            return {"error": "agent rung failed: %s" % type(exc).__name__}
+        if not md.exists():
+            return {"error": "agent produced no page markdown (browser never loaded a page)"}
+        return {"text": md.read_text(encoding="utf-8", errors="ignore"), "status": 0,
+                "title": ""}
+
+
+# Rung order, cheapest first. The agent rung runs after all of these; browserbase is last of
+# the renders because it is the only one that costs money.
+RUNG_ORDER = ["headless", "headful", "browserbase"]
+
+
+def dump_ladder_modes(args, cfg, start_url, xvfb):
+    """The rungs `fetch` will climb for this URL, cheapest first.
+
+    `fetch` climbs. It used to resolve ONE mode from the site policy and run it once, so Home
+    Depot picked headful by default, returned a 155-character shell and stopped, while the agent
+    path would have probed and escalated. A tier that does not climb is not a tier.
+
+    Prior experience is allowed to SKIP the rungs below it, not to replace the ladder: if this
+    host is known to need headful, start at headful and keep browserbase above it in reserve.
+    Retrying a rung already known to fail for this site is pure latency.
+
+    --all-layers throws that knowledge away and climbs from the bottom. It exists because the
+    learned cache is only as good as the code that wrote it: entries recorded while a rung was
+    broken say "this rung failed" when the truth was "we had a bug". www.bestbuy.com was learned
+    as `browserbase` by a probe whose browserbase attempt then died on a plan error — a winner
+    that never won. Use it after fixing anything in the browser path.
+    """
+    override = (getattr(args, "mode", None) or cfg.get("BROWSE_MODE") or "").strip().lower()
+    if override in RUNG_ORDER:
+        return [override], "override"
+
+    rungs = [m for m in RUNG_ORDER
+             if (m != "headful" or xvfb)
+             and (m != "browserbase" or (not browserbase_disabled(args, cfg)
+                                         and bb_cred(cfg, "BROWSERBASE_API_KEY")
+                                         and bb_cred(cfg, "BROWSERBASE_PROJECT_ID")))]
+
+    if getattr(args, "all_layers", False):
+        return rungs, "all-layers"
+
+    preferred, why = resolve_mode(args, cfg, start_url, xvfb)
+    if preferred in rungs and why != "default":
+        # Known to need this rung: start there, keep the dearer ones above it as fallbacks.
+        return rungs[rungs.index(preferred):], why
+    return rungs, why
+
+
 def resolve_mode(args, cfg, start_url, xvfb):
     """Pick browser mode (headless|headful|browserbase) and why, for this site."""
     no_bb = browserbase_disabled(args, cfg)
@@ -450,6 +537,16 @@ def main():
     p.add_argument("--dump-text", dest="dump_text", action="store_true",
                    help="return the page's RENDERED TEXT verbatim, with no agent in the loop. "
                         "For a caller that wants the document, not an answer.")
+    p.add_argument("--all-layers", dest="all_layers", action="store_true",
+                   help="ignore what was learned about this site and climb from the cheapest "
+                        "rung. Use after fixing anything in the browser path, since a learned "
+                        "entry can record a bug as if it were the site's behaviour")
+    p.add_argument("--no-agent", dest="no_agent", action="store_true",
+                   help="stop the dump ladder at the plain renders; do not escalate to the "
+                        "model-driven agent rung")
+    p.add_argument("--min-chars", dest="min_chars", type=int, default=200,
+                   help="a dump shorter than this counts as blocked, and the ladder climbs to "
+                        "the next browser mode")
     p.add_argument("--wait-ms", dest="wait_ms", type=int, default=3000,
                    help="how long to let the page settle before reading it")
     p.add_argument("--start-url", dest="start_url", default="https://www.bing.com/",
@@ -492,14 +589,40 @@ def main():
         if not fara_python.exists():
             fail("browser not installed at %s — run the setup in README." % fara_python)
         xvfb0 = shutil.which("xvfb-run")
-        mode0, why0 = resolve_mode(args, cfg, args.start_url, xvfb0)
-        log("DUMP " + json.dumps({"url": args.start_url, "mode": mode0, "why": why0}))
-        d = run_dump(args.start_url, mode0, xvfb0, fara_python, args.wait_ms, cfg)
-        if d.get("error"):
-            out({"ok": False, "url": args.start_url, "mode": mode0,
-                 "error": d["error"]}, 1)
+        modes, why0 = dump_ladder_modes(args, cfg, args.start_url, xvfb0)
+        log("DUMP " + json.dumps({"url": args.start_url, "ladder": modes, "start_why": why0}))
+        attempts, d, used = [], {}, None
+        for m in modes:
+            d = run_dump(args.start_url, m, xvfb0, fara_python, args.wait_ms, cfg)
+            text = d.get("text") or ""
+            note = (d.get("error") or "%d chars" % len(text))
+            attempts.append({"mode": m, "result": note[:120]})
+            log("DUMP %s -> %s" % (m, note[:160]))
+            if not d.get("error") and len(text.strip()) >= args.min_chars:
+                used = m
+                break
+        if used is None and not args.no_agent:
+            # Layer 6: the same free local browser, but driven. Tried after every plain render
+            # and before anything paid.
+            amode = "headful" if xvfb0 else "headless"
+            log("DUMP escalating to the agent rung (%s)" % amode)
+            ad = run_agent_dump(args.start_url, amode, xvfb0, cfg, args.wait_ms)
+            atext = ad.get("text") or ""
+            attempts.append({"mode": "agent:%s" % amode,
+                             "result": (ad.get("error") or "%d chars" % len(atext))[:120]})
+            if not ad.get("error") and len(atext.strip()) >= args.min_chars:
+                d, used = ad, "agent:%s" % amode
+        if used is None:
+            out({"ok": False, "url": args.start_url, "mode": modes[-1] if modes else None,
+                 "attempts": attempts,
+                 "error": (d.get("error") or "every browser mode returned less than %d chars"
+                                             % args.min_chars)}, 1)
+        # Remember what worked, so the next fetch of this site starts there. The ladder still
+        # runs in full if that mode later stops working.
+        if not used.startswith("agent:"):
+            save_learned(cfg, _host(args.start_url), used)
         text = d.get("text") or ""
-        out({"ok": bool(text.strip()), "url": args.start_url, "mode": mode0,
+        out({"ok": True, "url": args.start_url, "mode": used, "attempts": attempts,
              "http_status": d.get("status"), "title": d.get("title") or "",
              "chars": len(text), "text": text})
         return

@@ -348,7 +348,8 @@ def _browser_attempt(url, timeout):
     # cheaper than paying someone. Without this flag a site whose policy says browserbase (e.g.
     # costco.com) would jump straight from `http` to the paid remote browser, skipping both free
     # local rungs.
-    cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--no-browserbase", "--start-url", url]
+    cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--no-browserbase",
+           "--min-chars", str(MIN_DOCUMENT_CHARS), "--start-url", url]
     host = _host_of(url)
     # browse_task.py takes this host's gate when it is run on its own. Here it is a CHILD of a
     # gate we already hold, and flock is per-process: without this hand-off it would block on
@@ -372,13 +373,20 @@ def _browser_attempt(url, timeout):
         return Result("", "unreadable",
                       "browser output unparseable: %s" % (proc.stderr or "")[-160:].strip())
     if not data.get("ok"):
-        return Result("", "unreadable", "browser: %s" % str(data.get("error", ""))[:160])
+        tried = data.get("attempts") or []
+        trail = "; ".join("%s: %s" % (a.get("mode"), a.get("result")) for a in tried)
+        return Result("", "unreadable",
+                      "browser: %s%s" % (str(data.get("error", ""))[:160],
+                                         (" [tried %s]" % trail[:240]) if trail else ""))
 
     text = data.get("text") or ""
+    mode = data.get("mode") or "?"
     if looks_unusable(text):
         return Result("", "unreadable", "browser rendered %d chars, still a shell" % len(text))
-    return Result(text, "ok", "browser rendered %d chars (%s)" % (len(text), data.get("mode", "?")),
-                  via="browser")
+    # Name the rung, not just "browser". A caller that cannot tell a free local render from a
+    # paid remote one cannot judge the cost it just incurred, which is the whole point of `via`.
+    via = "browserbase" if mode == "browserbase" else "browser:%s" % mode
+    return Result(text, "ok", "browser rendered %d chars (%s)" % (len(text), mode), via=via)
 
 
 def cache_path(url):
