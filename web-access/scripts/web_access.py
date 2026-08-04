@@ -207,9 +207,11 @@ def cmd_fetch(args):
                         "was skipped by --no-browser. Re-run this exact command without that "
                         "flag to render the page in a real browser.")
     elif r.outcome == "unreadable":
-        body["next"] = ("every tier including a real browser was tried and none returned the "
-                        "document. The content is behind a login or genuinely absent. Report "
-                        "that you could not read it, and name the URL.")
+        body["next"] = ("the cheap tiers and a local browser render were all tried and none "
+                        "returned the document. The site may need a session that works the "
+                        "page rather than loading it — try the `do` verb with this URL as "
+                        "--start-url. Otherwise report that you could not read it, and name "
+                        "the URL.")
     elif r.outcome == "unreachable":
         body["next"] = ("no usable response. This is a fact about our reach, NOT evidence "
                         "about the page's content — never report it as though the page said "

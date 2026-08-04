@@ -47,18 +47,36 @@ text, reporting which one did in `via`:
 
 | `via` | Source | Cost |
 |---|---|---|
-| `cache` | text we already extracted for this URL | free, no request |
-| `ncbi-api` | **NCBI URLs only** — NCBI's own API | one request, no bot wall |
-| `http` | the page itself, retried with backoff | one request |
-| `browser` | a **local** browser renders the page — headless, or headful under xvfb | seconds, a whole process |
-| `browserbase` | a **remote managed** browser built to pass bot detection | seconds, plus money — a paid third-party service |
+| # | `via` | Source | Cost |
+|---|---|---|---|
+| 1 | `cache` | text we already extracted for this URL | free, no request |
+| 2 | `ncbi-api` | **NCBI URLs only** — NCBI's own API | one request, no bot wall |
+| 3 | `http` | the page itself, retried with backoff | one request |
+| 4 | `browser` | a **local** browser renders the page, no agent | seconds, a local process |
+| 5 | *agent* | the **local** browser driven by the model, working the page | minutes, a local process + GPU |
+| 6 | `browserbase` | a **remote managed** browser built to pass bot detection | seconds, plus money — a paid third-party service |
 
-`browserbase` is listed separately because it is a different kind of cost, not a heavier version
-of the same one. `browser` spends local CPU; `browserbase` sends the URL to an external company
-and bills a metered account (free tier: 1 browser-hour/month). It is the last rung and should
-stay the last rung. Both report `via: browser` today — the tier string does not yet distinguish
-them, which is worth fixing, since a caller cannot currently tell a free local render from a
-paid remote one.
+**Order is by cost, and `browserbase` is always last.** Rungs 4 and 5 use the same free local
+browser and differ only in who drives it: 4 loads the page and reads it, 5 lets the model click,
+scroll, dismiss consent walls and page through results. Spending the model is cheaper than
+spending money, so the agent is always tried before the managed browser. `browserbase` is the
+only rung that leaves the machine and bills a metered account (free tier: 1 browser-hour/month),
+so it is the last resort — **currently switched off entirely via `BROWSE_NO_BROWSERBASE=true`.**
+
+This ordering is enforced, not merely documented: `rxfetch._browser_attempt` passes
+`--no-browserbase` unconditionally, so rung 4 can never jump to rung 6 on a site whose policy
+says browserbase (costco.com does). Without that, `http` would escalate straight to the paid
+remote browser and skip both free local rungs.
+
+Two honest gaps in the table as it stands:
+
+- **Rung 5 is not yet wired into `fetch`.** It is reachable only through the `do` verb. Wiring it
+  in needs a decision first: `do` returns the model's *answer*, while `fetch` promises the
+  page's verbatim text, and the citation audit depends on that difference. The likely shape is
+  to let the agent navigate and then dump text from wherever it lands, so the verbatim guarantee
+  survives — not to return its prose.
+- **Rungs 4 and 6 both report `via: browser`.** A caller cannot currently tell a free local
+  render from a paid remote one, which is exactly the distinction `via` exists to make.
 
 `ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL only
 for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not exist and

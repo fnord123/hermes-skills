@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -97,9 +98,9 @@ TRANSIENT_STATUS = {408, 425, 429, 500, 502, 503, 504}
 # TRANSIENT_STATUS above, so it is still retried with backoff first; only once the retries are
 # spent does it land here, and by then a browser is the last thing left to try.
 #
-# Everything else keeps its old meaning. A 404 is an ANSWER — the page is not there, and no
-# amount of rendering invents it — and a connection timeout is silence, with nothing for a
-# browser to render.
+# A 404 keeps its old meaning: it is an ANSWER — the page is not there, and no amount of
+# rendering invents it. Read timeouts escalate too, but they are handled at the transport level
+# below rather than here, since they carry no status code.
 WITHHELD_STATUS = {401, 403, 429}
 
 # Interstitials that mean "this is not the document", at any length: pubmed's JS shell is
@@ -290,7 +291,15 @@ def _one_attempt(url, timeout, via='http'):
         outcome = "unreadable" if e.code in WITHHELD_STATUS else "unreachable"
         return Result("", outcome, "HTTP %s" % e.code), retryable
     except Exception as e:                                     # noqa: BLE001
-        return Result("", "unreachable", type(e).__name__), True
+        # A silent drop is a bot wall too. Best Buy accepts the connection and never answers a
+        # plain client, and the same page loads in a browser — so a timeout is a statement about
+        # THIS client, not about the host being gone. A local render is cheap (a process and a
+        # few seconds, no third party, no metered account), so it is worth spending on the
+        # chance the site simply refuses non-browsers. Name resolution and connection-refused
+        # stay `unreachable`: there is no server there for a browser to reach either.
+        transport = type(e).__name__
+        timed_out = isinstance(e, (TimeoutError, socket.timeout)) or "timeout" in transport.lower()
+        return Result("", "unreadable" if timed_out else "unreachable", transport), True
 
     if "pdf" in ctype or url.lower().endswith(".pdf") or raw[:5] == b"%PDF-":
         # Per-URL scratch name, created before it is written to. A fixed name would be
@@ -333,7 +342,13 @@ def _browser_attempt(url, timeout):
     """
     if not os.path.exists(BROWSE_TASK):
         return Result("", "unreadable", "browser tier unavailable (browser driver not installed)")
-    cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--start-url", url]
+    # --no-browserbase is NOT a policy choice here, it is the ladder's shape. browserbase is the
+    # last resort, after the agent, because it is the only rung that leaves the machine and bills
+    # a metered account. This tier is a plain local render — cheaper than the agent, which is
+    # cheaper than paying someone. Without this flag a site whose policy says browserbase (e.g.
+    # costco.com) would jump straight from `http` to the paid remote browser, skipping both free
+    # local rungs.
+    cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--no-browserbase", "--start-url", url]
     host = _host_of(url)
     # browse_task.py takes this host's gate when it is run on its own. Here it is a CHILD of a
     # gate we already hold, and flock is per-process: without this hand-off it would block on

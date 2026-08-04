@@ -386,5 +386,62 @@ for code, want_render in ((403, 1), (404, 0)):
 rxfetch._one_attempt = _real_attempt
 
 
+# ── a silent drop is a bot wall too ───────────────────────────────────────────────────────────
+# Best Buy accepts the connection and never answers a plain client, while the same page loads in
+# a browser. So a read timeout is a fact about THIS client, not about the host being gone, and a
+# local render is cheap enough to be worth spending on the chance the site just refuses
+# non-browsers. Name resolution and connection-refused stay unreachable: no server, nothing to
+# render.
+section("a read timeout escalates; a dead host does not")
+
+
+def run_transport(exc):
+    real = rxfetch.urllib.request.urlopen
+
+    def boom(req, timeout=None):
+        raise exc
+
+    rxfetch.urllib.request.urlopen = boom
+    try:
+        return rxfetch._one_attempt("https://drop.example/page", 5)[0]
+    finally:
+        rxfetch.urllib.request.urlopen = real
+
+
+chk("a read timeout is unreadable", run_transport(TimeoutError("timed out")).outcome == "unreadable",
+    "(got %s)" % run_transport(TimeoutError("timed out")).outcome)
+chk("socket.timeout is unreadable",
+    run_transport(__import__("socket").timeout("timed out")).outcome == "unreadable")
+chk("a refused connection stays unreachable",
+    run_transport(ConnectionRefusedError("refused")).outcome == "unreachable")
+chk("a DNS failure stays unreachable",
+    run_transport(OSError("Name or service not known")).outcome == "unreachable")
+
+# ── browserbase is the LAST rung, after the agent ─────────────────────────────────────────────
+# The local render and the agent both use the free local browser; browserbase leaves the machine
+# and bills a metered account. So the plain-render tier must never escalate onto it — otherwise a
+# site whose policy says browserbase (costco.com) jumps from `http` straight to the paid remote
+# browser and skips both free rungs.
+section("the plain render tier never reaches the paid rung")
+_seen = {}
+_real_run = rxfetch.subprocess.run
+
+
+def _spy_run(cmd, **kw):
+    _seen["cmd"] = list(cmd)
+    raise RuntimeError("stop here — we only need the argv")
+
+
+rxfetch.subprocess.run = _spy_run
+try:
+    rxfetch._browser_attempt("https://www.costco.com/p/x", 5)
+except Exception:                                                # noqa: BLE001
+    pass
+finally:
+    rxfetch.subprocess.run = _real_run
+chk("the browser tier forces --no-browserbase", "--no-browserbase" in _seen.get("cmd", []),
+    "(argv=%s)" % _seen.get("cmd"))
+chk("and still asks for verbatim text, not an answer", "--dump-text" in _seen.get("cmd", []))
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

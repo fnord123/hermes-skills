@@ -234,14 +234,35 @@ asyncio.run(_main())
 # audit downstream works by locating an exact quote inside fetched text. A paraphrase breaks
 # that silently, which is the worst way for it to break.
 DUMP_SRC = r"""
-import sys, asyncio, json
+import os, sys, asyncio, json
 from playwright.async_api import async_playwright
 _url = sys.argv[1]
-_headful = len(sys.argv) > 2 and sys.argv[2] == "headful"
+_mode = sys.argv[2] if len(sys.argv) > 2 else "headless"
+_headful = _mode == "headful"
 _wait = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
+
+def _envflag(name, default):
+    v = os.environ.get(name)
+    return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
+
+async def _launch(p):
+    # A browser, local or managed. Returns (browser, session_id_or_None).
+    if _mode != "browserbase":
+        return await p.chromium.launch(headless=not _headful), None
+    from browserbase import Browserbase
+    bb = Browserbase(api_key=os.environ["BROWSERBASE_API_KEY"])
+    settings = {"enablePdfViewer": True}
+    if _envflag("BROWSERBASE_ADVANCED_STEALTH", False):
+        settings["advanced_stealth"] = True
+    sess = bb.sessions.create(
+        project_id=os.environ["BROWSERBASE_PROJECT_ID"],
+        proxies=_envflag("BROWSERBASE_PROXIES", True),
+        browser_settings=settings, keep_alive=False, timeout=600)
+    return await p.chromium.connect_over_cdp(sess.connect_url), sess.id
+
 async def _main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(headless=not _headful)
+        b, _sid = await _launch(p)
         try:
             pg = await (await b.new_context()).new_page()
             r = await pg.goto(_url, wait_until="domcontentloaded", timeout=45000)
@@ -250,6 +271,7 @@ async def _main():
             print("__DUMP__" + json.dumps({
                 "status": (r.status if r is not None else 0),
                 "title": await pg.title(),
+                "mode": _mode, "session": _sid,
                 "text": body}))
         except Exception as e:
             print("__DUMP__" + json.dumps({"error": str(e).splitlines()[0][:200]}))
@@ -288,15 +310,28 @@ def host_gate(url):
         yield
 
 
-def run_dump(url, mode, xvfb, fara_python, wait_ms):
+def run_dump(url, mode, xvfb, fara_python, wait_ms, cfg=None):
     """Rendered page text via the browser, with no agent. Returns a dict."""
-    base = [str(fara_python), "-c", DUMP_SRC, url,
-            ("headful" if mode == "headful" else "headless"), str(wait_ms)]
+    # Pass the mode THROUGH. This used to read `"headful" if mode == "headful" else "headless"`,
+    # which silently turned a browserbase policy into a headless render — costco.com resolves to
+    # browserbase, so fetch quietly rendered it in the one mode the site is known to block and
+    # returned a shell. A downgrade that says nothing is worse than a failure that does.
+    base = [str(fara_python), "-c", DUMP_SRC, url, mode, str(wait_ms)]
     cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
+    env = dict(os.environ)
+    if mode == "browserbase":
+        for k in ("BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID",
+                  "BROWSERBASE_PROXIES", "BROWSERBASE_ADVANCED_STEALTH"):
+            v = bb_cred(cfg, k)
+            if v:
+                env[k] = v
+        if not (env.get("BROWSERBASE_API_KEY") and env.get("BROWSERBASE_PROJECT_ID")):
+            return {"error": "browserbase mode needs BROWSERBASE_API_KEY and "
+                             "BROWSERBASE_PROJECT_ID (see README)"}
     try:
         with host_gate(url):
             r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                               text=True, timeout=120)
+                               text=True, env=env, timeout=180)
     except Exception as exc:  # noqa: BLE001
         return {"error": "%s: %s" % (type(exc).__name__, exc)}
     for ln in (r.stdout or "").splitlines():
@@ -459,7 +494,7 @@ def main():
         xvfb0 = shutil.which("xvfb-run")
         mode0, why0 = resolve_mode(args, cfg, args.start_url, xvfb0)
         log("DUMP " + json.dumps({"url": args.start_url, "mode": mode0, "why": why0}))
-        d = run_dump(args.start_url, mode0, xvfb0, fara_python, args.wait_ms)
+        d = run_dump(args.start_url, mode0, xvfb0, fara_python, args.wait_ms, cfg)
         if d.get("error"):
             out({"ok": False, "url": args.start_url, "mode": mode0,
                  "error": d["error"]}, 1)
