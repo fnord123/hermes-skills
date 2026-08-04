@@ -50,6 +50,27 @@ LOG = (Path(os.environ["BROWSE_TASK_LOG"]) if os.environ.get("BROWSE_TASK_LOG")
        else _default_log())
 
 
+def trace(layer, event, **fields):
+    """Append one execution record to RXFETCH_TRACE, if the caller asked for a trace.
+
+    Same file as rxfetch's, so one fetch produces one ordered story across both processes:
+    the curl-equivalent of each HTTP attempt, then the exact browser argv, then the agent's
+    prompt and reply. Tracing must never break a render, hence the blanket except.
+    """
+    path = os.environ.get("RXFETCH_TRACE") or ""
+    if not path:
+        return
+    try:
+        rec = {"ts": datetime.datetime.now().strftime("%H:%M:%S"), "layer": layer,
+               "event": event}
+        rec.update(fields)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, default=str)[:4000] + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+
 def log(msg):
     try:
         LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +190,12 @@ def browserbase_disabled(args, cfg):
     return v in ("1", "true", "yes", "on")
 
 
+# How long the agent rung may run. Kept BELOW rxfetch's BROWSER_TIMEOUT_FLOOR on purpose: if the
+# parent's budget expires first the child is killed blind and its trace ends mid-run, which is
+# how a 173-second cutoff came back as an unexplained "browser timed out".
+AGENT_RUN_TIMEOUT = int(os.environ.get("BROWSE_AGENT_TIMEOUT") or 900)
+
+
 def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
     """Layer 6 as a TEXT source: let the agent navigate, then take the landed page verbatim.
 
@@ -187,8 +214,10 @@ def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
     with tempfile.TemporaryDirectory(prefix="agent_dump_") as tmp:
         md = Path(tmp) / "page.md"
         cmd = [str(cli), "--task",
-               "Open the page and make its main content visible. Dismiss any cookie, consent or "
-               "location prompt that covers it. Do not sign in, buy, book or submit anything. "
+               "Make THIS page's main content visible: dismiss any cookie, consent, location or "
+               "sign-in prompt covering it, and reload if the site served an error page. Stay on "
+               "this exact URL — if a reload or dismissal moves you elsewhere, navigate back to "
+               "it before stopping. Do not open a different product, a search, or the homepage. "
                "Then stop." + READONLY_DIRECTIVE,
                "--start_page", url, "--output_folder", tmp,
                "--base_url", base_url, "--api_key", cfg.get("BROWSE_API_KEY") or "none",
@@ -200,18 +229,52 @@ def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
             if xvfb:
                 cmd = [xvfb, "-a"] + cmd
         env = dict(os.environ, FARA_DUMP_MARKDOWN=str(md), RXFETCH_GATE_HELD=_host(url))
+        log("AGENT CMD %s" % " ".join("<redacted>" if i and cmd[i - 1] == "--api_key" else a
+                                      for i, a in enumerate(cmd)))
+        trace("agent:%s" % mode, "spawn", url=url, model=model, base_url=base_url,
+              max_rounds=max_steps, prompt=cmd[cmd.index("--task") + 1],
+              argv=["<redacted>" if i and cmd[i - 1] == "--api_key" else a
+                    for i, a in enumerate(cmd)])
         try:
             with host_gate(url):
-                subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                               text=True, env=env, timeout=1800, start_new_session=True)
+                proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                                      text=True, env=env, timeout=AGENT_RUN_TIMEOUT,
+                                      start_new_session=True)
         except subprocess.TimeoutExpired:
+            trace("agent:%s" % mode, "timeout", seconds=AGENT_RUN_TIMEOUT)
             return {"error": "agent rung timed out"}
         except Exception as exc:                               # noqa: BLE001
+            trace("agent:%s" % mode, "spawn-failed", exc=type(exc).__name__)
             return {"error": "agent rung failed: %s" % type(exc).__name__}
+        # The agent narrates its rounds on stdout; keep the whole thing in the log and the tail
+        # in the trace, so "what did fara actually do" is answerable after the fact.
+        log("AGENT STDOUT:\n" + (proc.stdout or ""))
+        if proc.stderr:
+            log("AGENT STDERR:\n" + proc.stderr[-2000:])
+        trace("agent:%s" % mode, "exit", code=proc.returncode,
+              reply_tail=(proc.stdout or "")[-1500:], stderr_tail=(proc.stderr or "")[-500:],
+              markdown_written=md.exists(),
+              markdown_chars=(md.stat().st_size if md.exists() else 0))
         if not md.exists():
             return {"error": "agent produced no page markdown (browser never loaded a page)"}
+
+        # WHERE it landed decides whether this is the document at all. The agent reports
+        # success for its own task, which is not the same as "still on the URL you asked for":
+        # Home Depot's error page, one refresh, and fara was on the homepage calling it done.
+        # A long, healthy-looking dump of site navigation is exactly the false positive
+        # looks_unusable cannot catch, so compare the paths and refuse a mismatch.
+        landed_file = Path(str(md) + ".url")
+        landed = landed_file.read_text(encoding="utf-8").strip() if landed_file.exists() else ""
+        want, got = urlparse(url), urlparse(landed or url)
+        drifted = bool(landed) and (want.netloc.lower().lstrip("www.")
+                                    != got.netloc.lower().lstrip("www.")
+                                    or want.path.rstrip("/") != got.path.rstrip("/"))
+        trace("agent", "landed", requested=url, landed=landed, drifted=drifted)
+        if drifted:
+            return {"error": "agent navigated away from the requested page (landed on %s); "
+                             "its dump is a different document" % (landed[:120] or "?")}
         return {"text": md.read_text(encoding="utf-8", errors="ignore"), "status": 0,
-                "title": ""}
+                "title": "", "landed": landed}
 
 
 # Rung order, cheapest first. The agent rung runs after all of these; browserbase is last of
@@ -415,16 +478,26 @@ def run_dump(url, mode, xvfb, fara_python, wait_ms, cfg=None):
         if not (env.get("BROWSERBASE_API_KEY") and env.get("BROWSERBASE_PROJECT_ID")):
             return {"error": "browserbase mode needs BROWSERBASE_API_KEY and "
                              "BROWSERBASE_PROJECT_ID (see README)"}
+    log("DUMP CMD[%s] %s" % (mode, " ".join(cmd)))
+    trace("browser:%s" % mode, "spawn", argv=cmd, url=url, wait_ms=wait_ms)
     try:
         with host_gate(url):
             r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                                text=True, env=env, timeout=180)
     except Exception as exc:  # noqa: BLE001
+        trace("browser:%s" % mode, "spawn-failed", exc=type(exc).__name__, detail=str(exc)[:300])
         return {"error": "%s: %s" % (type(exc).__name__, exc)}
+    trace("browser:%s" % mode, "exit", code=r.returncode,
+          stderr_tail=(r.stderr or "")[-500:], stdout_bytes=len(r.stdout or ""))
     for ln in (r.stdout or "").splitlines():
         if ln.startswith("__DUMP__"):
             try:
-                return json.loads(ln[len("__DUMP__"):])
+                d = json.loads(ln[len("__DUMP__"):])
+                trace("browser:%s" % mode, "rendered", http_status=d.get("status"),
+                      title=(d.get("title") or "")[:120], chars=len(d.get("text") or ""),
+                      session=d.get("session"), error=d.get("error"),
+                      text_head=(d.get("text") or "")[:300])
+                return d
             except Exception:  # noqa: BLE001
                 break
     return {"error": (r.stderr or r.stdout or "no output").strip().splitlines()[-1][:200]

@@ -436,6 +436,23 @@ grep -n "advanced_stealth" ~/fara/src/fara/environments/playwright/environment.p
 grep -a "BrowserBase session: proxies=" /tmp/browse-task/browse-task-*.log | tail -1
 ```
 
+**5. `src/fara/run_fara.py` — landed-URL sidecar.** Alongside the markdown, write `env._page.url`
+to `<dump>.url`. The agent reports success for *its own task*, which is not the same as "still
+on the URL you asked for": on 2026-08-03 fara met Home Depot's error page, hit Refresh, landed
+on the **homepage**, dismissed a popover and correctly declared its task done — and 18,307
+characters of site navigation were accepted as the product page. `looks_unusable` cannot catch
+that: the dump is long and carries no bot-wall marker. `run_agent_dump` compares host and path
+and refuses a mismatch.
+
+## Timeout budget
+
+The browser tier's budget covers the WHOLE ladder — headless, headful, agent — not one render.
+`RXFETCH_BROWSER_TIMEOUT` (default 1200s) bounds the tier; `BROWSE_AGENT_TIMEOUT` (default 900s)
+bounds the agent rung and is deliberately **smaller**, so a slow agent dies with its own
+diagnostics rather than being killed blind by the parent. The floor was 180s when the tier was a
+single render, and became a bug the moment the agent joined it: a run was cut off 173 seconds in
+and reported a bare "browser timed out" with every per-rung detail lost.
+
 ## Browser modes — per-site policy
 
 Sites differ in how aggressively they block automated browsers, so the wrapper

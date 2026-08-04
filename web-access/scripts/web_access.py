@@ -195,12 +195,18 @@ def cmd_search(args):
 
 
 def cmd_fetch(args):
+    if args.trace:
+        os.environ["RXFETCH_TRACE"] = args.trace
+        rxfetch.TRACE = args.trace
     rxfetch.configure(min_chars=args.min_chars)
     r = rxfetch.fetch(args.url, timeout=args.timeout, allow_browser=not args.no_browser)
     text = (r.text or "")
     truncated = len(text) > args.max_chars
     body = {"ok": r.ok, "url": args.url, "outcome": r.outcome, "detail": r.detail,
             "via": r.via, "chars": len(text), "truncated": truncated,
+            # Every layer tried, in order. A caller that can only see the verdict cannot tell a
+            # layer that failed from one that never ran — which is the doubt this answers.
+            "attempts": getattr(r, "attempts", []),
             "text": text[:args.max_chars]}
     if r.outcome == "unreadable" and args.no_browser:
         body["next"] = ("the server answered but withheld the document, and the browser tier "
@@ -264,6 +270,10 @@ def main():
                    help="skip the browser tier. Escalation is automatic and fires only when a "
                         "server answered without giving us the document; pass this when you "
                         "would rather have the failure than spend the seconds")
+    p.add_argument("--trace", default=None,
+                   help="append a detailed execution trace to this file: the curl-equivalent of "
+                        "each request, response status and headers, the browser argv and exit "
+                        "code, and the agent's prompt and reply")
     p.add_argument("--min-chars", type=int, default=200, dest="min_chars",
                    help="a response shorter than this is treated as an interstitial. The "
                         "default suits documents; lower it only if you know the page is "

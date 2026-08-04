@@ -112,6 +112,25 @@ BOT_WALL_STRONG_RE = re.compile(
 BOT_WALL_WEAK_RE = re.compile(
     r"enable javascript|captcha|access denied|cloudflare|403 forbidden", re.I)
 
+
+# Detailed execution trace: the actual request or command each layer issued, and what came back.
+# Off unless RXFETCH_TRACE names a file (browse_task sets it for its own children), because the
+# point is to be able to prove a layer ran, not to write a log on every fetch forever.
+TRACE = os.environ.get("RXFETCH_TRACE") or ""
+
+
+def trace_log(layer, event, **fields):
+    if not TRACE:
+        return
+    try:
+        rec = {"ts": time.strftime("%H:%M:%S"), "layer": layer, "event": event}
+        rec.update(fields)
+        with open(TRACE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, default=str)[:4000] + "\n")
+    except Exception:                                          # noqa: BLE001
+        pass                                                   # tracing must never break a fetch
+
+
 _DICT_LOCK = threading.Lock()
 _THREAD_LOCKS = {}
 
@@ -125,10 +144,14 @@ class Result(object):
     verbatim quotes, so it may reasonably refuse anything a browser rendered; a product lookup
     may not care. Neither can choose if the tier is invisible. string."""
 
-    __slots__ = ("text", "outcome", "detail", "via")
+    __slots__ = ("text", "outcome", "detail", "via", "attempts")
 
-    def __init__(self, text="", outcome="unreachable", detail="", via=""):
+    def __init__(self, text="", outcome="unreachable", detail="", via="", attempts=None):
         self.text, self.outcome, self.detail, self.via = text, outcome, detail, via
+        # Every layer tried, in order, with what it returned. A failure that cannot say how far
+        # it got is indistinguishable from a layer that never ran — which is exactly the doubt
+        # that made this trail necessary.
+        self.attempts = list(attempts or [])
 
     @property
     def ok(self):
@@ -277,18 +300,28 @@ def _ncbi_url(url):
 def _one_attempt(url, timeout, via='http'):
     """A single gated request. Returns (Result, retryable)."""
     host = _host_of(url)
-    req = urllib.request.Request(url, headers={
+    headers = {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/pdf,*/*",
-        "Accept-Language": "en-US,en;q=0.9"})
+        "Accept-Language": "en-US,en;q=0.9"}
+    req = urllib.request.Request(url, headers=headers)
+    # The equivalent curl, so a failure can be reproduced by hand exactly as we issued it.
+    trace_log(via, "request", method="GET", url=url, timeout=timeout,
+              curl="curl -sS -m %d %s %s" % (
+                  timeout, " ".join("-H %r" % ("%s: %s" % kv) for kv in headers.items()), url))
     try:
         with host_gate(host):
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 raw = r.read(8_000_000)
                 ctype = (r.headers.get("Content-Type") or "").lower()
+                trace_log(via, "response", status=getattr(r, "status", None), ctype=ctype,
+                          bytes=len(raw), final_url=r.geturl(),
+                          headers={k: v for k, v in list(r.headers.items())[:12]})
     except urllib.error.HTTPError as e:
         retryable = e.code in TRANSIENT_STATUS
         outcome = "unreadable" if e.code in WITHHELD_STATUS else "unreachable"
+        trace_log(via, "response", status=e.code, error=str(e)[:200], outcome=outcome,
+                  retryable=retryable)
         return Result("", outcome, "HTTP %s" % e.code), retryable
     except Exception as e:                                     # noqa: BLE001
         # A silent drop is a bot wall too. Best Buy accepts the connection and never answers a
@@ -299,6 +332,8 @@ def _one_attempt(url, timeout, via='http'):
         # stay `unreachable`: there is no server there for a browser to reach either.
         transport = type(e).__name__
         timed_out = isinstance(e, (TimeoutError, socket.timeout)) or "timeout" in transport.lower()
+        trace_log(via, "transport-error", exc=transport, detail=str(e)[:200],
+                  timed_out=timed_out)
         return Result("", "unreadable" if timed_out else "unreachable", transport), True
 
     if "pdf" in ctype or url.lower().endswith(".pdf") or raw[:5] == b"%PDF-":
@@ -328,7 +363,22 @@ def _one_attempt(url, timeout, via='http'):
 BROWSE_TASK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_task.py")
 # A render is not a request; it is a page load pulling scripts, fonts and images from the same
 # host. Give it room, but bound it - a hung browser must not hold the host lock forever.
-BROWSER_TIMEOUT_FLOOR = 180
+#
+# This budget covers the WHOLE browser ladder, not one render: headless, then headful, then the
+# model-driven agent rung. 180s was right when the tier was a single render and became a bug the
+# moment the agent joined it — on 2026-08-03 the parent killed fara 173 seconds into a run that
+# needed ~130s just for the model, and reported a bare "browser timed out" with the per-rung
+# detail lost. The child's own limit (AGENT_RUN_TIMEOUT in browse_task) is deliberately SMALLER,
+# so a slow agent dies with its own diagnostics rather than being cut off blind by the parent.
+BROWSER_TIMEOUT_FLOOR = int(os.environ.get("RXFETCH_BROWSER_TIMEOUT") or 1200)
+
+
+def _rung_name(mode):
+    """The rung's own name. `browser:` prefixes a bare local mode only — an already-namespaced
+    rung (browserbase, agent:headful) keeps its name, or the trail reads `browser:agent:headful`,
+    which is not a rung anyone can look up."""
+    mode = mode or "?"
+    return mode if (mode == "browserbase" or ":" in mode) else "browser:%s" % mode
 
 
 def _browser_attempt(url, timeout):
@@ -356,10 +406,14 @@ def _browser_attempt(url, timeout):
     # its own parent until the timeout, every single time. Name the host rather than passing a
     # bare flag so a stale value cannot disable throttling for some other site.
     env = dict(os.environ, RXFETCH_GATE_HELD=host)
+    trace_log("browser", "spawn", argv=cmd, timeout=max(timeout, BROWSER_TIMEOUT_FLOOR))
+    env["RXFETCH_TRACE"] = TRACE                               # children append to the same file
     try:
         with host_gate(host):
             proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                   timeout=max(timeout, BROWSER_TIMEOUT_FLOOR))
+        trace_log("browser", "exit", code=proc.returncode,
+                  stdout_bytes=len(proc.stdout or ""), stderr_tail=(proc.stderr or "")[-400:])
     except subprocess.TimeoutExpired:
         return Result("", "unreadable", "browser timed out")
     except Exception as exc:                                   # noqa: BLE001
@@ -374,10 +428,13 @@ def _browser_attempt(url, timeout):
                       "browser output unparseable: %s" % (proc.stderr or "")[-160:].strip())
     if not data.get("ok"):
         tried = data.get("attempts") or []
+        rungs = [{"layer": _rung_name(a.get("mode")), "result": a.get("result")}
+                 for a in tried]
         trail = "; ".join("%s: %s" % (a.get("mode"), a.get("result")) for a in tried)
         return Result("", "unreadable",
                       "browser: %s%s" % (str(data.get("error", ""))[:160],
-                                         (" [tried %s]" % trail[:240]) if trail else ""))
+                                         (" [tried %s]" % trail[:240]) if trail else ""),
+                      attempts=rungs)
 
     text = data.get("text") or ""
     mode = data.get("mode") or "?"
@@ -385,8 +442,14 @@ def _browser_attempt(url, timeout):
         return Result("", "unreadable", "browser rendered %d chars, still a shell" % len(text))
     # Name the rung, not just "browser". A caller that cannot tell a free local render from a
     # paid remote one cannot judge the cost it just incurred, which is the whole point of `via`.
-    via = "browserbase" if mode == "browserbase" else "browser:%s" % mode
-    return Result(text, "ok", "browser rendered %d chars (%s)" % (len(text), mode), via=via)
+    # A rung that already names itself (browserbase, agent:headful) keeps its own name; only a
+    # bare local mode gets the `browser:` prefix. Prefixing blindly produced `browser:agent:
+    # headful`, which is not a rung anyone can look up.
+    via = mode if (mode == "browserbase" or ":" in mode) else "browser:%s" % mode
+    rungs = [{"layer": _rung_name(a.get("mode")), "result": a.get("result")}
+             for a in (data.get("attempts") or [])]
+    return Result(text, "ok", "browser rendered %d chars (%s)" % (len(text), mode), via=via,
+                  attempts=rungs)
 
 
 def cache_path(url):
@@ -445,25 +508,44 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
     permanent, because the read path trusted any non-empty file and every later sweep round
     replayed it.
     """
+    trail = []
+
+    def _note(layer, result, **extra):
+        """Record a layer's outcome on the trail and in the trace."""
+        trail.append({"layer": layer, "result": result, **extra})
+        trace_log(layer, result, url=url, **extra)
+        return trail
+
     path = cache_path(url)
     if use_cache and os.path.exists(path) and os.path.getsize(path) > 0:
         cached = open(path, encoding="utf-8", errors="ignore").read()
         if not looks_unusable(cached):
-            return Result(cached, "ok", "cached", via="cache")
+            _note("cache", "hit", chars=len(cached), path=path)
+            return Result(cached, "ok", "cached", via="cache", attempts=trail)
+        _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
+    else:
+        _note("cache", "miss", path=path)
 
     targets = []
     api = _ncbi_url(url)
     if api:
         targets.append((api, "ncbi-api"))
+    else:
+        _note("ncbi-api", "skipped (not an NCBI url)")
     targets.append((url, "http"))
 
     last = Result("", "unreachable", "no attempt made")
     for target, via in targets:
         delay = 1.0
         for attempt in range(ATTEMPTS):
+            t0 = time.time()
             res, retryable = _one_attempt(target, timeout, via=via)
+            ms = int((time.time() - t0) * 1000)
+            _note(via, "%s: %s" % (res.outcome, res.detail), attempt=attempt + 1,
+                  ms=ms, target=target, chars=len(res.text or ""))
             if res.ok:
                 _write_cache(path, res.text)
+                res.attempts = trail
                 return res
             last = res
             if not retryable or attempt == ATTEMPTS - 1:
@@ -478,12 +560,25 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
     # which is why `unreadable` was previously a dead end that sent the work back to the user.
     if allow_browser and last.outcome == "unreadable":
         res = _browser_attempt(url, timeout)
+        # The browser rungs report their own per-mode trail; splice it in rather than collapsing
+        # them into one "browser" line, so the audit can see headless AND headful AND the agent.
+        for a in (res.attempts or []):
+            trail.append(a)
+            trace_log(a.get("layer", "browser"), a.get("result", ""), url=url)
+        if not res.attempts:
+            _note("browser", "%s: %s" % (res.outcome, res.detail))
         if res.ok:
             _write_cache(path, res.text)
+            res.attempts = trail
             return res
         # Keep the cheaper tier's diagnosis: it says what the SERVER did, which is more useful
         # than "the browser also could not read it".
         last.detail += "; browser tier: %s" % res.detail
+    elif allow_browser:
+        _note("browser", "skipped (%s is not a wall a render can fix)" % last.outcome)
+    else:
+        _note("browser", "skipped (--no-browser)")
+    last.attempts = trail
     return last
 
 

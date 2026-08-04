@@ -443,5 +443,33 @@ chk("the browser tier forces --no-browserbase", "--no-browserbase" in _seen.get(
     "(argv=%s)" % _seen.get("cmd"))
 chk("and still asks for verbatim text, not an answer", "--dump-text" in _seen.get("cmd", []))
 
+# ── rung names, and the trail that proves a layer ran ─────────────────────────────────────────
+# `via` and the attempts trail both used to prefix blindly, turning the agent rung into
+# `browser:agent:headful` — not a rung anyone can look up. And the trail itself was documented
+# but never surfaced: a caller could not tell a layer that failed from one that never ran.
+section("every layer is named and accounted for")
+chk("a bare local mode gets the browser: prefix", rxfetch._rung_name("headless") == "browser:headless")
+chk("browserbase keeps its own name", rxfetch._rung_name("browserbase") == "browserbase")
+chk("the agent rung is not double-prefixed", rxfetch._rung_name("agent:headful") == "agent:headful",
+    "(got %s)" % rxfetch._rung_name("agent:headful"))
+
+_real_attempt, _real_browser = rxfetch._one_attempt, rxfetch._browser_attempt
+rxfetch._one_attempt = lambda url, timeout, via="http": (
+    rxfetch.Result("", "unreachable", "stub 404"), False)
+rxfetch._browser_attempt = lambda url, timeout: rxfetch.Result("", "unreadable", "stub")
+try:
+    with tempfile.TemporaryDirectory() as td5:
+        rxfetch.configure(sources_dir=td5)
+        r = rxfetch.fetch("https://trail.example/doc", allow_browser=True)
+finally:
+    rxfetch._one_attempt, rxfetch._browser_attempt = _real_attempt, _real_browser
+layers = [a["layer"] for a in r.attempts]
+chk("the trail records the cache miss", "cache" in layers, "(%s)" % layers)
+chk("and that ncbi-api was skipped", "ncbi-api" in layers)
+chk("and the http attempt", "http" in layers)
+chk("and says why the browser did not run",
+    any(a["layer"] == "browser" and "skipped" in str(a["result"]) for a in r.attempts),
+    "(%s)" % r.attempts)
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
