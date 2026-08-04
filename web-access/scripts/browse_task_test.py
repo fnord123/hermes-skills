@@ -305,6 +305,33 @@ class BrowseTaskTest(unittest.TestCase):
         self.assertIn("browser mode=headless (probed)", self.__class__.log.read_text())
         self.assertEqual(json.loads(learned.read_text()).get("www.oksite.test"), "headless")
 
+    # ── a rung that returns a bot wall has NOT got the document ─────────────
+    def test_rung_failure_rejects_a_long_enough_bot_wall(self):
+        """lowes.com answers a blocked product page with 403 + 240 chars of 'Access Denied'.
+        That cleared a 200-char floor, so the ladder called it a win and never tried headful or
+        the agent — while the caller rejected the very same text as an interstitial."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bt_rf", SCRIPT)
+        bt = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bt)
+
+        wall = {"status": 403, "title": "Access Denied",
+                "text": "Access Denied\nYou don't have permission to access "
+                        "\"http://www.lowes.com/pd/x\" on this server." + " pad" * 40}
+        self.assertIsNotNone(bt.rung_failure(wall, 200),
+                             "a 403 bot wall must not count as the document")
+        self.assertIn("403", bt.rung_failure(wall, 200))
+
+        short = {"status": 200, "text": "tiny"}
+        self.assertIsNotNone(bt.rung_failure(short, 200))
+
+        errored = {"error": "net::ERR_HTTP2_PROTOCOL_ERROR"}
+        self.assertIn("HTTP2", bt.rung_failure(errored, 200))
+
+        real = {"status": 200, "title": "LG WashCombo", "text": "product details " * 200}
+        self.assertIsNone(bt.rung_failure(real, 200),
+                          "a genuine page must pass")
+
     def test_cookies_passed_through(self):
         cfile = self.tmp / "cookies.json"
         cfile.write_text('[{"name":"z","value":"97219","domain":".x.com","path":"/"}]')

@@ -491,6 +491,47 @@ def host_gate(url):
         yield
 
 
+# HTTP statuses that mean the server answered and withheld the page. A rung that returns one of
+# these has not got the document, however many characters of refusal it printed.
+BLOCKED_STATUS = {401, 403, 429, 503}
+
+
+def _rxfetch_looks_unusable(text):
+    """rxfetch's interstitial test, if it is installed. Reused rather than reimplemented: two
+    copies of "is this a document?" is exactly how the two halves come to disagree."""
+    impl = str(HERE / "rxfetch.py")
+    try:
+        spec = importlib.util.spec_from_file_location("rxfetch_judge", impl)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return bool(mod.looks_unusable(text))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def rung_failure(d, min_chars):
+    """Why this rung did not get the document, or None if it did.
+
+    Length alone is not the test. lowes.com answers a blocked product page with a 403 and a
+    240-character 'Access Denied — You don't have permission to access...' body; that cleared a
+    200-character floor, so the ladder declared success on a bot wall and never tried headful or
+    the agent. The caller then rejected the same text as an interstitial. The ladder has to
+    apply the caller's judgement, not a weaker one, or it stops climbing exactly when climbing
+    is the point.
+    """
+    if d.get("error"):
+        return d["error"]
+    status = d.get("status")
+    if status in BLOCKED_STATUS:
+        return "HTTP %s (%s)" % (status, (d.get("title") or "no title")[:40])
+    text = (d.get("text") or "").strip()
+    if len(text) < min_chars:
+        return "%d chars, under the %d floor" % (len(text), min_chars)
+    if _rxfetch_looks_unusable(text):
+        return "%d chars, but an interstitial (%s)" % (len(text), (d.get("title") or "")[:40])
+    return None
+
+
 def run_dump(url, mode, xvfb, fara_python, wait_ms, cfg=None):
     """Rendered page text via the browser, with no agent. Returns a dict."""
     # Pass the mode THROUGH. This used to read `"headful" if mode == "headful" else "headless"`,
@@ -789,10 +830,11 @@ def main():
         for m in modes:
             d = run_dump(args.start_url, m, xvfb0, fara_python, args.wait_ms, cfg)
             text = d.get("text") or ""
-            note = (d.get("error") or "%d chars" % len(text))
+            why_not = rung_failure(d, args.min_chars)
+            note = why_not or ("%d chars" % len(text))
             attempts.append({"mode": m, "result": note[:120]})
             log("DUMP %s -> %s" % (m, note[:160]))
-            if not d.get("error") and len(text.strip()) >= args.min_chars:
+            if why_not is None:
                 used = m
                 break
         if used is None and not args.no_agent:
@@ -802,9 +844,10 @@ def main():
             log("DUMP escalating to the agent rung (%s)" % amode)
             ad = run_agent_dump(args.start_url, amode, xvfb0, cfg, args.wait_ms)
             atext = ad.get("text") or ""
+            a_why_not = rung_failure(ad, args.min_chars)
             attempts.append({"mode": "agent:%s" % amode,
-                             "result": (ad.get("error") or "%d chars" % len(atext))[:120]})
-            if not ad.get("error") and len(atext.strip()) >= args.min_chars:
+                             "result": (a_why_not or "%d chars" % len(atext))[:120]})
+            if a_why_not is None:
                 d, used = ad, "agent:%s" % amode
         if used is None:
             out({"ok": False, "url": args.start_url, "mode": modes[-1] if modes else None,
