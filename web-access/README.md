@@ -45,38 +45,66 @@ choosing to, and the `--confirm` gate only means something if invoking the actor
 `fetch` tries the cheapest source that could work and stops at the first that yields usable
 text, reporting which one did in `via`:
 
-| `via` | Source | Cost |
+| # | Layer | What runs | Model | Cost |
+|---|---|---|---|---|
+| 1 | `cache` | reads a file we wrote earlier, keyed by URL hash | none | free — no network at all |
+| 2 | `ncbi-api` | one HTTPS GET to NCBI E-utilities (`efetch`). **NCBI URLs only** | none | one request, no bot wall |
+| 3 | `http` | one `urllib` GET, retried with backoff; HTML stripped to text by regex, PDFs by PyMuPDF | none | one request |
+| 4 | `browser` — **headless** | Playwright launches headless Chromium, loads the URL, returns `page.inner_text("body")` | none | ~seconds, one local process |
+| 5 | `browser` — **headful** | the same, but real Chromium on a virtual display via `xvfb-run`. Some sites 503 headless and serve headful | none | ~seconds, one local process + Xvfb |
+| 6 | *agent* — **fara** | the local browser driven in a screenshot→action loop: click, type, scroll, back, search, dismiss walls, page through results | **fara1.5-27b** (vision/computer-use) on `.222` via LiteLLM | minutes, local process + GPU |
+| 7 | `browserbase` | a **remote managed** Chromium built to defeat bot detection, reached over CDP; can run with or without the agent | none, or fara if the agent drives it | seconds **plus money** — metered third party |
+
+**What uses a model, and which one.** Layers 1–5 use **no model whatsoever** — they are plumbing
+and a browser, and what they return is the document. Only layer 6 involves a model, and it is
+always **fara**, never a general chat model. Two distinct calls, both to the same endpoint:
+
+- the **screenshot→action loop** — fara1.5-27b as a computer-use model, given a rendered image of
+  the page each round and emitting a grounded action;
+- **`read_page_answer_question`** — the agent's own action for reading a page. It calls
+  `get_page_markdown()` (real DOM → MarkItDown), truncates to 20,000 characters, and passes that
+  plus the question to **the same fara client as a plain text LLM**, returning only the answer.
+  There is no second, "regular" LLM anywhere in this skill.
+
+Layer 7 is orthogonal to the model question: browserbase is *where the browser runs*, not who
+drives it. The dump path can use a managed browser with no model at all; the agent can drive one.
+
+**Order is by cost, and `browserbase` is always last.** Layers 4, 5 and 6 all use the same free
+local browser and differ in how hard they try: 4 loads the page, 5 loads it convincingly, 6 works
+it. Spending the model is cheaper than spending money, so the agent always precedes the managed
+browser. Layer 7 is the only rung that leaves the machine and bills a metered account (free tier:
+1 browser-hour/month) — **currently switched off entirely via `BROWSE_NO_BROWSERBASE=true`.**
+
+The ordering is enforced, not merely described: `rxfetch._browser_attempt` passes
+`--no-browserbase` unconditionally, so the render tier can never jump to layer 7 on a site whose
+policy names browserbase (costco.com does). Without it, `http` would escalate straight to the
+paid remote browser past every free rung.
+
+### What each verb actually reaches today
+
+| Layer | `fetch` | `do` |
 |---|---|---|
-| # | `via` | Source | Cost |
-|---|---|---|---|
-| 1 | `cache` | text we already extracted for this URL | free, no request |
-| 2 | `ncbi-api` | **NCBI URLs only** — NCBI's own API | one request, no bot wall |
-| 3 | `http` | the page itself, retried with backoff | one request |
-| 4 | `browser` | a **local** browser renders the page, no agent | seconds, a local process |
-| 5 | *agent* | the **local** browser driven by the model, working the page | minutes, a local process + GPU |
-| 6 | `browserbase` | a **remote managed** browser built to pass bot detection | seconds, plus money — a paid third-party service |
+| 1 `cache` | yes | no |
+| 2 `ncbi-api` | yes | no |
+| 3 `http` | yes | no |
+| 4/5 headless / headful | **one shot only** — a policy lookup picks one mode, with no probe and no retry | yes, with the probe ladder |
+| 6 agent (fara) | **not wired** | yes — this is what `do` is |
+| 7 browserbase | blocked by design (see above) | last rung, currently disabled |
 
-**Order is by cost, and `browserbase` is always last.** Rungs 4 and 5 use the same free local
-browser and differ only in who drives it: 4 loads the page and reads it, 5 lets the model click,
-scroll, dismiss consent walls and page through results. Spending the model is cheaper than
-spending money, so the agent is always tried before the managed browser. `browserbase` is the
-only rung that leaves the machine and bills a metered account (free tier: 1 browser-hour/month),
-so it is the last resort — **currently switched off entirely via `BROWSE_NO_BROWSERBASE=true`.**
+Three honest gaps:
 
-This ordering is enforced, not merely documented: `rxfetch._browser_attempt` passes
-`--no-browserbase` unconditionally, so rung 4 can never jump to rung 6 on a site whose policy
-says browserbase (costco.com does). Without that, `http` would escalate straight to the paid
-remote browser and skip both free local rungs.
-
-Two honest gaps in the table as it stands:
-
-- **Rung 5 is not yet wired into `fetch`.** It is reachable only through the `do` verb. Wiring it
-  in needs a decision first: `do` returns the model's *answer*, while `fetch` promises the
-  page's verbatim text, and the citation audit depends on that difference. The likely shape is
-  to let the agent navigate and then dump text from wherever it lands, so the verbatim guarantee
-  survives — not to return its prose.
-- **Rungs 4 and 6 both report `via: browser`.** A caller cannot currently tell a free local
-  render from a paid remote one, which is exactly the distinction `via` exists to make.
+- **`fetch` does not climb.** `run_dump` resolves exactly one mode from the site policy and runs
+  it once. The headless → headful → browserbase probe ladder, with its learned per-domain cache,
+  is wired only into the agent path. Home Depot showed this: `mode=headful why=default`, a
+  155-character shell, and no escalation — where `do` would have probed, escalated, and
+  remembered. Sharing `probe_ladder` with the dump path is the missing piece.
+- **Layer 6 is not reachable from `fetch`.** Wiring it needs a decision first: `do` returns the
+  model's *answer*, while `fetch` promises verbatim page text and the rx-review citation audit
+  depends on that. The right shape is to let the agent navigate and then return
+  `get_page_markdown()` from wherever it lands — the verbatim text already exists inside
+  `read_page_answer_question` and is currently discarded in favour of the answer.
+- **Layers 4, 5 and 7 all report `via: browser`.** A caller cannot tell a free local render from
+  a paid remote one, which is precisely the distinction `via` exists to make.
 
 `ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL only
 for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not exist and
@@ -109,19 +137,17 @@ and dead-ended at the precise point rendering would have helped. 429 stays in
 `TRANSIENT_STATUS` too, so it is retried with backoff first and only escalates once the retries
 are spent; 403 is not retried, because a wall does not soften.
 
-**A connection timeout still does not escalate**, and that is a real gap rather than a decision
-to be proud of. Best Buy drops non-browser clients silently, so `fetch` sees `TimeoutError`,
-classifies it `unreachable`, and stops — even though a browser is exactly what would get in.
-The argument for leaving it is that a genuinely dead host would then cost a render on every
-attempt. Unresolved.
+**A read timeout escalates too.** A silent drop is a bot wall in its own right: Best Buy accepts
+the connection and never answers a plain client, while the same URL loads in a browser. So a
+timeout is a fact about *this* client, not about the host being gone, and a local render is a
+process and a few seconds — cheap enough to spend on the chance the site simply refuses
+non-browsers. Handled at the transport level rather than in `WITHHELD_STATUS`, since it carries
+no status code. Connection-refused and DNS failures stay `unreachable`: there is no server there
+for a browser to reach either.
 
-**The browser tier never reaches `browserbase`.** `--dump-text` resolves one mode from the site
-policy and runs it; the headless → headful → browserbase probe ladder is wired only into the
-agent path (`do`). So `fetch` effectively stops at the `browser` rung: a site whose policy
-resolves to the default `headful` but which actually needs the managed browser — Home Depot,
-verified 2026-08-03, `mode=headful why=default` returning a 155-character shell — gives up
-there. The last rung exists but `fetch` cannot climb to it, so no BrowserBase fix helps until
-either the ladder is shared with the dump path or the site gets an explicit policy rule.
+Worth knowing what this does *not* fix: Best Buy answers a real headful Chromium with
+`net::ERR_HTTP2_PROTOCOL_ERROR` — it resets the connection on TLS/H2 fingerprint before any page
+loads. Verified 2026-08-03. No local mode helps; that is what layer 7 is for.
 
 The browser tier runs `scripts/browse_task.py` with `--dump-text`, which returns the rendered
 text with no agent in the loop — deliberately, because a citation audit locates exact quotes and
