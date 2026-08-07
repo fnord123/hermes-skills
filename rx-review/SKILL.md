@@ -62,12 +62,13 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
 | `doctor` | Explains why a regimen item is still held: the answers on record, whether each item's answer matched, which manufacturer file resolved, and the gate card's state. Run this when the user says an answer "didn't work" or an item keeps re-asking. |
-| `regimen-confirm` | Records an answer to a regimen question. Closes the gate card only once nothing is outstanding, so answer each item. `--accept-all` takes the draft as written; `--unknown` is for an item they cannot place. |
+| `correct-item-slug-request "<reply>"` | The ONE verb for a regimen-review reply. `approved` (or a synonym) completes the barrier; `<n> <correction>` / `<n> drop` route by the number the user wrote. Then do exactly what it prints. |
+| `regimen-accept` | Accepts the regimen and completes the Stage 3 barrier — what an `approved` reply triggers. |
 | `labs-confirm` | Records that the user confirmed the labs and closes the gate card. `--ignore "A, B"` leaves markers unresearched, and adds to anything already excluded; `--drop` starts that list over. |
 | `regimen-reject` | **Halts the review.** For an inventory that is wrong in a way answering cannot fix. Needs `--reason`. |
 | `labs-reject` | **Halts the review.** For a transcription the user says is wrong. Needs `--reason`. |
-| `verify-labs` | Gets the full transcription picture for the "CONFIRM YOUR LABS" card: markers read, out-of-range values, anything unverified. |
-| `confirm --json` | Lists the items the "Confirm N item(s) before research" card is waiting on, with what intake already knows about each. |
+| `trends` | Markers moving consistently in one direction over their last three or more draws. |
+| `labs-accept` | Confirms the lab transcription and closes the labs-complete gate. |
 
 Those nine are yours. Every other verb the script accepts belongs to the pipeline — it runs
 them itself, on its own schedule.
@@ -159,25 +160,13 @@ notification is only a one-line signal — **read the card for the detail**:
     python3 ~/.hermes/rx-review/rx.py status
     hermes kanban --board rx-review show <card-id>
 
-### "CONFIRM YOUR LABS"
+### "CONFIRM YOUR LABS" / "Labs review"
 
-Run `rx.py verify-labs` to get the full picture, then tell the user:
-
-- how many markers were read, from how many PDFs
-- **every out-of-range marker, with its value and reference range** — quote them, do not
-  summarize as "several are high"
-- anything it could not verify against the source PDF
-
-Send this as normal chat messages. Long output is fine — your messages are split
-automatically; it is only the card notifications that are one-liners.
-
-Then ask whether that matches their results (`clarify`: "yes" / "something's wrong"). The
-machine already checked every value appears verbatim in the PDF; what it cannot catch is a
-correct number attached to the wrong marker. That is what their eyes are for.
+The card reports how many out-of-range markers were found. Show those to the user so they can confirm. Then ask whether that matches their results.
 
 If they confirm, run:
 
-    python3 ~/.hermes/rx-review/rx.py labs-confirm
+    python3 ~/.hermes/rx-review/rx.py labs-accept
 
 That records the answer and closes the card. Do NOT unblock this card instead - unblocking
 re-runs it, the card asks for confirmation again, and Hermes treats the second block as a
@@ -185,11 +174,23 @@ loop and moves the card to triage, where it satisfies nothing and the research s
 forever.
 
 **If they confirm but do not want some markers researched** — "these are right, but don't
-bother with vitamin D" — put that on the same command; an exclusion is part of a confirmation:
+bother with vitamin D" — use `--ignore` on the same command; an exclusion is part of a confirmation:
 
-    python3 ~/.hermes/rx-review/rx.py labs-confirm --ignore "VITAMIN D, FERRITIN"
+    python3 ~/.hermes/rx-review/rx.py labs-accept --ignore "VITAMIN D, FERRITIN"
 
-Use the names exactly as the card listed them. A name that matches nothing refuses the whole
+**If they say the transcription is WRONG** — a value misread, a marker that is not theirs — that
+is a rejection, and it ends the review:
+
+    python3 ~/.hermes/rx-review/rx.py labs-reject --reason "THEIR EXACT WORDS"
+
+**If the transcription is wrong** — a value misread, a marker that is not theirs — that is a rejection:
+
+    python3 ~/.hermes/rx-review/rx.py labs-reject --reason "THEIR EXACT WORDS"
+
+Do not offer to re-transcribe. They saw one bad row, not the set of bad rows, and re-running the
+same cards over the same PDFs asks the model that misread the document to check its own reading.
+
+Use the names exactly as the card listed them for `--ignore`. A name that matches nothing refuses the whole
 command and names the closest matches — nothing is recorded, so fix the name and re-run. Saying
 "also skip ferritin" later ADDS to the list; `--drop` clears it and starts over. Excluded markers
 stay in the report and in `labs.md`; only their research cards are skipped.
@@ -208,69 +209,40 @@ corrected upload starts a new one.
 Never use `--ignore` for a wrong value. It means "this number is right, don't research it", and
 the value still reaches the brief — so excluding a wrong value publishes it.
 
-### "Confirm N item(s) before research"
+### "Regimen review" — confirm the whole regimen
 
-Run `rx.py confirm --json`. Each entry carries what you need for a real question:
+Stage 3 posts the WHOLE regimen as one numbered list to chat and blocks, waiting for the user:
 
-- `item`, `why` — what is missing
-- `note` — what intake found ambiguous
-- `known` — brand, dose, unit, serving size, times taken
-- `lookup` — the manufacturer's Supplement Facts if found: `serving_size`, panel `excerpt`,
-  and `ambiguous` / `not_found`
+    Regimen review — reply `approved` to accept, or `<n> <correction>` or `<n> drop`:
+      1. Thorne Super EPA — EPA 425mg, DHA 270mg — 1 pill — morning — high
+      2. Vitamin C — ascorbic acid 100mg — 1 tablet — noon — low
 
-**Spell it out.** Never ask a bare "X needs confirmation" — they cannot answer that without
-hunting for the bottle. State what is known, state what the manufacturer says, ask the one
-undetermined thing:
+When the user replies, pass their reply VERBATIM to ONE verb and do exactly what it prints:
 
-- panel found → *"Thorne Super EPA: the manufacturer lists EPA 425 mg + DHA 270 mg per
-  serving, and a serving is 2 gelcaps — your 1 pill would be half that. Is that your product,
-  and do you take 1 or 2?"*
-- `ambiguous` → name the variants, ask which they have
-- name looks misspelled → *"You wrote Prevastatin 20 mg at 9pm — did you mean Pravastatin?"*
-- implausible dose → give both their number and the plausible one, ask which
-- nothing found → ask for the amount per serving from the label
+    python3 ~/.hermes/rx-review/rx.py correct-item-slug-request "<their reply verbatim>"
 
-Record each answer with:
+That single command handles every case:
 
-    python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "PRODUCT" --answer "THEIR EXACT WORDS"
+- **`approved`** (or `yes` / `looks good` / `ok`) → the script completes the barrier and releases
+  Stage 4. You do nothing else.
+- **`<n> <correction>`** — e.g. `2 Now Foods Vitamin C, 1000mg, evening` — it prints the one line to
+  fix; merge the correction into that line and run the `correct-item-slug-response` line it prints;
+  it re-posts the updated review.
+- **`<n> drop`** → it drops that item and re-posts the review.
 
-The gate notification already prints this command with `--item` filled in for each product — copy
-that line and fill in `--answer` from their reply, rather than typing the product name yourself.
+Do NOT read the card body, do NOT re-run `gather-regimen-slugs`, and do NOT unblock or
+`kanban_complete` the card yourself — the script owns the completion. Unblocking re-asks the same
+question and lands the card in triage.
 
-**The gate closes only when nothing is outstanding**, so answer every item — one command each.
-If the user cannot place an item at all ("that bottle is long gone"), record that rather than
-guessing:
+Copy their words verbatim rather than paraphrasing. "Super EPA (regular)" and "Super EPA
+(NSF Certified for Sport)" are two products; a correction joining both names by a slash names
+neither.
 
-    python3 ~/.hermes/rx-review/rx.py regimen-confirm --item "PRODUCT" --unknown
-
-That drops the item from the review: it gets no research card, and the brief says it was excluded
-for an unknown dose. A substance with no dose cannot be researched — every question about it is
-dose-dependent, so answering against a guess produces a confident brief about a regimen they do
-not have.
-
-If the inventory is wrong in a way answering cannot fix — the photo pass read the wrong bottles,
-half the regimen is missing — that is a rejection, and it ends the review the same way
+If the regimen itself is wrong in a way answering cannot fix — the reading captured the wrong
+products, half the regimen is missing — that is a rejection, and it ends the review the same way
 `labs-reject` does:
 
     python3 ~/.hermes/rx-review/rx.py regimen-reject --reason "THEIR EXACT WORDS"
-
-**Run it before you reply.** Recording the answer is what makes it stick; a reply that is only
-spoken back in chat does not. Say "recorded" only after the command has printed its confirmation,
-and quote what it said. If the user's answer arrives in a session that has lost the earlier
-context — an overnight reset, a new thread — run `python3 ~/.hermes/rx-review/rx.py confirm` first
-to see what is outstanding, then record against that.
-
-Copy their words verbatim rather than paraphrasing. "Super EPA (regular)" and "Super EPA
-(NSF Certified for Sport)" are two products; answering with both names joined by a slash records
-an answer that names neither.
-
-If they genuinely do not know a value, use `--accept-all` and tell them it will be researched
-with the gap noted.
-
-That records the answer and closes the card, which is what the pipeline is waiting on. Do NOT
-unblock this card: unblocking re-runs it, the card asks the same question again, and Hermes
-treats the second block as a loop and moves it to triage - where it satisfies nothing and the
-research stage waits forever.
 
 ### "Start the research stage" is blocked
 
