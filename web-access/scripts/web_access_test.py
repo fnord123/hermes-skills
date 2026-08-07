@@ -542,5 +542,38 @@ chk("and says why the browser did not run",
     any(a["layer"] == "browser" and "skipped" in str(a["result"]) for a in r.attempts),
     "(%s)" % r.attempts)
 
+section("a not-found fetch steers back to search, not another guessed URL")
+# The failure log showed every real fetch miss was a CONSTRUCTED url — a 404 on a real host or a
+# URLError on an invented domain. The `next` hint now distinguishes those and points to search, so
+# a worker recovers with a real result instead of guessing another path.
+import io as _iof
+import json as _jsonf
+import types as _typesf
+import contextlib as _clibf
+_saved_fetch = _wa.rxfetch.fetch
+
+
+def _fetch_next(detail):
+    _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("", "unreachable", detail)
+    ns = _typesf.SimpleNamespace(url="https://x/y", max_chars=1000, timeout=5,
+                                 no_browser=True, trace=None, min_chars=200)
+    buf = _iof.StringIO()
+    with _clibf.suppress(SystemExit), _clibf.redirect_stdout(buf):
+        _wa.cmd_fetch(ns)
+    return (_jsonf.loads(buf.getvalue()).get("next") or "")
+
+
+try:
+    _n404 = _fetch_next("HTTP 404")
+    chk("a 404 (real host, missing path) points to search", "Search" in _n404 and "path" in _n404,
+        "(%s)" % _n404)
+    _ndns = _fetch_next("URLError")
+    chk("a DNS failure (invented domain) points to search", "resolve" in _ndns and "Search" in _ndns,
+        "(%s)" % _ndns)
+    _nto = _fetch_next("TimeoutError")
+    chk("a generic unreachable keeps the reach caveat", "reach" in _nto, "(%s)" % _nto)
+finally:
+    _wa.rxfetch.fetch = _saved_fetch
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

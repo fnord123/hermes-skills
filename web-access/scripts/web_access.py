@@ -324,9 +324,20 @@ def cmd_fetch(args):
                         "--start-url. Otherwise report that you could not read it, and name "
                         "the URL.")
     elif r.outcome == "unreachable":
-        body["next"] = ("no usable response. This is a fact about our reach, NOT evidence "
-                        "about the page's content — never report it as though the page said "
-                        "nothing.")
+        detail = r.detail or ""
+        if detail.startswith("HTTP 4"):
+            # 404/410: the host answered but has no page at this path — almost always a URL that
+            # was constructed rather than taken from a search result. Steer back to search.
+            body["next"] = ("the site has no page at this path. Search for the page and fetch a "
+                            "`url` from the results.")
+        elif "URLError" in detail or "gaierror" in detail:
+            # The domain did not resolve — usually an invented host. Steer back to search.
+            body["next"] = ("that domain did not resolve. Search for the page and fetch a `url` "
+                            "from the results.")
+        else:
+            body["next"] = ("no usable response. This is a fact about our reach, NOT evidence "
+                            "about the page's content — never report it as though the page said "
+                            "nothing.")
     return out(body)
 
 
