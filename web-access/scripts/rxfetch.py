@@ -482,7 +482,7 @@ def _write_cache(path, text):
         raise
 
 
-def fetch(url, timeout=45, use_cache=True, allow_browser=False):
+def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
     """Usable text for a URL, or a Result saying why not.
 
     Tiers, cheapest first, stopping at the first that yields usable text:
@@ -580,6 +580,56 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
         _note("browser", "skipped (--no-browser)")
     last.attempts = trail
     return last
+
+
+# ── per-card fetch metrics ───────────────────────────────────────────────────
+# Every fetch records ONE event: which card asked, the URL and host, and the outcome
+# (cache_hit / fetched / failed). Two sinks: a local JSONL (reliable — the source for
+# "what did card X fetch") and a best-effort push to Loki for the Grafana dashboard.
+# Neither can raise: metrics must never break a fetch.
+_FETCH_EVENTS_PATH = os.path.expanduser(
+    os.environ.get("RX_FETCH_EVENTS", "~/.hermes/rx-review/logs/fetch-events.jsonl"))
+_LOKI_URL = os.environ.get("RX_LOKI_URL", "http://192.168.1.226:3100/loki/api/v1/push")
+
+
+def _push_loki(ev):
+    import urllib.request                                       # noqa: PLC0415
+    labels = {"job": "rx-fetch", "host": ev["host"] or "unknown", "outcome": ev["outcome"]}
+    body = json.dumps({"streams": [{"stream": labels,
+                                    "values": [[str(ev["ts"] * 1_000_000), json.dumps(ev)]]}]})
+    req = urllib.request.Request(_LOKI_URL, data=body.encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=1.5).read()
+
+
+def _emit_fetch_event(url, r, ms=None):
+    try:
+        outcome = ("cache_hit" if r.via == "cache"
+                   else "fetched" if r.outcome == "ok" else "failed")
+        ev = {"ts": int(time.time() * 1000),
+              "card": os.environ.get("HERMES_KANBAN_TASK", ""),
+              "url": url, "host": _host_of(url), "outcome": outcome, "via": r.via or "",
+              "bytes": len(r.text or ""), "ms": ms, "detail": (r.detail or "")[:200]}
+    except Exception:                                          # noqa: BLE001
+        return
+    try:
+        os.makedirs(os.path.dirname(_FETCH_EVENTS_PATH), exist_ok=True)
+        with open(_FETCH_EVENTS_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(ev) + "\n")
+    except Exception:                                          # noqa: BLE001
+        pass
+    try:
+        _push_loki(ev)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def fetch(url, timeout=45, use_cache=True, allow_browser=False):
+    """Fetch a URL and record ONE per-card metrics event; see `_fetch_impl` for the tiers."""
+    t0 = time.time()
+    r = _fetch_impl(url, timeout=timeout, use_cache=use_cache, allow_browser=allow_browser)
+    _emit_fetch_event(url, r, ms=int((time.time() - t0) * 1000))
+    return r
 
 
 def fetch_text(url, timeout=45):
