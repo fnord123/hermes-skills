@@ -188,6 +188,8 @@ def _push_search_loki(ev):
 
 
 def _emit_search_event(query, scope, outcome, count, ms):
+    if not rxfetch._metrics_enabled():
+        return
     try:
         ev = {"ts": int(time.time() * 1000), "kind": "search",
               "card": os.environ.get("HERMES_KANBAN_TASK", ""),
@@ -252,6 +254,8 @@ def run_search(query, scope, timeout=30):
 
 
 def cmd_search(args):
+    if getattr(args, "no_metrics", False):
+        os.environ["RX_METRICS"] = "0"
     if not SEARXNG_URL:
         return out({"ok": False, "error": "SEARXNG_URL is not set for this profile. Search is "
                                           "not available; do not fall back to another engine."})
@@ -300,6 +304,8 @@ def cmd_search(args):
 
 
 def cmd_fetch(args):
+    if getattr(args, "no_metrics", False):
+        os.environ["RX_METRICS"] = "0"
     if args.trace:
         os.environ["RXFETCH_TRACE"] = args.trace
         rxfetch.TRACE = args.trace
@@ -376,6 +382,9 @@ def main():
                         "for manufacturer and retailer pages. `web` uses the default mix.")
     p.add_argument("--max", type=int, default=DEFAULT_MAX)
     p.add_argument("--timeout", type=int, default=30)
+    p.add_argument("--no-metrics", action="store_true", dest="no_metrics",
+                   help="do not record this search in the metrics log/dashboard (for tests and "
+                        "one-off checks, so fixture queries do not skew the stats)")
     p.set_defaults(fn=cmd_search)
 
     p = sub.add_parser("fetch", help="read one page's text, rate-limited and retried")
@@ -394,6 +403,9 @@ def main():
                    help="a response shorter than this is treated as an interstitial. The "
                         "default suits documents; lower it only if you know the page is "
                         "genuinely short, and never to make a bot wall look like success")
+    p.add_argument("--no-metrics", action="store_true", dest="no_metrics",
+                   help="do not record this fetch in the metrics log/dashboard (for tests and "
+                        "one-off checks, so fixture fetches do not skew the stats)")
     p.set_defaults(fn=cmd_fetch)
 
     p = sub.add_parser("do", help="carry out a multi-step task on a site")

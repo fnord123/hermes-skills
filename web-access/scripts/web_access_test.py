@@ -13,6 +13,11 @@ import os
 import sys
 import tempfile
 
+# Fixture fetches (tier.example, wall.example, …) go through rxfetch.fetch, which emits a metrics
+# event. Off by default here so the suite does not pollute the real fetch/search dashboard; the one
+# test that verifies emission re-enables it locally against a temp events file.
+os.environ["RX_METRICS"] = "0"
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rxfetch                                                  # noqa: E402
 
@@ -161,6 +166,7 @@ _wa._SEARCH_CACHE = os.path.join(_tmp, "searches")
 _saved_events = rxfetch._FETCH_EVENTS_PATH
 rxfetch._FETCH_EVENTS_PATH = os.path.join(_tmp, "events.jsonl")
 _wa._push_search_loki = lambda ev: None            # no network sink in tests
+os.environ["RX_METRICS"] = "1"                      # this test VERIFIES emission — to the temp file
 
 _ncalls = {"n": 0}
 
@@ -218,6 +224,7 @@ try:
         "a transient empty must not be pinned for 24h")
 finally:
     rxfetch._FETCH_EVENTS_PATH = _saved_events
+    os.environ["RX_METRICS"] = "0"                  # back off for the rest of the suite
 
 
 # ── the outcome taxonomy ──────────────────────────────────────────────────────────────────────

@@ -592,6 +592,12 @@ _FETCH_EVENTS_PATH = os.path.expanduser(
 _LOKI_URL = os.environ.get("RX_LOKI_URL", "http://192.168.1.226:3100/loki/api/v1/push")
 
 
+def _metrics_enabled():
+    """False when RX_METRICS=0 — the opt-out tests set so their fixture fetches (tier.example,
+    wall.example, …) do not land in the real events log and skew the fetch/search dashboard."""
+    return os.environ.get("RX_METRICS", "1") != "0"
+
+
 def _push_loki(ev):
     import urllib.request                                       # noqa: PLC0415
     labels = {"job": "rx-fetch", "host": ev["host"] or "unknown", "outcome": ev["outcome"]}
@@ -603,6 +609,8 @@ def _push_loki(ev):
 
 
 def _emit_fetch_event(url, r, ms=None):
+    if not _metrics_enabled():
+        return
     try:
         outcome = ("cache_hit" if r.via == "cache"
                    else "fetched" if r.outcome == "ok" else "failed")
