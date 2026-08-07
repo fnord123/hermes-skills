@@ -149,6 +149,77 @@ chk("the vocabulary is the caller's, not the engine's",
     "callers say what they want, not which SearXNG category or engine serves it")
 
 
+section("a repeated search is served from a 24h cache, and every search emits one event")
+import io as _io
+import json as _json
+import time as _time
+import types as _types
+import contextlib as _clib
+
+_tmp = tempfile.mkdtemp()
+_wa._SEARCH_CACHE = os.path.join(_tmp, "searches")
+_saved_events = rxfetch._FETCH_EVENTS_PATH
+rxfetch._FETCH_EVENTS_PATH = os.path.join(_tmp, "events.jsonl")
+_wa._push_search_loki = lambda ev: None            # no network sink in tests
+
+_ncalls = {"n": 0}
+
+
+def _one_result(query, scope, timeout=30):
+    _ncalls["n"] += 1
+    return ({"results": [{"title": "T", "url": "http://x/y", "content": "snip",
+                          "engine": "brave api"}]}, False)
+
+
+def _run_search_cmd(query="magnesium glycinate dose", scope="products", mx=10):
+    ns = _types.SimpleNamespace(query=query, scope=scope, max=mx, timeout=30)
+    buf = _io.StringIO()
+    with _clib.suppress(SystemExit), _clib.redirect_stdout(buf):
+        _wa.cmd_search(ns)
+    return _json.loads(buf.getvalue())
+
+
+try:
+    _wa.run_search = _one_result
+    _r1 = _run_search_cmd()
+    chk("the first search asks the backend and is not cached",
+        _ncalls["n"] == 1 and _r1["cached"] is False and _r1["count"] == 1)
+    _r2 = _run_search_cmd()
+    chk("an identical query+scope is served from cache, backend untouched",
+        _ncalls["n"] == 1 and _r2["cached"] is True and _r2["results"][0]["url"] == "http://x/y")
+    _run_search_cmd(scope="literature")
+    chk("a different scope is a different cache entry", _ncalls["n"] == 2,
+        "the key is query AND scope")
+
+    _events = [_json.loads(l) for l in open(rxfetch._FETCH_EVENTS_PATH, encoding="utf-8")]
+    chk("every search emits exactly one event", len(_events) == 3, "(%d)" % len(_events))
+    chk("the first event is a live search, the second a cache hit",
+        _events[0]["outcome"] == "searched" and _events[1]["outcome"] == "cache_hit")
+    chk("a search event names the query, scope, count and kind",
+        _events[0]["kind"] == "search" and _events[0]["scope"] == "products"
+        and _events[0]["count"] == 1)
+
+    # TTL: an entry older than _SEARCH_TTL is ignored; a fresh one is served.
+    _cp = _wa._search_cache_path("stale q", "web")
+    _wa._write_search_cache(_cp, {"ts": _time.time() - _wa._SEARCH_TTL - 10,
+                                  "results": [{"url": "u"}]})
+    chk("a cache entry past 24h is not served", _wa._read_search_cache(_cp) is None)
+    _wa._write_search_cache(_cp, {"ts": _time.time(), "results": [{"url": "u"}]})
+    chk("a fresh cache entry is served", _wa._read_search_cache(_cp) is not None)
+
+    # An empty result set is a fact, not cached: the next identical query re-asks.
+    _ncalls["n"] = 0
+    _wa.run_search = lambda q, s, t=30: (_ncalls.__setitem__("n", _ncalls["n"] + 1)
+                                         or ({"results": []}, False))
+    _re = _run_search_cmd(query="zzz no such thing", scope="web")
+    chk("an empty result set is ok=True with count 0", _re["ok"] is True and _re["count"] == 0)
+    _run_search_cmd(query="zzz no such thing", scope="web")
+    chk("an empty search is not cached, so it is re-asked", _ncalls["n"] == 2,
+        "a transient empty must not be pinned for 24h")
+finally:
+    rxfetch._FETCH_EVENTS_PATH = _saved_events
+
+
 # ── the outcome taxonomy ──────────────────────────────────────────────────────────────────────
 # A caller that cannot tell "the server refused us" from "we never reached it" writes "the
 # source does not support this claim" when the truth is "we were throttled". One citation audit

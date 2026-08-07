@@ -41,9 +41,11 @@ and only with --confirm.
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 
@@ -129,6 +131,82 @@ DEFAULT_MAX = 10
 DEFAULT_MAX_CHARS = 20000
 
 
+# ── search cache (24h) ───────────────────────────────────────────────────────
+# A search is a lookup, not evidence: the same query recurs constantly (every review researches
+# the same substances), the backend is rate-limited, and a result set is cheap to keep. So a
+# query+scope is answered from disk for 24h before we ask SearXNG again. Distinct from the fetch
+# text cache, which is content-addressed and permanent — a page's text does not go stale the way
+# a ranked result list does, so this one carries a TTL. Lives under the same web-access cache
+# tree, so `rx.py reset` keeps it by default (only --clear-web-cache drops it).
+_SEARCH_CACHE = os.path.expanduser(
+    os.environ.get("RX_SEARCH_CACHE", "~/.hermes/cache/web-access/searches"))
+_SEARCH_TTL = int(os.environ.get("RX_SEARCH_TTL", "86400"))     # seconds; 24h
+
+
+def _search_cache_path(query, scope):
+    key = hashlib.sha1(("%s\x1f%s" % (scope, query)).encode()).hexdigest()[:16]
+    return os.path.join(_SEARCH_CACHE, key + ".json")
+
+
+def _read_search_cache(path):
+    """The cached result set for this query+scope if one exists and is younger than the TTL."""
+    try:
+        if os.path.exists(path):
+            obj = json.load(open(path, encoding="utf-8"))
+            if time.time() - obj.get("ts", 0) < _SEARCH_TTL:
+                return obj
+    except Exception:                                          # noqa: BLE001
+        pass
+    return None
+
+
+def _write_search_cache(path, obj):
+    """Publish the result set atomically (temp file then rename), never raising."""
+    try:
+        os.makedirs(_SEARCH_CACHE, exist_ok=True)
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(obj, fh)
+        os.replace(tmp, path)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+# ── per-card search metrics ──────────────────────────────────────────────────
+# Mirrors rxfetch's fetch events so a search shows up wherever a fetch does: ONE event per
+# search — which card asked, the query and scope, and the outcome (cache_hit / searched / failed)
+# — appended to the shared events JSONL and pushed best-effort to Loki under job="rx-search".
+# Never raises: metrics must not break a search.
+def _push_search_loki(ev):
+    import urllib.request                                       # noqa: PLC0415
+    labels = {"job": "rx-search", "scope": ev["scope"] or "web", "outcome": ev["outcome"]}
+    body = json.dumps({"streams": [{"stream": labels,
+                                    "values": [[str(ev["ts"] * 1_000_000), json.dumps(ev)]]}]})
+    req = urllib.request.Request(rxfetch._LOKI_URL, data=body.encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=1.5).read()
+
+
+def _emit_search_event(query, scope, outcome, count, ms):
+    try:
+        ev = {"ts": int(time.time() * 1000), "kind": "search",
+              "card": os.environ.get("HERMES_KANBAN_TASK", ""),
+              "query": (query or "")[:200], "scope": scope or "web",
+              "outcome": outcome, "count": count, "ms": ms}
+    except Exception:                                          # noqa: BLE001
+        return
+    try:
+        os.makedirs(os.path.dirname(rxfetch._FETCH_EVENTS_PATH), exist_ok=True)
+        with open(rxfetch._FETCH_EVENTS_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(ev) + "\n")
+    except Exception:                                          # noqa: BLE001
+        pass
+    try:
+        _push_search_loki(ev)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def out(obj):
     """Print the one JSON object and exit: 0 on success, 1 on failure."""
     print(json.dumps(obj, indent=2))
@@ -177,22 +255,46 @@ def cmd_search(args):
     if not SEARXNG_URL:
         return out({"ok": False, "error": "SEARXNG_URL is not set for this profile. Search is "
                                           "not available; do not fall back to another engine."})
+    t0 = time.time()
+
+    # A cache hit answers from disk without touching the backend. The full result set is cached
+    # (not the --max slice), so a later call with a larger --max still hits.
+    cpath = _search_cache_path(args.query, args.scope)
+    hit = _read_search_cache(cpath)
+    if hit is not None:
+        results = (hit.get("results") or [])[:args.max]
+        _emit_search_event(args.query, args.scope, "cache_hit", len(results),
+                           int((time.time() - t0) * 1000))
+        return out({"ok": True, "query": args.query, "scope": args.scope,
+                    "widened": hit.get("widened", False), "cached": True,
+                    "count": len(results), "results": results,
+                    "note": ("no results — try different terms" if not results else
+                             "read a page with `fetch` before drawing a conclusion from it")})
+
     try:
         data, widened = run_search(args.query, args.scope, args.timeout)
     except Exception as exc:                                   # noqa: BLE001
+        _emit_search_event(args.query, args.scope, "failed", 0, int((time.time() - t0) * 1000))
         return out({"ok": False, "query": args.query,
                     "error": "search backend unreachable: %s: %s" % (type(exc).__name__, exc)})
 
-    results = []
-    for r in (data.get("results") or [])[:args.max]:
-        results.append({"title": (r.get("title") or "").strip(),
-                        "url": r.get("url") or "",
-                        "snippet": (r.get("content") or "").strip()[:400],
-                        "engine": r.get("engine") or ""})
+    everything = [{"title": (r.get("title") or "").strip(),
+                   "url": r.get("url") or "",
+                   "snippet": (r.get("content") or "").strip()[:400],
+                   "engine": r.get("engine") or ""}
+                  for r in (data.get("results") or [])]
+    # Cache only a non-empty result set: an empty one is either a genuine miss (cheap to re-ask)
+    # or a transient backend hiccup, and pinning either for 24h is the wrong trade.
+    if everything:
+        _write_search_cache(cpath, {"ts": time.time(), "query": args.query, "scope": args.scope,
+                                    "widened": widened, "results": everything})
+    results = everything[:args.max]
+    _emit_search_event(args.query, args.scope, "searched", len(results),
+                       int((time.time() - t0) * 1000))
     # An empty result set is a FACT, not an error: say so plainly rather than leaving the
     # caller to infer that the backend broke and try to work around it.
     return out({"ok": True, "query": args.query, "scope": args.scope, "widened": widened,
-                "count": len(results), "results": results,
+                "cached": False, "count": len(results), "results": results,
                 "note": ("no results — try different terms" if not results else
                          "read a page with `fetch` before drawing a conclusion from it")})
 
