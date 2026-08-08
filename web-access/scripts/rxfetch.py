@@ -452,8 +452,83 @@ def _browser_attempt(url, timeout):
                   attempts=rungs)
 
 
+# A dead URL is remembered so it is not re-fetched by every card that guesses it. A 404/410 is
+# durable (the page does not exist); a 429/5xx/DNS failure is transient and forgotten quickly so a
+# real outage or blip is retried. An `unreadable` (403/401 withheld) is NEVER remembered — that is
+# the one failure the browser tier can fix, and a later caller may opt into it.
+NEG_TTL_PERMANENT = int(os.environ.get("RX_NEG_TTL_PERMANENT", 7 * 24 * 3600))
+NEG_TTL_TRANSIENT = int(os.environ.get("RX_NEG_TTL_TRANSIENT", 3600))
+
+
+def _norm_url(url):
+    """The cache identity of a URL: same resource, same key. Lowercases scheme and host, drops a
+    leading `www.` and the fragment, and strips a trailing slash — so `https://WWW.Thorne.com/x/`
+    and `https://thorne.com/x#a` share one cache entry. Path case and query are preserved; they can
+    be significant. A URL that will not parse is returned unchanged rather than dropped."""
+    try:
+        from urllib.parse import urlsplit, urlunsplit                # noqa: PLC0415
+        p = urlsplit(url.strip())
+        if not p.scheme or not p.hostname:
+            return url.strip()
+        host = p.hostname.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        netloc = host + (":%d" % p.port if p.port else "")
+        return urlunsplit((p.scheme.lower(), netloc, p.path.rstrip("/") or "/", p.query, ""))
+    except Exception:                                                # noqa: BLE001
+        return url
+
+
+def _url_hash(url):
+    return hashlib.sha1(_norm_url(url).encode()).hexdigest()[:16]
+
+
 def cache_path(url):
+    return os.path.join(SOURCES, _url_hash(url) + ".txt")
+
+
+def _legacy_cache_path(url):
+    """The pre-normalisation key. Read-only, so a cache written before URL normalisation still
+    hits instead of being re-fetched; new writes always use the normalised `cache_path`."""
     return os.path.join(SOURCES, hashlib.sha1(url.encode()).hexdigest()[:16] + ".txt")
+
+
+def _neg_path(url):
+    return os.path.join(SOURCES, _url_hash(url) + ".neg.json")
+
+
+def _read_negative(url):
+    """A remembered failure for this URL that has not yet expired, or None."""
+    try:
+        d = json.load(open(_neg_path(url), encoding="utf-8"))
+        if time.time() - d["ts"] <= d.get("ttl", NEG_TTL_TRANSIENT):
+            return d
+    except Exception:                                                # noqa: BLE001
+        pass
+    return None
+
+
+def _write_negative(url, r):
+    """Remember a hard failure so it is not retried until its TTL lapses. A success or an
+    `unreadable` (browser-fixable) result is never written."""
+    if r.ok or r.outcome == "unreadable":
+        return
+    permanent = bool(re.search(r"HTTP\s+(?:404|410)\b", r.detail or ""))
+    ev = {"ts": time.time(), "outcome": r.outcome, "detail": (r.detail or "")[:200],
+          "ttl": NEG_TTL_PERMANENT if permanent else NEG_TTL_TRANSIENT}
+    try:
+        os.makedirs(SOURCES, exist_ok=True)
+        tmp = "%s.%d.tmp" % (_neg_path(url), os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(ev, fh)
+        os.replace(tmp, _neg_path(url))
+    except Exception:                                                # noqa: BLE001
+        pass
+
+
+def _purge_negative(url):
+    with contextlib.suppress(OSError):
+        os.remove(_neg_path(url))
 
 
 def _write_cache(path, text):
@@ -517,14 +592,27 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
         return trail
 
     path = cache_path(url)
-    if use_cache and os.path.exists(path) and os.path.getsize(path) > 0:
-        cached = open(path, encoding="utf-8", errors="ignore").read()
-        if not looks_unusable(cached):
-            _note("cache", "hit", chars=len(cached), path=path)
-            return Result(cached, "ok", "cached", via="cache", attempts=trail)
-        _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
-    else:
+    if use_cache:
+        # The normalised key first, then the pre-normalisation key, so a corpus written before URL
+        # normalisation still hits rather than being re-fetched.
+        for cand in (path, _legacy_cache_path(url)):
+            if os.path.exists(cand) and os.path.getsize(cand) > 0:
+                cached = open(cand, encoding="utf-8", errors="ignore").read()
+                if not looks_unusable(cached):
+                    _note("cache", "hit", chars=len(cached), path=cand)
+                    return Result(cached, "ok", "cached", via="cache", attempts=trail)
+                _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
         _note("cache", "miss", path=path)
+        neg = _read_negative(url)
+        if neg:
+            # A URL known to be dead is not re-fetched by every card that guesses it. This is the
+            # one short-circuit before the host gate — the whole point is to make no request.
+            _note("neg-cache", "hit (%s)" % (neg.get("detail") or "recent failure"))
+            return Result("", neg.get("outcome") or "unreachable",
+                          ((neg.get("detail") or "") + " (cached failure)").strip(),
+                          via="neg-cache", attempts=trail)
+    else:
+        _note("cache", "miss (bypassed)", path=path)
 
     targets = []
     api = _ncbi_url(url)
@@ -545,6 +633,7 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
                   ms=ms, target=target, chars=len(res.text or ""))
             if res.ok:
                 _write_cache(path, res.text)
+                _purge_negative(url)
                 res.attempts = trail
                 return res
             last = res
@@ -569,6 +658,7 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
             _note("browser", "%s: %s" % (res.outcome, res.detail))
         if res.ok:
             _write_cache(path, res.text)
+            _purge_negative(url)
             res.attempts = trail
             return res
         # Keep the cheaper tier's diagnosis: it says what the SERVER did, which is more useful
@@ -579,6 +669,9 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
     else:
         _note("browser", "skipped (--no-browser)")
     last.attempts = trail
+    if use_cache:
+        # Remember the failure so the next card that guesses this URL does not repeat the work.
+        _write_negative(url, last)
     return last
 
 

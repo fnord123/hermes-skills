@@ -309,6 +309,60 @@ with tempfile.TemporaryDirectory() as td:
         rxfetch.looks_unusable(open(p).read()))
 
 
+# ── URL normalisation and the negative cache ────────────────────────────────────────────────────
+section("variant URLs share one cache key; a dead URL is remembered, not re-fetched by every card")
+# The research fan-out invents many URLs for one product (www vs not, thorne.com vs thorneresearch.com,
+# /products/ vs /mineral-supplements/) and guesses URLs that 404. Normalisation collapses the cosmetic
+# variants; the negative cache stops a known-dead URL being re-fetched by every card that guesses it.
+with tempfile.TemporaryDirectory() as td:
+    rxfetch.configure(sources_dir=td)
+    _saved_metrics = os.environ.get("RX_METRICS")
+    os.environ["RX_METRICS"] = "0"           # keep fixture fetches off the real dashboard
+
+    chk("www, a trailing slash and a fragment collapse to one key",
+        rxfetch.cache_path("https://WWW.Thorne.com/x/#a") == rxfetch.cache_path("https://thorne.com/x"))
+    chk("a different path is still a different key",
+        rxfetch.cache_path("https://thorne.com/a") != rxfetch.cache_path("https://thorne.com/b"))
+    chk("http and https stay distinct",
+        rxfetch.cache_path("http://thorne.com/a") != rxfetch.cache_path("https://thorne.com/a"))
+
+    rxfetch._write_negative("http://x.example/gone", rxfetch.Result("", "unreachable", "HTTP 404"))
+    rxfetch._write_negative("http://x.example/busy", rxfetch.Result("", "unreachable", "HTTP 429"))
+    rxfetch._write_negative("http://x.example/wall", rxfetch.Result("", "unreadable", "HTTP 403"))
+    chk("a 404 is remembered with the durable TTL",
+        _json.load(open(rxfetch._neg_path("http://x.example/gone")))["ttl"] == rxfetch.NEG_TTL_PERMANENT)
+    chk("a 429 is remembered only briefly (transient TTL)",
+        _json.load(open(rxfetch._neg_path("http://x.example/busy")))["ttl"] == rxfetch.NEG_TTL_TRANSIENT)
+    chk("an unreadable (browser-fixable) wall is NOT remembered",
+        not os.path.exists(rxfetch._neg_path("http://x.example/wall")),
+        "a later caller may still opt into the browser tier")
+
+    _sp = rxfetch._neg_path("http://x.example/stale")
+    open(_sp, "w").write(_json.dumps({"ts": 0, "outcome": "unreachable", "detail": "HTTP 429",
+                                      "ttl": 3600}))
+    chk("an expired entry is ignored", rxfetch._read_negative("http://x.example/stale") is None)
+
+    _calls = {"n": 0}
+    def _fail_404(target, timeout, via):
+        _calls["n"] += 1
+        return rxfetch.Result("", "unreachable", "HTTP 404"), False
+    _orig_one = rxfetch._one_attempt
+    rxfetch._one_attempt = _fail_404
+    try:
+        _r1 = rxfetch.fetch("http://x.example/miss", allow_browser=False)
+        _after_first = _calls["n"]
+        _r2 = rxfetch.fetch("http://x.example/miss", allow_browser=False)
+        chk("the first fetch of a dead URL reaches the network", _after_first > 0 and not _r1.ok)
+        chk("the second is served from the negative cache with no request",
+            _calls["n"] == _after_first and _r2.via == "neg-cache")
+    finally:
+        rxfetch._one_attempt = _orig_one
+        if _saved_metrics is None:
+            os.environ.pop("RX_METRICS", None)
+        else:
+            os.environ["RX_METRICS"] = _saved_metrics
+
+
 # ── throttling ────────────────────────────────────────────────────────────────────────────────
 section("the throttle is per host and shared by every route")
 with tempfile.TemporaryDirectory() as td:
