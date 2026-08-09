@@ -131,16 +131,16 @@ DEFAULT_MAX = 10
 DEFAULT_MAX_CHARS = 20000
 
 
-# ── search cache (24h) ───────────────────────────────────────────────────────
+# ── search cache (7d) ────────────────────────────────────────────────────────
 # A search is a lookup, not evidence: the same query recurs constantly (every review researches
 # the same substances), the backend is rate-limited, and a result set is cheap to keep. So a
-# query+scope is answered from disk for 24h before we ask SearXNG again. Distinct from the fetch
-# text cache, which is content-addressed and permanent — a page's text does not go stale the way
-# a ranked result list does, so this one carries a TTL. Lives under the same web-access cache
-# tree, so `rx.py reset` keeps it by default (only --clear-web-cache drops it).
+# query+scope is answered from disk for 7 days before we ask SearXNG again. Distinct from the fetch
+# text cache, which is content-addressed and carries its own longer TTL (rxfetch.SOURCES_TTL,
+# 30d) — a ranked result list goes stale faster than a page's text. Lives under the same
+# web-access cache tree, so `rx.py reset` keeps it by default (only --clear-web-cache drops it).
 _SEARCH_CACHE = os.path.expanduser(
     os.environ.get("RX_SEARCH_CACHE", "~/.hermes/cache/web-access/searches"))
-_SEARCH_TTL = int(os.environ.get("RX_SEARCH_TTL", "86400"))     # seconds; 24h
+_SEARCH_TTL = int(os.environ.get("RX_SEARCH_TTL", "604800"))    # seconds; 7d
 
 
 def _search_cache_path(query, scope):
@@ -288,7 +288,7 @@ def cmd_search(args):
                    "engine": r.get("engine") or ""}
                   for r in (data.get("results") or [])]
     # Cache only a non-empty result set: an empty one is either a genuine miss (cheap to re-ask)
-    # or a transient backend hiccup, and pinning either for 24h is the wrong trade.
+    # or a transient backend hiccup, and pinning either for 7 days is the wrong trade.
     if everything:
         _write_search_cache(cpath, {"ts": time.time(), "query": args.query, "scope": args.scope,
                                     "widened": widened, "results": everything})

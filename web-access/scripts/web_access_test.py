@@ -154,7 +154,7 @@ chk("the vocabulary is the caller's, not the engine's",
     "callers say what they want, not which SearXNG category or engine serves it")
 
 
-section("a repeated search is served from a 24h cache, and every search emits one event")
+section("a repeated search is served from a 7d cache, and every search emits one event")
 import io as _io
 import json as _json
 import time as _time
@@ -209,7 +209,7 @@ try:
     _cp = _wa._search_cache_path("stale q", "web")
     _wa._write_search_cache(_cp, {"ts": _time.time() - _wa._SEARCH_TTL - 10,
                                   "results": [{"url": "u"}]})
-    chk("a cache entry past 24h is not served", _wa._read_search_cache(_cp) is None)
+    chk("a cache entry past the TTL is not served", _wa._read_search_cache(_cp) is None)
     _wa._write_search_cache(_cp, {"ts": _time.time(), "results": [{"url": "u"}]})
     chk("a fresh cache entry is served", _wa._read_search_cache(_cp) is not None)
 
@@ -221,7 +221,7 @@ try:
     chk("an empty result set is ok=True with count 0", _re["ok"] is True and _re["count"] == 0)
     _run_search_cmd(query="zzz no such thing", scope="web")
     chk("an empty search is not cached, so it is re-asked", _ncalls["n"] == 2,
-        "a transient empty must not be pinned for 24h")
+        "a transient empty must not be pinned for the TTL")
 finally:
     rxfetch._FETCH_EVENTS_PATH = _saved_events
     os.environ["RX_METRICS"] = "0"                  # back off for the rest of the suite
@@ -307,6 +307,39 @@ with tempfile.TemporaryDirectory() as td:
     open(p, "w").write(SHELL[:141])
     chk("a cached shell would be rejected on read",
         rxfetch.looks_unusable(open(p).read()))
+
+
+# ── cached page text expires after SOURCES_TTL ────────────────────────────────────────────────
+# The text cache is content-addressed but not immortal: an entry older than the 30d TTL is
+# ignored on read (lazy, like the search cache) and overwritten by the next successful fetch.
+section("cached page text expires after the 30d TTL")
+with tempfile.TemporaryDirectory() as td:
+    import time as _t
+    rxfetch.configure(sources_dir=td)
+    _real_attempt = rxfetch._one_attempt
+    _live = {"n": 0}
+
+    def _fresh(url, timeout, via="http"):
+        _live["n"] += 1
+        return rxfetch.Result("fresh copy " * 100, "ok", "stub", via=via), False
+
+    rxfetch._one_attempt = _fresh
+    try:
+        _u = "https://ttl.example/page"
+        _p = rxfetch.cache_path(_u)
+        open(_p, "w").write("old cached copy " * 100)
+        _r = rxfetch.fetch(_u)
+        chk("a young entry is served from cache, no request",
+            _r.via == "cache" and _live["n"] == 0, "(via=%s live=%d)" % (_r.via, _live["n"]))
+        _old = _t.time() - rxfetch.SOURCES_TTL - 60
+        os.utime(_p, (_old, _old))
+        _r = rxfetch.fetch(_u)
+        chk("an entry older than the TTL is re-fetched, not served",
+            _r.via == "http" and _live["n"] == 1, "(via=%s live=%d)" % (_r.via, _live["n"]))
+        chk("...and the re-fetch overwrote the expired entry",
+            "fresh copy" in open(_p).read() and _t.time() - os.path.getmtime(_p) < 60)
+    finally:
+        rxfetch._one_attempt = _real_attempt
 
 
 # ── URL normalisation and the negative cache ────────────────────────────────────────────────────

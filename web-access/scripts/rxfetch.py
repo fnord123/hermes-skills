@@ -53,6 +53,13 @@ import urllib.request
 SOURCES = os.path.expanduser(
     os.environ.get("ANALYSIS_SOURCES_DIR") or "~/.hermes/cache/web-access/sources")
 
+# Cached page text expires after 30 days: long enough that one review and its citation audit read
+# one consistent copy, short enough that the next review re-reads a page that may have changed.
+# Age is the file's mtime — _write_cache publishes by rename, so mtime is the write time. Expiry
+# is lazy (an expired file is ignored, then overwritten by the next successful fetch), matching
+# the search cache's behaviour in web_access.py.
+SOURCES_TTL = int(os.environ.get("RX_SOURCES_TTL", 30 * 24 * 3600))
+
 # The locks are NOT per-corpus. A rate limit counts the client, not the pipeline, so every
 # consumer on this machine has to queue behind the same per-host gate — otherwise two pipelines
 # each politely spacing their own requests still hand NCBI twice its limit between them.
@@ -597,6 +604,10 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
         # normalisation still hits rather than being re-fetched.
         for cand in (path, _legacy_cache_path(url)):
             if os.path.exists(cand) and os.path.getsize(cand) > 0:
+                if time.time() - os.path.getmtime(cand) > SOURCES_TTL:
+                    _note("cache", "expired (older than the %dd TTL)" % (SOURCES_TTL // 86400),
+                          path=cand)
+                    continue
                 cached = open(cand, encoding="utf-8", errors="ignore").read()
                 if not looks_unusable(cached):
                     _note("cache", "hit", chars=len(cached), path=cand)
