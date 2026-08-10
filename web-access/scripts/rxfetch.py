@@ -48,10 +48,13 @@ import time
 import urllib.error
 import urllib.request
 
-# The text cache is per-corpus: two pipelines auditing different documents should not share
-# one pile of extracted sources. Override with configure() or ANALYSIS_SOURCES_DIR.
-SOURCES = os.path.expanduser(
-    os.environ.get("ANALYSIS_SOURCES_DIR") or "~/.hermes/cache/web-access/sources")
+# ONE text cache, for every caller (2026-08-10). The cache is this skill's own concern: a caller
+# asks for a page and trusts what comes back — a cached answer and a live answer are the same
+# answer, and re-fetching a page the cache holds proves nothing. Per-corpus cache directories
+# (the old ANALYSIS_SOURCES_DIR override) were removed: an audit re-fetching 558 pages, 201 of
+# which this cache already held, is what they cost. configure(sources_dir=...) survives for
+# TEST isolation only; no production caller sets it.
+SOURCES = os.path.expanduser("~/.hermes/cache/web-access/sources")
 
 # Cached page text expires after 30 days: long enough that one review and its citation audit read
 # one consistent copy, short enough that the next review re-reads a page that may have changed.
@@ -67,11 +70,12 @@ LOCKDIR = os.path.expanduser(os.environ.get("ANALYSIS_FETCH_LOCKDIR") or "~/.her
 
 
 def configure(sources_dir=None, lock_dir=None, min_chars=None):
-    """Point the text cache (and, rarely, the locks) somewhere else.
+    """Adjust the fetcher's knobs.
 
-    Callers that keep their own corpus — analysis-engine gives each Pipeline a sources_dir —
-    set this once at startup. Leave lock_dir alone unless you genuinely want a separate rate
-    limiter, which you almost never do.
+    sources_dir exists for TEST isolation only — a suite pointing the cache at a temp dir so
+    fixture fetches never touch the real one. Production callers use the one shared cache and
+    do not set it. Leave lock_dir alone unless you genuinely want a separate rate limiter,
+    which you almost never do.
     """
     global MIN_DOCUMENT_CHARS, SOURCES, LOCKDIR
     if sources_dir:

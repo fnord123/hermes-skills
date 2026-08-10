@@ -56,6 +56,15 @@ chk("--min-chars is honoured when lowered deliberately",
 rxfetch.configure(min_chars=200)
 chk("and restored afterwards", rxfetch.looks_unusable("short but real"))
 
+# ── ONE cache ─────────────────────────────────────────────────────────────────────────────────
+# Every caller shares the skill's one page cache; a caller cannot be handed a different cache by
+# the environment. Per-corpus overrides re-fetched hundreds of already-cached pages per audit.
+chk("the default cache is the one shared sources dir",
+    rxfetch.SOURCES == os.path.expanduser("~/.hermes/cache/web-access/sources"))
+chk("no environment variable re-points the cache",
+    'environ.get("ANALYSIS_SOURCES_DIR"' not in open(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "rxfetch.py")).read())
+
 # Moved here from the rx-review pipeline's suite when the fetcher moved into this skill: these
 # test the fetcher, so they belong with it. The pipeline could no longer run them anyway - it
 # binds to this file, and CI has no skills directory.
