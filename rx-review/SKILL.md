@@ -57,7 +57,8 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 |---|---|
 | `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
 | `stage` | Copies every document Hermes has received into the intake folder. Run after **every** message that carries attachments. Creates nothing, so it is safe to repeat. |
-| `start` | Begins the review. Run **once**, after the user says the labs are complete and you have resolved the regimen. |
+| `uploads-done` | Records that the user said every lab document has been sent. Run it when they say so, and again if more arrive afterwards. |
+| `start` | Begins the review. Run **once**, after `uploads-done` and after you have resolved the regimen. It refuses until both are done. |
 | `staged` | What is waiting to be transcribed, across upload rounds. |
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
@@ -94,6 +95,13 @@ that PDFs were received but not staged, run `stage` again and re-check.
 Then **ask whether more are coming, and wait.** Ask in plain text rather than a choice form:
 the answer often arrives as another batch of attachments, and a form has nowhere to put them. Re-sending the same PDF is free — files are matched by
 content, so a duplicate is ignored rather than transcribed twice.
+
+When the user says that is all of them, record it:
+
+    python3 ~/.hermes/rx-review/rx.py uploads-done
+
+`start` refuses until this has been run, and refuses again if a document arrives afterwards —
+re-run it when the user confirms the later ones too.
 
 **If any file is marked `CHECK`, raise it before starting.** That file does not look like a lab
 panel — an endoscopy or imaging report, a clinical note, or a scan with no text layer. Name the
