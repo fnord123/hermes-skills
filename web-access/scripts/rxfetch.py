@@ -291,7 +291,12 @@ def _pdf_to_text(raw, scratch):
 
 def _ncbi_url(url):
     """The E-utilities URL for a PubMed/PMC page, or None — the HTML pages never yield text."""
-    m = re.search(r"pubmed\.ncbi\.nlm\.nih\.gov/(\d+)", url, re.I)
+    # Both PubMed URL shapes carry the PMID: the modern host `pubmed.ncbi.nlm.nih.gov/<id>` and
+    # the legacy path `(www.)ncbi.nlm.nih.gov/pubmed/<id>`. The legacy form is what a model
+    # reconstructs from a bare PMID, and it dominates real citations — matching only the modern
+    # host sent 340 legacy links down the HTML path, where pubmed's bot wall left 9 of them
+    # unjudged after a 4-round citation-audit sweep (2026-08-12). efetch answers either the same.
+    m = re.search(r"(?:pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov/pubmed)/(\d+)", url, re.I)
     if m:
         query = "db=pubmed&id=%s&rettype=abstract&retmode=text" % m.group(1)
     # NCBI Bookshelf (StatPearls) is deliberately NOT routed here: efetch db=books answers with

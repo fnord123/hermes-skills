@@ -432,8 +432,16 @@ with tempfile.TemporaryDirectory() as td:
 # ── NCBI URLs prefer the API ──────────────────────────────────────────────────────────────────
 section("NCBI URLs route to the API, not the bot-walled page")
 api = rxfetch._ncbi_url("https://pubmed.ncbi.nlm.nih.gov/12345678/")
-chk("a pubmed url yields an api url", bool(api) and "ncbi" in (api or ""))
+chk("a modern pubmed url yields an api url", bool(api) and "efetch" in (api or ""))
+# The legacy `(www.)ncbi.nlm.nih.gov/pubmed/<id>` form is what models reconstruct from a PMID and
+# it dominates real citations; it MUST reach efetch too, or it lands on pubmed's bot wall (9 such
+# citations went unjudged through a 4-round audit sweep on 2026-08-12).
+legacy = rxfetch._ncbi_url("https://www.ncbi.nlm.nih.gov/pubmed/12345678")
+chk("a legacy /pubmed/ url routes to the same api", bool(legacy) and "db=pubmed&id=12345678" in (legacy or ""))
+chk("both pubmed shapes yield the same efetch url", api == legacy)
 chk("an ordinary url does not", not rxfetch._ncbi_url("https://example.com/article"))
+chk("a bookshelf page is deliberately not routed",
+    not rxfetch._ncbi_url("https://www.ncbi.nlm.nih.gov/books/NBK1234/"))
 
 
 # ── The browser tier fails on USE, not on IMPORT ──────────────────────────────────────────────
