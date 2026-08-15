@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -188,6 +189,17 @@ MIN_DOCUMENT_CHARS = int(os.environ.get("ANALYSIS_MIN_DOCUMENT_CHARS") or 200)
 
 # Tier 4: self-hosted Firecrawl (JS render -> full markdown). Set to "" to disable the rung.
 FIRECRAWL_URL = (os.environ.get("FIRECRAWL_API_URL") or "http://192.168.1.226:3002").rstrip("/")
+
+# Tier 5: bladebro stealth browser. Run one-shot in a FRESH container per fetch — the persistent
+# service raced on Chrome/Xvfb, while a clean container per fetch is reliable. Reached only when
+# Firecrawl is blocked; its narrow A/B edge was aggressive commercial anti-bot (e.g. Amazon).
+# BLADEBRO_SSH="" disables the rung; it is otherwise fail-safe (unreachable -> falls through).
+BLADEBRO_IMAGE = os.environ.get("BLADEBRO_IMAGE", "bladebro-mcp:local")
+BLADEBRO_SSH = os.environ.get("BLADEBRO_SSH", "ssh -o ConnectTimeout=10 docker").split()
+
+# Tier 6: browserbase (paid, remote managed stealth). OFF by default — metered third party, and
+# only worth it for a wall neither free rung cracked. Set WEB_ALLOW_BROWSERBASE=1 to enable.
+ALLOW_BROWSERBASE = os.environ.get("WEB_ALLOW_BROWSERBASE", "0") == "1"
 
 
 def looks_unusable(text):
@@ -431,6 +443,57 @@ def _firecrawl_attempt(url, timeout):
     if not d.get("success") or looks_unusable(md):
         return Result("", "unreadable", "firecrawl returned no usable document (%d chars)" % len(md))
     return Result(md, "ok", "firecrawl rendered %d chars" % len(md), via="firecrawl")
+
+
+def _bladebro_attempt(url, timeout):
+    """Tier 5: bladebro stealth render, one-shot in a FRESH container per fetch. The last FREE
+    rung, reached only when Firecrawl was blocked. Returns bladebro's clean content (distilled —
+    at this rung "got past the wall" is the win). Fail-safe: any error/empty -> unreadable."""
+    if not BLADEBRO_SSH:
+        return Result("", "unreadable", "bladebro tier disabled")
+    inner = ("timeout %d bladebro see content %s --no-daemon --json 2>/dev/null"
+             % (int(max(timeout, 70)), shlex.quote(url)))
+    remote = ("timeout %d docker run --rm --shm-size=1g -e BLADE_FRESH=1 --entrypoint bash %s -c %s"
+              % (int(max(timeout, 80)), shlex.quote(BLADEBRO_IMAGE), shlex.quote(inner)))
+    try:
+        with host_gate(_host_of(url)):
+            p = subprocess.run(BLADEBRO_SSH + [remote], capture_output=True, text=True,
+                               timeout=int(max(timeout, 95)))
+    except Exception as exc:                                    # noqa: BLE001
+        return Result("", "unreadable", "bladebro unreachable: %s" % type(exc).__name__)
+    m = re.search(r'\{.*"ok".*\}', p.stdout or "", re.S)
+    if not m:
+        return Result("", "unreadable", "bladebro: no result")
+    try:
+        d = json.loads(m.group(0))
+    except ValueError:
+        return Result("", "unreadable", "bladebro: unparseable result")
+    text = d.get("text", "") or ""
+    if not d.get("ok") or d.get("is_error") or looks_unusable(text):
+        return Result("", "unreadable", "bladebro: no usable document (%d chars)" % len(text))
+    return Result(text, "ok", "bladebro rendered %d chars" % len(text), via="browser:bladebro")
+
+
+def _browserbase_attempt(url, timeout):
+    """Tier 6: browserbase (paid remote managed stealth), the absolute last resort. OFF unless
+    WEB_ALLOW_BROWSERBASE=1. Driven via browse_task --mode browserbase so it skips the retired
+    local render. Fail-safe."""
+    if not ALLOW_BROWSERBASE:
+        return Result("", "unreadable", "browserbase disabled (WEB_ALLOW_BROWSERBASE=0)")
+    if not os.path.exists(BROWSE_TASK):
+        return Result("", "unreadable", "browserbase unavailable (browse_task missing)")
+    cmd = [sys.executable, BROWSE_TASK, "--dump-text", "--mode", "browserbase",
+           "--min-chars", str(MIN_DOCUMENT_CHARS), "--start-url", url]
+    try:
+        with host_gate(_host_of(url)):
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=int(max(timeout, BROWSER_TIMEOUT_FLOOR)))
+    except Exception as exc:                                    # noqa: BLE001
+        return Result("", "unreadable", "browserbase failed: %s" % type(exc).__name__)
+    text = (p.stdout or "").strip()
+    if p.returncode != 0 or looks_unusable(text):
+        return Result("", "unreadable", "browserbase returned no usable document")
+    return Result(text, "ok", "browserbase rendered %d chars" % len(text), via="browserbase")
 
 
 def _browser_attempt(url, timeout):
@@ -708,6 +771,18 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
         # headless/headful local render (_browser_attempt, kept below for reference/rollback).
         res = _firecrawl_attempt(url, timeout)
         _note("firecrawl", "%s: %s" % (res.outcome, res.detail), chars=len(res.text or ""))
+        # Tier 5: bladebro stealth render — only if Firecrawl was blocked. The last FREE rung.
+        if not res.ok:
+            b = _bladebro_attempt(url, timeout)
+            _note("bladebro", "%s: %s" % (b.outcome, b.detail), chars=len(b.text or ""))
+            if b.ok:
+                res = b
+        # Tier 6: browserbase (paid, remote stealth) — only if both free rungs failed AND enabled.
+        if not res.ok:
+            bb = _browserbase_attempt(url, timeout)
+            _note("browserbase", "%s: %s" % (bb.outcome, bb.detail), chars=len(bb.text or ""))
+            if bb.ok:
+                res = bb
         # --- RETIRED local browser render (headless/headful/agent). Uncomment to roll back. ---
         # res = _browser_attempt(url, timeout)
         # for a in (res.attempts or []):

@@ -20,6 +20,10 @@ os.environ["RX_METRICS"] = "0"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rxfetch                                                  # noqa: E402
+# Unit tests exercise the ladder LOGIC with the render tier (_firecrawl_attempt) stubbed; they must
+# never actually docker-run bladebro (tier 5) or spend browserbase (tier 6). Disable those rungs.
+rxfetch.BLADEBRO_SSH = []
+rxfetch.ALLOW_BROWSERBASE = False
 
 PASS = FAIL = 0
 
