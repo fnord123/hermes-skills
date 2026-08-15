@@ -75,24 +75,20 @@ text, reporting which one did in `via`:
 | 1 | `cache` | reads a file we wrote earlier, keyed by URL hash | none | free — no network at all |
 | 2 | `ncbi-api` | one HTTPS GET to NCBI E-utilities (`efetch`). **NCBI URLs only** | none | one request, no bot wall |
 | 3 | `http` | one `urllib` GET, retried with backoff; HTML stripped to text by regex, PDFs by PyMuPDF | none | one request |
-| 4 | `browser` — **headless** | Playwright launches headless Chromium, loads the URL, returns `page.inner_text("body")` | none | ~seconds, one local process |
-| 5 | `browser` — **headful** | the same, but real Chromium on a virtual display via `xvfb-run`. Some sites 503 headless and serve headful | none | ~seconds, one local process + Xvfb |
-| 6 | *agent* — **fara** | the local browser driven in a screenshot→action loop: click, type, scroll, back, search, dismiss walls, page through results | **fara1.5-27b** (vision/computer-use) on `.222` via LiteLLM | minutes, local process + GPU |
-| 7 | `browserbase` | a **remote managed** Chromium built to defeat bot detection, reached over CDP; can run with or without the agent | none, or fara if the agent drives it | seconds **plus money** — metered third party |
+| 4 | `firecrawl` | self-hosted Firecrawl (`.226:3002`) renders the page (its Playwright pool runs the JS) and returns clean, **full** markdown | none | one request to a local service |
+| 5 | `browser:bladebro` | the bladebro **stealth** browser, one-shot in a fresh container, reached ONLY when Firecrawl is blocked — its edge is aggressive commercial anti-bot (e.g. Amazon). Returns bladebro's distilled content | none | ~seconds, a fresh container + Chromium |
+| 6 | `browserbase` | a **remote managed** Chromium built to defeat bot detection; **OFF by default** (`WEB_ALLOW_BROWSERBASE=1` to enable), driven via `browse_task --mode browserbase` | none | seconds **plus money** — metered third party |
 
-**What uses a model, and which one.** Layers 1–5 use **no model whatsoever** — they are plumbing
-and a browser, and what they return is the document. Only layer 6 involves a model, and it is
-always **fara**, never a general chat model. Two distinct calls, both to the same endpoint:
+**Render order is cheapest-that-works, and each rung escalates only on a *detected* failure**
+(HTTP shell/interstitial → Firecrawl; Firecrawl blocked/empty → bladebro; both free rungs failed →
+browserbase). The complementary A/B is the reason for the order: Firecrawl wins JS/full-text/speed
+and clears most walls, while bladebro's narrow win is stealth against the hardest commercial
+anti-bot — so trying Firecrawl then bladebro covers each one's blind spot for free before paying.
 
-- the **screenshot→action loop** — fara1.5-27b as a computer-use model, given a rendered image of
-  the page each round and emitting a grounded action;
-- **`read_page_answer_question`** — the agent's own action for reading a page. It calls
-  `get_page_markdown()` (real DOM → MarkItDown), truncates to 20,000 characters, and passes that
-  plus the question to **the same fara client as a plain text LLM**, returning only the answer.
-  There is no second, "regular" LLM anywhere in this skill.
-
-Layer 7 is orthogonal to the model question: browserbase is *where the browser runs*, not who
-drives it. The dump path can use a managed browser with no model at all; the agent can drive one.
+**No render tier uses a chat model.** Every rung returns the document itself: cache/ncbi/http are
+plumbing; `firecrawl` and `browser:bladebro` are model-free renderers; `browserbase` is a remote
+browser. The retired local render (headless/headful Playwright and the fara screenshot→action
+agent loop) is commented out in `rxfetch.py`, kept only for rollback.
 
 **Order is by cost, and `browserbase` is always last.** Layers 4, 5 and 6 all use the same free
 local browser and differ in how hard they try: 4 loads the page, 5 loads it convincingly, 6 works
