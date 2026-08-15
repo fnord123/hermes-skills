@@ -264,7 +264,7 @@ section("the browser tier is a last resort, not a retry")
 def run_fetch(http_outcome, allow_browser, browser_ok=True):
     """fetch() with both outer tiers replaced. Returns (result, browser_call_count)."""
     calls = {"n": 0}
-    real_attempt, real_browser = rxfetch._one_attempt, rxfetch._browser_attempt
+    real_attempt, real_browser = rxfetch._one_attempt, rxfetch._firecrawl_attempt
 
     def fake_attempt(url, timeout, via="http"):
         if http_outcome == "ok":
@@ -274,20 +274,20 @@ def run_fetch(http_outcome, allow_browser, browser_ok=True):
     def fake_browser(url, timeout):
         calls["n"] += 1
         if browser_ok:
-            return rxfetch.Result("rendered " * 100, "ok", "stub", via="browser")
+            return rxfetch.Result("rendered " * 100, "ok", "stub", via="firecrawl")
         return rxfetch.Result("", "unreadable", "stub: still a shell")
 
-    rxfetch._one_attempt, rxfetch._browser_attempt = fake_attempt, fake_browser
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = fake_attempt, fake_browser
     try:
         with tempfile.TemporaryDirectory() as td2:
             rxfetch.configure(sources_dir=td2)
             return rxfetch.fetch("https://tier.example/page", allow_browser=allow_browser), calls["n"]
     finally:
-        rxfetch._one_attempt, rxfetch._browser_attempt = real_attempt, real_browser
+        rxfetch._one_attempt, rxfetch._firecrawl_attempt = real_attempt, real_browser
 
 
 r, n = run_fetch("unreadable", True)
-chk("unreadable + opted in renders", r.ok and r.via == "browser" and n == 1,
+chk("unreadable + opted in renders", r.ok and r.via == "firecrawl" and n == 1,
     "(via=%s calls=%d)" % (r.via, n))
 r, n = run_fetch("unreadable", False)
 chk("unreadable, not opted in: no render", not r.ok and n == 0, "(calls=%d)" % n)
@@ -298,7 +298,7 @@ chk("a success spends no render", r.ok and r.via == "http" and n == 0,
     "(via=%s calls=%d)" % (r.via, n))
 r, n = run_fetch("unreadable", True, browser_ok=False)
 chk("a render that still fails keeps the server's diagnosis",
-    not r.ok and "browser tier" in r.detail, "(detail=%r)" % r.detail[:60])
+    not r.ok and "render tier" in r.detail, "(detail=%r)" % r.detail[:60])
 
 
 # ── the cache never stores a bot wall ─────────────────────────────────────────────────────────
@@ -555,14 +555,14 @@ for code, want_render in ((403, 1), (404, 0)):
         _c["n"] += 1
         return rxfetch.Result("rendered " * 100, "ok", "stub", via="browser")
 
-    _real_browser = rxfetch._browser_attempt
-    rxfetch._browser_attempt = fake_browser
+    _real_browser = rxfetch._firecrawl_attempt
+    rxfetch._firecrawl_attempt = fake_browser
     try:
         with tempfile.TemporaryDirectory() as td4:
             rxfetch.configure(sources_dir=td4)
             rxfetch.fetch("https://wall.example/p", allow_browser=True)
     finally:
-        rxfetch._browser_attempt = _real_browser
+        rxfetch._firecrawl_attempt = _real_browser
     chk("HTTP %d spends %d render(s)" % (code, want_render), calls["n"] == want_render,
         "(spent %d)" % calls["n"])
 rxfetch._one_attempt = _real_attempt
