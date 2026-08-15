@@ -186,6 +186,9 @@ SUBSTANTIAL_CHARS = 20_000
 # an interstitial. Callers that read short pages should lower it via configure(min_chars=...).
 MIN_DOCUMENT_CHARS = int(os.environ.get("ANALYSIS_MIN_DOCUMENT_CHARS") or 200)
 
+# Tier 4: self-hosted Firecrawl (JS render -> full markdown). Set to "" to disable the rung.
+FIRECRAWL_URL = (os.environ.get("FIRECRAWL_API_URL") or "http://192.168.1.226:3002").rstrip("/")
+
 
 def looks_unusable(text):
     """True when what came back is an interstitial rather than the document."""
@@ -195,6 +198,12 @@ def looks_unusable(text):
         return False                     # too much text to be an interstitial
     head = text[:4000]
     if BOT_WALL_STRONG_RE.search(head):
+        return True
+    # A JavaScript-app shell: the server answered, but the document only appears after JS runs.
+    # High-precision markers (CRA/Vue/Angular empty-app pages) so a render tier is tried, not the
+    # shell served as the answer. Deliberately narrow to avoid escalating real short pages.
+    if re.search(r"(?i)you need to enable javascript|please enable javascript to (run|view)|"
+                 r"enable javascript to run this app|this app requires javascript", head):
         return True
     return len(text) < MIN_USABLE_CHARS and bool(BOT_WALL_WEAK_RE.search(head))
 
@@ -395,6 +404,33 @@ def _rung_name(mode):
     which is not a rung anyone can look up."""
     mode = mode or "?"
     return mode if (mode == "browserbase" or ":" in mode) else "browser:%s" % mode
+
+
+def _firecrawl_attempt(url, timeout):
+    """Tier 4: render via the self-hosted Firecrawl (JS-capable) and return its markdown.
+
+    Cheaper than a full browser process here — one HTTP call to a service that already runs a
+    Playwright pool — and it returns clean, FULL markdown (the skill's contract), which is why it
+    replaces the retired headless local render. Fail-safe: any error, an empty body, or a
+    blocked/interstitial result returns `unreadable`, so the ladder falls through to the stealth
+    rung. Runs inside host_gate like every other request tier.
+    """
+    if not FIRECRAWL_URL:
+        return Result("", "unreadable", "firecrawl tier disabled")
+    host = _host_of(url)
+    body = json.dumps({"url": url, "formats": ["markdown"],
+                       "timeout": int(max(timeout, 45) * 1000)}).encode()
+    try:
+        with host_gate(host):
+            req = urllib.request.Request(FIRECRAWL_URL + "/v1/scrape", data=body,
+                                         headers={"Content-Type": "application/json"})
+            d = json.loads(urllib.request.urlopen(req, timeout=max(timeout, 90)).read())
+    except Exception as exc:                                    # noqa: BLE001
+        return Result("", "unreadable", "firecrawl unreachable: %s" % type(exc).__name__)
+    md = (d.get("data") or {}).get("markdown", "") or ""
+    if not d.get("success") or looks_unusable(md):
+        return Result("", "unreadable", "firecrawl returned no usable document (%d chars)" % len(md))
+    return Result(md, "ok", "firecrawl rendered %d chars" % len(md), via="firecrawl")
 
 
 def _browser_attempt(url, timeout):
@@ -668,22 +704,25 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
     # a caller that opted in. It is also the only tier that can read a JavaScript-rendered page,
     # which is why `unreadable` was previously a dead end that sent the work back to the user.
     if allow_browser and last.outcome == "unreadable":
-        res = _browser_attempt(url, timeout)
-        # The browser rungs report their own per-mode trail; splice it in rather than collapsing
-        # them into one "browser" line, so the audit can see headless AND headful AND the agent.
-        for a in (res.attempts or []):
-            trail.append(a)
-            trace_log(a.get("layer", "browser"), a.get("result", ""), url=url)
-        if not res.attempts:
-            _note("browser", "%s: %s" % (res.outcome, res.detail))
+        # Tier 4: Firecrawl (self-hosted JS render -> full markdown), replacing the retired
+        # headless/headful local render (_browser_attempt, kept below for reference/rollback).
+        res = _firecrawl_attempt(url, timeout)
+        _note("firecrawl", "%s: %s" % (res.outcome, res.detail), chars=len(res.text or ""))
+        # --- RETIRED local browser render (headless/headful/agent). Uncomment to roll back. ---
+        # res = _browser_attempt(url, timeout)
+        # for a in (res.attempts or []):
+        #     trail.append(a)
+        #     trace_log(a.get("layer", "browser"), a.get("result", ""), url=url)
+        # if not res.attempts:
+        #     _note("browser", "%s: %s" % (res.outcome, res.detail))
         if res.ok:
             _write_cache(path, res.text)
             _purge_negative(url)
             res.attempts = trail
             return res
         # Keep the cheaper tier's diagnosis: it says what the SERVER did, which is more useful
-        # than "the browser also could not read it".
-        last.detail += "; browser tier: %s" % res.detail
+        # than "the render tier also could not read it".
+        last.detail += "; render tier: %s" % res.detail
     elif allow_browser:
         _note("browser", "skipped (%s is not a wall a render can fix)" % last.outcome)
     else:
