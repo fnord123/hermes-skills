@@ -54,6 +54,11 @@ SHELL = ("<html><head><title>Thorne</title></head><body><div id=root></div>"
 chk("a 141-char shell is unusable", rxfetch.looks_unusable(SHELL[:141]))
 chk("empty text is unusable", rxfetch.looks_unusable(""))
 chk("a real document is usable", not rxfetch.looks_unusable("word " * 300))
+chk("a short page of clean PROSE is usable, not rejected as a shell",
+    not rxfetch.looks_unusable("This domain is for use in documentation examples without needing "
+                               "permission. You may use it in literature without prior coordination."))
+chk("a short NON-prose blob (stripped shell/title) is still unusable",
+    rxfetch.looks_unusable("Thorne Loading"))
 rxfetch.configure(min_chars=1)
 chk("--min-chars is honoured when lowered deliberately",
     not rxfetch.looks_unusable("short but real"))

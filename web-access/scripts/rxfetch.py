@@ -181,10 +181,11 @@ class Result(object):
 SUBSTANTIAL_CHARS = 20_000
 
 
-# A floor tuned for LONG-FORM sources - papers, drug labels, monographs - where anything under
-# 200 characters is a shell rather than the document. That is a domain assumption, not a fact
-# about the web: example.com is a legitimate 136-character page, and this module rejected it as
-# an interstitial. Callers that read short pages should lower it via configure(min_chars=...).
+# The boundary below which looks_unusable applies its prose test: at/above this length a page is
+# taken as the document; below it, a page is kept only if it READS like prose (real sentences), so
+# a genuine short page (example.com, 136 chars) is no longer rejected as an interstitial while a
+# stripped shell still is. Tuned for LONG-FORM sources (papers, labels); lower via
+# configure(min_chars=...) to widen the prose-rescue window, raise it to be stricter.
 MIN_DOCUMENT_CHARS = int(os.environ.get("ANALYSIS_MIN_DOCUMENT_CHARS") or 200)
 
 # Tier 4: self-hosted Firecrawl (JS render -> full markdown). Set to "" to disable the rung.
@@ -202,12 +203,30 @@ BLADEBRO_SSH = os.environ.get("BLADEBRO_SSH", "ssh -o ConnectTimeout=10 docker")
 ALLOW_BROWSERBASE = os.environ.get("WEB_ALLOW_BROWSERBASE", "0") == "1"
 
 
+def _reads_like_prose(text):
+    """A rough 'this is a real document, not a stripped shell' test: enough words AND at least one
+    sentence terminator followed by a space. A JS shell strips to a title/'Loading' (few words, no
+    sentences); example.com strips to real sentences. Used only to rescue SHORT pages below the
+    long-form floor, so it errs strict."""
+    return len(text.split()) >= 10 and bool(re.search(r"[.!?]\s", text))
+
+
 def looks_unusable(text):
-    """True when what came back is an interstitial rather than the document."""
-    if not text or len(text.strip()) < MIN_DOCUMENT_CHARS:
-        return True
-    if len(text) >= SUBSTANTIAL_CHARS:
-        return False                     # too much text to be an interstitial
+    """True when what came back is a wall / JS shell / near-empty response rather than the document.
+
+    Length alone no longer condemns a page: a SHORT page of clean prose (example.com, 136 chars) is
+    the document, not an interstitial, and was wrongly rejected before — which then wasted the whole
+    render ladder on a page nothing could improve. A short page is usable IFF it reads like prose;
+    otherwise (a stripped shell, a bare title) it is not. Walls and JS-app shells are caught by
+    marker at any length; empty is always unusable. The long-form floor (MIN_DOCUMENT_CHARS) is the
+    boundary below which the prose test applies, so a caller wanting long documents keeps its guard.
+    """
+    s = (text or "").strip()
+    if not s:
+        return True                      # nothing came back
+    if len(s) >= SUBSTANTIAL_CHARS:
+        return False                     # too much text to be an interstitial — the document,
+        #                                  even if it happens to contain a JS/wall phrase in body
     head = text[:4000]
     if BOT_WALL_STRONG_RE.search(head):
         return True
@@ -217,7 +236,10 @@ def looks_unusable(text):
     if re.search(r"(?i)you need to enable javascript|please enable javascript to (run|view)|"
                  r"enable javascript to run this app|this app requires javascript", head):
         return True
-    return len(text) < MIN_USABLE_CHARS and bool(BOT_WALL_WEAK_RE.search(head))
+    if len(s) >= MIN_DOCUMENT_CHARS:     # long enough by the domain floor
+        return len(s) < MIN_USABLE_CHARS and bool(BOT_WALL_WEAK_RE.search(head))
+    # Below the floor: rescue a genuine short document, reject a shell.
+    return not _reads_like_prose(s) or bool(BOT_WALL_WEAK_RE.search(head))
 
 
 def _host_of(url):
