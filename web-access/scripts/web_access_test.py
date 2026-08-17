@@ -183,6 +183,11 @@ _tmp = tempfile.mkdtemp()
 _wa._SEARCH_CACHE = os.path.join(_tmp, "searches")
 _saved_events = rxfetch._FETCH_EVENTS_PATH
 rxfetch._FETCH_EVENTS_PATH = os.path.join(_tmp, "events.jsonl")
+_saved_searxng = _wa.SEARXNG_URL
+_wa.SEARXNG_URL = "http://searxng.test"            # run_search is stubbed below, so this URL is
+                                                   # never contacted; it only clears cmd_search's
+                                                   # `if not SEARXNG_URL` guard so the test is
+                                                   # hermetic (CI has no SEARXNG_URL in env)
 _wa._push_search_loki = lambda ev: None            # no network sink in tests
 os.environ["RX_METRICS"] = "1"                      # this test VERIFIES emission — to the temp file
 
@@ -242,6 +247,7 @@ try:
         "a transient empty must not be pinned for the TTL")
 finally:
     rxfetch._FETCH_EVENTS_PATH = _saved_events
+    _wa.SEARXNG_URL = _saved_searxng
     os.environ["RX_METRICS"] = "0"                  # back off for the rest of the suite
 
 
