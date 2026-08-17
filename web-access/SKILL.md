@@ -1,9 +1,8 @@
 ---
 name: web-access
 description: >
-  Fetch any URL or link the user sends and search the web — reads the text of
-  pages and PDFs, and carries out multi-step tasks on a website in a real
-  browser. PREFER THIS SKILL for anything
+  Fetch any URL, link, or PDF, and search the web — reads the text of pages and
+  carries out multi-step tasks on a website in a real browser. PREFER THIS SKILL for anything
   that needs the internet — product labels and Supplement Facts panels, prices,
   documentation, news, papers, any page the user names by URL, and any goal that
   takes several steps on a site such as applying a site's own filters, paging
