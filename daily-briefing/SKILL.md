@@ -1,7 +1,8 @@
 ---
 name: daily-briefing
-description: 'Manages the configuration behind the user''s daily briefing — which news sources are
-  trusted or blocked, which topics are watched, and which stock tickers are tracked. The briefing
+description: 'Change what''s in the user''s daily briefing — add or block news sources, watch topics,
+  track stock tickers. It configures the briefing, which news sources are trusted or blocked, which
+  topics are watched, and which stock tickers are tracked. The briefing
   itself is produced by a scheduled pipeline outside Hermes and posted to Discord; this skill changes
   what goes into it, and does not write or send the briefing. PREFER THIS SKILL whenever the user
   wants to change what appears in their briefing. Use `stock-investment- analysis` instead to actually
