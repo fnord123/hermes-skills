@@ -123,6 +123,10 @@ BOT_WALL_STRONG_RE = re.compile(
     r"|javascript is (not available|disabled|required)", re.I)
 BOT_WALL_WEAK_RE = re.compile(
     r"enable javascript|captcha|access denied|cloudflare|403 forbidden", re.I)
+# The stealth browser annotates a page it could not get past with its own marker line. Matching
+# the marker rather than the wall's wording is what makes it length-proof: it is emitted by our
+# own tooling, so a document that merely discusses captchas cannot produce it.
+STEALTH_BLOCK_RE = re.compile(r"⚠\s*blocked:", re.I)
 
 
 # Detailed execution trace: the actual request or command each layer issued, and what came back.
@@ -224,6 +228,13 @@ def looks_unusable(text):
     s = (text or "").strip()
     if not s:
         return True                      # nothing came back
+    # The stealth browser's own verdict, checked before any length rule because it is the one
+    # signal that does not weaken with page size. Tier 5 returns ok=true for a challenge page --
+    # it did render something -- so on 2026-08-23 a reddit reCAPTCHA wall arrived here labelled a
+    # success, and only its shortness kept it out of the cache. A wall padded past
+    # SUBSTANTIAL_CHARS would have been cached as the thread.
+    if STEALTH_BLOCK_RE.search(s):
+        return True
     if len(s) >= SUBSTANTIAL_CHARS:
         return False                     # too much text to be an interstitial — the document,
         #                                  even if it happens to contain a JS/wall phrase in body
@@ -616,8 +627,93 @@ def _norm_url(url):
         return url
 
 
+# ── per-site surface rules ────────────────────────────────────────────────────────────────────
+#
+# Some sites serve the document on exactly one surface and a wall on the rest. That is knowledge
+# about a site, not about a fetch, so it belongs here as behaviour rather than in a page of prose
+# a model has to remember to consult (it will not: on 2026-08-23 a worker walked every dead end
+# in this comment while a playbook skill describing them sat one skill_view away).
+#
+# Reddit, measured 2026-08-23 from this host:
+#   www.reddit.com  html  -> the document, via the render tier
+#   old.reddit.com  html  -> "Welcome to Reddit", the login wall (this INVERTED on 2026-08-21;
+#                            old.reddit used to be the surface that worked)
+#   *.json, api.    json  -> HTTP 403, a 260-char "You've been blocked by network security" page
+#   /r/<sub>/s/<id>       -> a share link; the render tier follows it, `curl -sIL` now 403s
+REDDIT_CONTENT_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "new.reddit.com",
+                        "np.reddit.com", "m.reddit.com", "i.reddit.com", "api.reddit.com"}
+REDDIT_CANONICAL_HOST = "www.reddit.com"
+
+# Query keys that identify who shared a link, never which document it is. Dropping them keeps one
+# thread from occupying a fresh cache entry per person who pastes it.
+TRACKING_PARAMS = ("share_id", "utm_source", "utm_medium", "utm_campaign", "utm_name",
+                   "utm_term", "utm_content", "ref", "ref_source", "correlation_id", "rdt",
+                   "context", "$deep_link", "$original_url")
+
+
+def canonical_url(url):
+    """The surface of `url` that actually answers, unchanged when no rule applies.
+
+    Pure and idempotent: it rewrites where the document lives, never what is being asked for. A
+    comment permalink stays a comment permalink — flattening it to its parent post would answer a
+    question the caller did not ask."""
+    try:
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode   # noqa: PLC0415
+        p = urlsplit((url or "").strip())
+        host = (p.hostname or "").lower()
+        if host not in REDDIT_CONTENT_HOSTS:
+            return (url or "").strip()                  # incl. developers./ads. — not content
+        path, query = p.path, p.query
+        if path.endswith("/.json") or path.endswith(".json"):
+            # Not JSON at all any more, just a differently-shaped wall. The html path underneath
+            # it is the document, and its query (limit=, sort=) was for the API, not the page.
+            path = path[:-len("/.json")] + "/" if path.endswith("/.json") else path[:-len(".json")]
+            query = ""
+        if query:
+            kept = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True)
+                    if k.lower() not in TRACKING_PARAMS]
+            query = urlencode(kept)
+        return urlunsplit(("https", REDDIT_CANONICAL_HOST, path, query, ""))
+    except Exception:                                                # noqa: BLE001
+        return (url or "").strip()                                   # never break a fetch
+
+
+# The cheapest tier a host is allowed to start at. A wall that every plain request has met is not
+# worth ATTEMPTS tries and exponential backoff to meet again: on 2026-08-23 that ceremony cost
+# 19.7s per reddit fetch before the ladder was permitted to escalate to the tier that works.
+# Keyed by canonical host, so a rule cannot be dodged by pasting an alias.
+HOST_MIN_TIER = {REDDIT_CANONICAL_HOST: "firecrawl"}
+
+
+def min_tier_for(url):
+    """The tier this host must start at, or None to walk the ladder from the top."""
+    try:
+        from urllib.parse import urlsplit                             # noqa: PLC0415
+        return HOST_MIN_TIER.get((urlsplit(canonical_url(url)).hostname or "").lower())
+    except Exception:                                                 # noqa: BLE001
+        return None
+
+
+_REDDIT_POST_RE = re.compile(
+    r"https://www\.reddit\.com/r/[A-Za-z0-9_]+/comments/[a-z0-9]+/(?!comment/)[a-z0-9_]+")
+
+
+def canonical_from_render(text, url=None):
+    """The post's own permalink as found in a rendered page, or None.
+
+    A share link cannot be resolved cheaply any more — `curl -sIL` answers 403, and the renderer
+    reports back the URL it was handed, not the one it landed on. The rendered body still carries
+    the permalink, so the canonical form worth recording is recoverable from the content itself.
+    Returns None rather than a guess: a wrong canonical is worse than no canonical."""
+    hits = _REDDIT_POST_RE.findall(text or "")
+    if not hits:
+        return None
+    best = max(sorted(set(hits)), key=hits.count)    # most-repeated, ties broken deterministically
+    return best.rstrip("/") + "/"
+
+
 def _url_hash(url):
-    return hashlib.sha1(_norm_url(url).encode()).hexdigest()[:16]
+    return hashlib.sha1(_norm_url(canonical_url(url)).encode()).hexdigest()[:16]
 
 
 def cache_path(url):
@@ -761,9 +857,19 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
         targets.append((api, "ncbi-api"))
     else:
         _note("ncbi-api", "skipped (not an NCBI url)")
-    targets.append((url, "http"))
 
-    last = Result("", "unreachable", "no attempt made")
+    # A host whose cheap surfaces are a known wall starts further down the ladder. The skip is
+    # recorded on the trail rather than being silent: a tier that never ran and a tier that failed
+    # are different facts, and a reader who cannot tell them apart cannot audit the ladder.
+    floor = min_tier_for(url)
+    if floor:
+        _note("http", "skipped (this host answers the cheap tiers with a wall)")
+        last = Result("", "unreadable", "cheap tiers skipped: %s starts at %s"
+                      % (_host_of(url), floor))
+    else:
+        targets.append((url, "http"))
+        last = Result("", "unreachable", "no attempt made")
+
     for target, via in targets:
         delay = 1.0
         for attempt in range(ATTEMPTS):
@@ -882,7 +988,12 @@ def _emit_fetch_event(url, r, ms=None):
 
 
 def fetch(url, timeout=45, use_cache=True, allow_browser=False):
-    """Fetch a URL and record ONE per-card metrics event; see `_fetch_impl` for the tiers."""
+    """Fetch a URL and record ONE per-card metrics event; see `_fetch_impl` for the tiers.
+
+    The surface rewrite happens here, at the single entry point, so every caller and every tier
+    below sees the one URL that answers — and the metrics event records the surface actually
+    fetched rather than whichever alias happened to be pasted."""
+    url = canonical_url(url)
     t0 = time.time()
     r = _fetch_impl(url, timeout=timeout, use_cache=use_cache, allow_browser=allow_browser)
     _emit_fetch_event(url, r, ms=int((time.time() - t0) * 1000))

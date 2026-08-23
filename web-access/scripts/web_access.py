@@ -313,7 +313,10 @@ def cmd_fetch(args):
     r = rxfetch.fetch(args.url, timeout=args.timeout, allow_browser=not args.no_browser)
     text = (r.text or "")
     truncated = len(text) > args.max_chars
-    body = {"ok": r.ok, "url": args.url, "outcome": r.outcome, "detail": r.detail,
+    # The surface actually read, not the alias handed in — a caller that files this URL (a vault
+    # entry, a citation) must end up with the one that will still answer when it is followed.
+    body = {"ok": r.ok, "url": rxfetch.canonical_url(args.url), "outcome": r.outcome,
+            "detail": r.detail,
             "via": r.via, "chars": len(text), "truncated": truncated,
             # Every layer tried, in order. A caller that can only see the verdict cannot tell a
             # layer that failed from one that never ran — which is the doubt this answers.

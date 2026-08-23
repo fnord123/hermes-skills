@@ -701,5 +701,205 @@ try:
 finally:
     _wa.rxfetch.fetch = _saved_fetch
 
+
+# ══ Reddit: the surface the model is handed is not the surface that answers ═══════════════════
+#
+# Every URL below is one a real user actually pasted at the archivist profile (pulled from its
+# vault + logs, 2026-08-23): 15 distinct /s/ share links, 17 canonical posts, 6 comment
+# permalinks, two .json endpoints, and an old.reddit rewrite. The knowledge these cases encode
+# used to live as PROSE in a profile-local `web-fetch-playbook` skill that told the model which
+# surfaces to avoid — a page of negative examples sitting in a 27B's context, which it duly
+# ignored on 2026-08-23. Behaviour belongs in the fetcher, not in a page the model must remember
+# to read.
+#
+# Ground truth for each expectation was measured through the render tier on 2026-08-23, and the
+# measurement is quoted in the comment above the case that depends on it.
+
+def _fn(name):
+    """The function under test, or a stub that fails every assertion — clean TDD red before the
+    implementation lands, rather than an AttributeError that aborts the whole suite."""
+    return getattr(rxfetch, name, lambda *a, **k: None)
+
+
+# Real inputs, verbatim from the corpus.
+SHARE_LL    = "https://www.reddit.com/r/LocalLLaMA/s/YiVgh7yR69"
+SHARE_HA    = "https://www.reddit.com/r/homeassistant/s/URwOC22SAN"
+SHARE_OLD   = "https://old.reddit.com/r/iRacing/s/i2ShebwupP"
+SHARE_WWW   = "https://www.reddit.com/r/iRacing/s/i2ShebwupP"
+POST_LL     = "https://www.reddit.com/r/LocalLLaMA/comments/1vvyacg/qwen_38_27b_is_a_game_changer/"
+POST_HA     = "https://www.reddit.com/r/homeassistant/comments/1vqu9il/phlips_hue_lights/"
+POST_OLD    = "https://old.reddit.com/r/LocalLLaMA/comments/1o32k8d/what_do_you_think_is_the_most_underrated_local/"
+JSON_HA     = "https://www.reddit.com/r/homeassistant/comments/1vqu9il/phlips_hue_lights/.json?limit=5"
+JSON_OLD    = POST_OLD + ".json"
+COMMENT     = "https://www.reddit.com/r/hermesagent/comments/1vvxppq/comment/p5cy8p8/"
+TRACKED     = POST_LL + "?share_id=xLQx9nMhQ0&utm_source=share&utm_medium=web3x"
+
+section("reddit: rewrite the surface, not the request")
+canon = _fn("canonical_url")
+
+# Measured 2026-08-23: old.reddit.com/r/iRacing/s/i2ShebwupP renders as "Welcome to Reddit" — the
+# login wall. The SAME path on www renders the thread, "Beginner Friendly Live-Broadcast MX-5
+# League at BWRL", 31,949 chars. One hostname is the whole difference between a wall and the
+# document, which is why this is a rewrite and not a retry.
+chk("old.reddit share link is rewritten to www", canon(SHARE_OLD) == SHARE_WWW,
+    "(got %r)" % canon(SHARE_OLD))
+chk("old.reddit canonical post is rewritten to www",
+    canon(POST_OLD) == POST_OLD.replace("old.reddit.com", "www.reddit.com"),
+    "(got %r)" % canon(POST_OLD))
+
+# Measured 2026-08-23: the .json surface answers 403 with a 260-char "You've been blocked by
+# network security" page. It is not JSON, so a caller that parses it fails twice — once on the
+# wall, once on the parse.
+chk("a .json endpoint is rewritten to the html post", canon(JSON_HA) == POST_HA,
+    "(got %r)" % canon(JSON_HA))
+chk("an old.reddit .json endpoint loses BOTH the host and the suffix",
+    canon(JSON_OLD) == POST_OLD.replace("old.reddit.com", "www.reddit.com"),
+    "(got %r)" % canon(JSON_OLD))
+
+chk("share/utm tracking params are dropped", canon(TRACKED) == POST_LL,
+    "(got %r)" % canon(TRACKED))
+
+# A /s/ link is deliberately NOT resolved here. `curl -sIL` on one answered 403 with no Location
+# header on 2026-08-23 (it still worked at 06:30 the same morning), so a resolve step is a round
+# trip that now reliably fails. The render tier follows the redirect itself: fed SHARE_LL it
+# returned "Qwen 3.8 27B is a game changer. : r/LocalLLaMA", and SHARE_HA "Phlips hue lights :
+# r/homeassistant" — both the correct posts. Resolution is the renderer's job.
+chk("a www share link is passed through untouched", canon(SHARE_LL) == SHARE_LL,
+    "(got %r)" % canon(SHARE_LL))
+
+# Six of these are in the corpus. A comment permalink is a request for ONE comment; flattening it
+# to the parent post answers a question the user did not ask.
+chk("a comment permalink is preserved, not flattened to the post",
+    canon(COMMENT) == COMMENT, "(got %r)" % canon(COMMENT))
+
+# The rule is scoped to the content site. Both of these appear in the corpus and neither is a
+# post; rewriting them would invent a URL that does not exist.
+chk("developers.reddit.com is left alone",
+    canon("https://developers.reddit.com/docs/api") == "https://developers.reddit.com/docs/api")
+chk("ads.reddit.com is left alone",
+    canon("https://ads.reddit.com/register") == "https://ads.reddit.com/register")
+chk("a non-reddit url is untouched",
+    canon("https://example.com/a?b=c") == "https://example.com/a?b=c")
+
+chk("rewriting is idempotent", canon(canon(JSON_OLD)) == canon(JSON_OLD))
+
+# The share link and the canonical are the same document. Hashing them apart means the second
+# person to paste the thread pays for a render the cache already holds.
+chk("the rewritten forms share one cache key",
+    rxfetch.cache_path(POST_OLD) == rxfetch.cache_path(POST_OLD.replace("old.reddit.com",
+                                                                        "www.reddit.com")))
+
+section("reddit: skip the tiers that are known to be a wall")
+min_tier = _fn("min_tier_for")
+
+# Measured 2026-08-23: plain http to a reddit post is an interstitial, and to /s/ or .json a 403.
+# The ladder still spent ATTEMPTS tries with 1s/2s backoff on every one of them before it was
+# allowed to escalate — the 06:31 failure burned 19.7s to learn what this table already knows.
+chk("reddit floors at the render tier", min_tier(POST_LL) == "firecrawl",
+    "(got %r)" % min_tier(POST_LL))
+chk("the floor applies to share links too", min_tier(SHARE_LL) == "firecrawl")
+chk("the floor follows the rewrite, not the raw host", min_tier(POST_OLD) == "firecrawl")
+chk("a site with no history has no floor", min_tier("https://example.com/a") is None,
+    "(got %r)" % min_tier("https://example.com/a"))
+chk("the developer subdomain has no floor",
+    min_tier("https://developers.reddit.com/docs/api") is None)
+
+# The floor has to change what the ladder DOES, not merely describe it. A floored host must reach
+# the renderer without spending a single http request first.
+_real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
+_seen = {"http": 0, "render": 0}
+
+
+def _count_http(url, timeout, via="http"):
+    _seen["http"] += 1
+    return rxfetch.Result("", "unreadable", "stub: bot wall"), False
+
+
+def _count_render(url, timeout):
+    _seen["render"] += 1
+    return rxfetch.Result("thread " * 200, "ok", "stub", via="firecrawl")
+
+
+rxfetch._one_attempt, rxfetch._firecrawl_attempt = _count_http, _count_render
+try:
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        _r = rxfetch.fetch(POST_LL, allow_browser=True)
+    chk("a floored host makes NO http request", _seen["http"] == 0, "(made %d)" % _seen["http"])
+    chk("a floored host still reaches the renderer", _seen["render"] == 1 and _r.ok)
+    chk("the trail says the cheap tiers were skipped, not that they failed",
+        any(a.get("layer") == "http" and "skip" in str(a.get("result", "")).lower()
+            for a in (_r.attempts or [])),
+        "(trail: %r)" % [a.get("layer") for a in (_r.attempts or [])])
+
+    _seen["http"] = _seen["render"] = 0
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        rxfetch.fetch("https://example.com/page", allow_browser=True)
+    chk("an unfloored host still tries http first", _seen["http"] >= 1)
+finally:
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
+
+section("a captcha wall is not a document")
+# Verbatim from bladebro against POST_LL on 2026-08-23. Note `ok: true` — the stealth browser
+# reports success because it successfully rendered *a* page; the page is a challenge. Tier 5's
+# only defence is looks_unusable(), so the marker has to be part of that judgement.
+BLADE_WALL = (
+    "# Prove your humanity\n\n**r/LocalLLaMA**\n\n# Prove your humanity\n\n"
+    "We’re committed to safety and security. But not for bots. Complete the challenge "
+    "below and let us know you’re a real person. \n\n"
+    "[Reddit, Inc. © \"2026\". All rights reserved.](https://www.redditinc.com/)"
+    "[User Agreement](https://www.reddit.com/help/useragreement)"
+    "[Privacy Policy](https://www.reddit.com/help/privacypolicy)"
+    "⚠ blocked: recaptcha\n"
+    "⚠   remediation: reCAPTCHA challenge (v3 score-based or v2 checkbox)\n")
+chk("the 715-char reddit captcha wall is unusable", rxfetch.looks_unusable(BLADE_WALL))
+
+# The case above passes today only because the wall is short and link-heavy. A wall wrapped in
+# enough prose clears every length and prose heuristic we have, and then a challenge page gets
+# written to the cache as though it were the thread. The marker is the only reliable signal.
+chk("a LONG wall carrying the blocked marker is still unusable",
+    rxfetch.looks_unusable("This subreddit discusses local inference. " * 80 +
+                           "\n⚠ blocked: recaptcha\n"))
+chk("prose merely discussing captchas is still a document",
+    not rxfetch.looks_unusable("The thread argues that reCAPTCHA is a poor bot defence. " * 40))
+
+section("recovering the canonical url from a render")
+# The vault stores canonical URLs, never share links — but curl now 403s on /s/ and the renderer
+# reports metadata.url as the URL it was GIVEN (measured 2026-08-23: sourceURL and url both echo
+# SHARE_HA). The canonical is recoverable from the rendered body: the real render of SHARE_HA
+# carried the post permalink 5 times and /comment/ permalinks 10 times.
+from_render = _fn("canonical_from_render")
+RENDER_HA = ("[Skip to main content](%s#main-content)\n Phlips hue lights : r/homeassistant\n"
+             "[reply](https://www.reddit.com/r/homeassistant/comments/1vqu9il/comment/p489ij0/)\n"
+             "[reply](https://www.reddit.com/r/homeassistant/comments/1vqu9il/comment/p48a3lq/)\n"
+             "[permalink](https://www.reddit.com/r/homeassistant/comments/1vqu9il/phlips_hue_lights/)\n"
+             % SHARE_HA)
+chk("the post permalink is recovered from a share-link render",
+    from_render(RENDER_HA, SHARE_HA) == POST_HA, "(got %r)" % from_render(RENDER_HA, SHARE_HA))
+chk("comment permalinks do not win over the post permalink",
+    "/comment/" not in (from_render(RENDER_HA, SHARE_HA) or ""))
+chk("a render with no permalink yields nothing rather than a guess",
+    from_render("just some text with no links at all", SHARE_HA) is None,
+    "(got %r)" % from_render("just some text with no links at all", SHARE_HA))
+
+# A caller that files the URL it PASSED IN files the wall it was rescued from. The archivist
+# stores one URL per entry, so `fetch` reporting the input rather than the surface it actually
+# read is how old.reddit links end up preserved in a vault forever.
+_saved_fetch2 = _wa.rxfetch.fetch
+try:
+    _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("thread " * 200, "ok", "stub",
+                                                            via="firecrawl")
+    _ns = _typesf.SimpleNamespace(url=SHARE_OLD, max_chars=1000, timeout=5,
+                                  no_browser=False, trace=None, min_chars=200)
+    _buf = _iof.StringIO()
+    with _clibf.suppress(SystemExit), _clibf.redirect_stdout(_buf):
+        _wa.cmd_fetch(_ns)
+    _out = _jsonf.loads(_buf.getvalue())
+    chk("fetch reports the surface it read, not the alias it was given",
+        _out.get("url") == SHARE_WWW, "(got %r)" % _out.get("url"))
+finally:
+    _wa.rxfetch.fetch = _saved_fetch2
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
