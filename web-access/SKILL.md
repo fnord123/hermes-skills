@@ -40,6 +40,24 @@ metadata:
 
 ## Tools
 
+The verbs are served by the **webaccess service** on the docker host (one handler
+core, two facades). You reach them two ways — same verbs, same JSON:
+
+1. **MCP tools (preferred).** `mcp_webaccess_search`, `mcp_webaccess_fetch`,
+   `mcp_webaccess_do` — registered in this profile's config, typed schemas, no
+   shell needed. Use these.
+2. **CLI shim (fallback / cron).** POSTs to the service and prints the same JSON:
+
+```
+python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "QUERY" [--scope literature|products|web] [--max 10]
+python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--max-chars 20000]
+python3 ~/hermes-skills/web-access/scripts/web_access.py do     --task "TASK" [--start-url URL] [--max-steps 25] [--confirm]
+```
+
+The shim needs the `terminal` tool; MCP tools do not. If the service is down,
+the shim fails cleanly — there is no local fallback, because the backends
+(searxng, firecrawl) are not reachable from the LAN.
+
 | Verb | Purpose |
 |---|---|
 | `search` | Finds pages matching a query. Returns titles, URLs, and short snippets. |
@@ -47,13 +65,7 @@ metadata:
 | `search --scope products` | Searches the open web for manufacturer and retailer pages. |
 | `fetch` | Reads one page and returns its text. Handles PDFs and pages that only render in a browser. |
 | `do` | Carries out a multi-step task on a site and reports what it found. |
-| `do --confirm` | Carries out a task that must act on a site. Use only after the user approved this exact task. |
-
-```
-python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "QUERY" [--scope literature|products|web] [--max 10]
-python3 ~/hermes-skills/web-access/scripts/web_access.py fetch  --url "URL" [--max-chars 20000]
-python3 ~/hermes-skills/web-access/scripts/web_access.py do     --task "TASK" [--start-url URL] [--max-steps 25] [--confirm]
-```
+| `do confirm=true` | Carries out a task that must act on a site. Use only after the user approved this exact task. |
 
 Use `fetch` when you have a URL and want what the page says. Use `do` when
 reaching the answer takes several steps on a site.

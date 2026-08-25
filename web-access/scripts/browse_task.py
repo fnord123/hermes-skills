@@ -224,8 +224,11 @@ def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
     verbatim quotes still works. (The agent's own read action does the opposite: it extracts
     the markdown and returns only an answer.)
     """
-    fara_home = cfg.get("FARA_HOME") or ""
-    base_url, model = cfg.get("BROWSE_BASE_URL") or "", cfg.get("BROWSE_MODEL") or ""
+    fara_home = cfg.get("FARA_HOME") or os.environ.get("FARA_HOME") or ""
+    # Process env is the container's configuration path (config.env is a dev-machine
+    # convention); file first, so a dev config still wins over a stray env var.
+    base_url = cfg.get("BROWSE_BASE_URL") or os.environ.get("BROWSE_BASE_URL") or ""
+    model = cfg.get("BROWSE_MODEL") or os.environ.get("BROWSE_MODEL") or ""
     cli = Path(fara_home) / ".venv" / "bin" / "fara-cli"
     if not (fara_home and base_url and model and cli.exists()):
         return {"error": "agent rung unavailable (browser agent not configured)"}
@@ -238,7 +241,8 @@ def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
                "it before stopping. Do not open a different product, a search, or the homepage. "
                "Then stop." + READONLY_DIRECTIVE,
                "--start_page", url, "--output_folder", tmp,
-               "--base_url", base_url, "--api_key", cfg.get("BROWSE_API_KEY") or "none",
+               "--base_url", base_url,
+               "--api_key", cfg.get("BROWSE_API_KEY") or os.environ.get("BROWSE_API_KEY") or "none",
                "--model", model, "--max_rounds", str(max_steps)]
         if mode == "browserbase":
             cmd.insert(1, "--browserbase")
@@ -866,9 +870,9 @@ def main():
 
     log("START " + json.dumps({"task": args.task, "acted": bool(args.confirm),
                                "start_url": args.start_url, "max_steps": args.max_steps}))
-    base_url = cfg.get("BROWSE_BASE_URL") or ""
-    model = cfg.get("BROWSE_MODEL") or ""
-    api_key = cfg.get("BROWSE_API_KEY") or "none"
+    base_url = cfg.get("BROWSE_BASE_URL") or os.environ.get("BROWSE_BASE_URL") or ""
+    model = cfg.get("BROWSE_MODEL") or os.environ.get("BROWSE_MODEL") or ""
+    api_key = cfg.get("BROWSE_API_KEY") or os.environ.get("BROWSE_API_KEY") or "none"
     if not (fara_home and base_url and model):
         fail("the browser agent is not configured. Copy templates/config.env.example to "
              "scripts/config.env and set FARA_HOME, BROWSE_BASE_URL, and BROWSE_MODEL "

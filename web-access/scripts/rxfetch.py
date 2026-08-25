@@ -193,7 +193,7 @@ SUBSTANTIAL_CHARS = 20_000
 MIN_DOCUMENT_CHARS = int(os.environ.get("ANALYSIS_MIN_DOCUMENT_CHARS") or 200)
 
 # Tier 4: self-hosted Firecrawl (JS render -> full markdown). Set to "" to disable the rung.
-FIRECRAWL_URL = (os.environ.get("FIRECRAWL_API_URL") or "http://192.168.1.226:3002").rstrip("/")
+FIRECRAWL_URL = (os.environ.get("FIRECRAWL_API_URL") or "http://docker.putzolu.com:3002").rstrip("/")
 
 # Tier 5: bladebro stealth browser. Run one-shot in a FRESH container per fetch — the persistent
 # service raced on Chrome/Xvfb, while a clean container per fetch is reliable. Reached only when
@@ -944,7 +944,7 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
 # Neither can raise: metrics must never break a fetch.
 _FETCH_EVENTS_PATH = os.path.expanduser(
     os.environ.get("RX_FETCH_EVENTS", "~/.hermes/rx-review/logs/fetch-events.jsonl"))
-_LOKI_URL = os.environ.get("RX_LOKI_URL", "http://192.168.1.226:3100/loki/api/v1/push")
+_LOKI_URL = os.environ.get("RX_LOKI_URL", "http://docker.putzolu.com:3100/loki/api/v1/push")
 
 
 def _metrics_enabled():

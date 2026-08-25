@@ -65,7 +65,8 @@ scripts refuse and change nothing.
 | `gina-notify.py --topic <t> --body <b> [--handoff-date <ISO>] [--trip-name <n>] --dry-run` *then* the same call with `--confirm` | Posts a Model-X coordination message to the shared Discord channel (mentions Gina + the user). **Requires `--confirm` to post for real.** Normally fired automatically by a booking; direct call is an escape hatch. | **Yes — sends a message** |
 | `gina-pending.py [--resolve <id>]` | Lists outstanding Gina-coordination asks; `--resolve` clears one. | Read / small write |
 | `pallo-calendar-invite.py --plan '<plan_json>' [--events pickup,dropoff] [--to <emails>] --dry-run` *then* the same call with `--confirm` | Emails Google-Calendar invites (iMIP `.ics`) for the drop-off and/or pickup to you + Gina via AgentMail — they land in Google Calendar with RSVP. **Requires `--confirm` to send for real;** `--dry-run` prints the `.ics`. Fired automatically after a booking; call directly to (re)send for an existing stay. | **Yes — sends email invites** |
-| `gingr-login.py [--show-head]` | Captures / refreshes the saved portal session. Run only when a script reports `session_expired` or `not_logged_in`. | No (writes session file) |
+| `gingr-login.py [--show-head]` | Captures / refreshes the saved portal session. **Known broken: headless login does not complete on this portal — expect `login_failed`. Use `gingr-import-session.py` instead.** | No (writes session file) |
+| `gingr-import-session.py <localstorage.json> [--no-verify]` | Rebuilds the saved session from a localStorage dump exported from the user's logged-in browser tab. **This is THE way to fix `session_expired`.** The portal authenticates API calls with an `AUTHORIZATION` header from `localStorage["user.token"]` — cookies do NOT authenticate it, so never ask the user for cookies. Ask them to open the logged-in portal tab, press F12 → Console, run `copy(JSON.stringify(Object.fromEntries(Object.entries(localStorage))))`, and paste the result; save it to a file and pass it to this script. It verifies the session afterwards. | No (writes session file) |
 
 ## Safety — read-only by default
 
@@ -196,14 +197,51 @@ and relay it.
   the user, and re-run.
 - `conflict` — Pallo already has an overlapping reservation. Show it to the user
   and ask which stay they want.
-- `session_expired` / `not_logged_in` — run `gingr-login.py` once, then re-run
-  the original call.
+- `session_expired` / `not_logged_in` — the saved session no longer
+  authenticates. `gingr-login.py` will NOT fix this (headless login is blocked
+  by the portal) and cookies from the user's browser will NOT fix it either
+  (the portal authenticates with `localStorage["user.token"]`, not cookies).
+  Send the user the **session-refresh instructions** below VERBATIM, wait for
+  the JSON, save it to a file, run `gingr-import-session.py <file>`, then
+  re-run the original call.
+- `submit_failed` — the SUBMIT REQUEST button was clicked but didn't register.
+  This can happen if the button is off-screen (short viewport). The script now
+  scrolls it into view before clicking; if it still fails, re-run the same
+  `--confirm` call — it will re-fill the wizard and try again.
+
+### Session-refresh instructions (send this message verbatim)
+
+When you see `session_expired` / `not_logged_in`, send the user exactly this —
+do not summarize it, do not ask for cookies:
+
+> The kennel-portal session has expired and I can't log in headlessly, so I
+> need a fresh session from your browser. Takes about 30 seconds:
+>
+> 1. In Chrome, log in at https://tailwaginn.portal.gingrapp.com (if you're
+>    already logged in, just open that tab).
+> 2. Press **F12**, click the **Console** tab.
+> 3. Paste this and press Enter (if Chrome warns about pasting, type
+>    `allow pasting` first):
+>    `copy(JSON.stringify(Object.fromEntries(Object.entries(localStorage))))`
+> 4. It's now on your clipboard — paste it here as a message or .txt file.
+>    (It contains your login token, so only share it in this chat.)
+>
+> **Not cookies** — the F12 cookie list won't work for this portal; I need the
+> localStorage JSON from that exact command.
+
+When the JSON arrives, write it to a temp file exactly as received (it starts
+with `{"` — do not re-quote or reformat it), then:
+`python3 scripts/gingr-import-session.py /tmp/gingr-localstorage.json`
+A result of `"status": "ok"` means the session is live — re-run the original
+booking/read command. `imported_but_invalid` means the dump came from a
+logged-out tab — ask the user to log in first and re-export.
 - `not_found`, `not_cancellable`, `uncertain` — the stay wasn't located, has no
   cancel control, or the cancellation didn't verify. Report it and ask the user
   to check the portal.
 
-Run `gingr-login.py` **only** for `session_expired` / `not_logged_in`. A booking
-that took a long time is slow, not expired — re-run it with `timeout=600`.
+Refresh the session (via `gingr-import-session.py`) **only** for
+`session_expired` / `not_logged_in`. A booking that took a long time is slow,
+not expired — re-run it with `timeout=600`.
 
 Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 

@@ -1011,6 +1011,13 @@ def main() -> int:
                 # Real submit. SUBMIT REQUEST is an RNW pressable; a real mouse
                 # click at its coordinates is what reliably fires it (same as the
                 # terms checkbox). Fall back to _press_text.
+                # Scroll the button into view first — it can be off-screen on short viewports.
+                page.evaluate(r"""() => {
+                    const el=[...document.querySelectorAll('div,span,button')]
+                        .find(e => /^SUBMIT REQUEST$/i.test((e.innerText||'').trim()));
+                    if(el) el.scrollIntoView({block:'center', behavior:'instant'});
+                }""")
+                page.wait_for_timeout(400)
                 sbox = page.evaluate(r"""() => {
                     const el=[...document.querySelectorAll('div,span,button')]
                         .find(e => /^SUBMIT REQUEST$/i.test((e.innerText||'').trim()));

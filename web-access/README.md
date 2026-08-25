@@ -1,71 +1,210 @@
 # web-access
 
-Search, page-reading, and multi-step web tasks, through tooling we control. Three verbs, one
-JSON object each.
+Self-hosted web access for agents and pipelines: find pages, read pages, and carry out
+multi-step tasks on sites. Three verbs, one JSON object each, through tooling we control end
+to end — nothing here depends on a paid third-party API being picked correctly, because the
+backends are named in code we own.
 
-**`search`** — find pages. Asks the self-hosted SearXNG and returns titles, URLs and snippets;
-never page content. `--scope literature` reaches the research databases (PubMed, Semantic
-Scholar, OpenAlex, Crossref, arXiv), `--scope products` the open web for labels and retailers.
+The skill exists because Hermes' built-in `web` toolset picks a backend from whatever API keys
+happen to be in the environment, ranking a paid provider first. On 2026-07-31 a stale key
+silently outranked the self-hosted stack and an entire research stage failed on a service
+nobody had used in weeks. Naming the backend in one script removes that class of failure, and
+an agent granted only these verbs cannot reach anything else — which is what let the `web`,
+`search`, and `browser` toolsets be removed from most profiles entirely.
+
+Three properties hold across everything below:
+
+- **Documents come back verbatim**, with the layer that produced them named in `via`.
+  rx-review's citation audit locates exact quotes; a model's paraphrase would break that
+  silently. Accordingly, **no render tier uses a chat model.**
+- **Escalation is the fetcher's job, not the caller's.** A caller states a URL and gets text
+  or an honest failure; it never chooses tiers. Failures are classified (`ok` /
+  `unreadable` / `unreachable`) so a caller can never report an unread page as an empty one.
+- **Cost orders everything.** The ladder tries the cheapest source that could work and stops
+  at the first that yields usable text. The only metered rung is switched off entirely.
+
+Consumers: Hermes agents reach the verbs through the **MCP facade**; the rx-review pipeline
+through plain **HTTP** behind its library binding; the weekly research cron jobs through the
+**CLI shim** under the cron hook. All three hit the same handlers.
+
+This document runs: the verbs first, then interfaces and deployment, then the architectural
+detail (the fetch ladder; throttling and caching; the browser tier), closing with an appendix
+of prior decisions.
+
+---
+
+# The verbs
+
+One section per verb: the contract, and the reason it looks the way it does. Mechanical depth
+follows in the architecture part.
+
+## `search` — find pages
+
+Asks the **self-hosted SearXNG** on the docker host (`.226`) and returns titles, URLs and
+snippets — never page content. Read what you found with `fetch`. `--scope literature` queries
+the research databases (PubMed, Semantic Scholar, OpenAlex, Crossref, arXiv) rather than
+SearXNG; the open-web scopes (`products`, default `web`) ask one high-quality engine first and
+broaden automatically when it returns nothing, with `widened` recording which happened.
 
 ```
-python3 scripts/web_access.py search --query "..." [--scope literature|products|web]
+python3 scripts/web_access.py search --query "..." [--scope literature|products|web] [--max 10]
 ```
 
-**`fetch`** — read one page and return **its verbatim text**. You give it a URL, it gives you
-the document. It climbs the layer ladder below by itself, from a cached copy up through a
-model-driven browser, and reports which layer produced the text in `via`. Handles PDFs. This is
-the verb whose output feeds rx-review's citation audit, which is why it returns the page rather
-than a summary of it.
+**Why search is self-hosted.** Until 2026-07-27 this ran on Tavily's free tier (1,000
+queries/month), and the failure was structural twice over. The quota itself was the first
+problem. The second was how Hermes chose backends: `web.backend` pinned *both* search and
+extraction to one provider, so an exhausted quota took both capabilities down together. The
+replacement is a self-hosted pair on `.226` — SearXNG for queries, Firecrawl for rendering
+(see the `firecrawl` rung under *The fetch ladder*) — giving zero recurring cost, no
+third-party API keys, and queries that never leave the LAN. Design record:
+`~/homelab/docs/hermes-web-search.md`.
+
+## `fetch` — read one page
+
+You give it a URL, it returns **the document**: verbatim text, PDFs handled, plus `via`
+naming the layer that produced the text and `attempts` listing everything tried. Verbatim is a
+hard requirement, not a nicety — rx-review's citation audit locates exact quotes, which a
+model's paraphrase would break silently. The climb up the tier ladder (cache → NCBI → plain
+HTTP → rendered → stealth-rendered, cheapest-that-works, escalating only on *detected*
+withholding) is specified in *The fetch ladder* and *How `fetch` climbs* below; the escalation
+triggers in *Which failures escalate*; the outcome vocabulary in *`unreachable` vs
+`unreadable`*.
 
 ```
 python3 scripts/web_access.py fetch --url "..." [--max-chars 20000]
 ```
 
-**`do`** — carry out a multi-step task on a site and return **an answer**, not a document. A
-browser session driven by the model: apply the site's own filters, page through listings, follow
-a flow across screens. It is the only verb that can change anything, and only with `--confirm`
-after the user approved that exact action.
+Two properties worth restating here because callers rely on them:
+
+- **No render tier uses a chat model.** Every rung returns the document itself, so an audit
+  that distrusts model-touched text can refuse anything claiming otherwise.
+- **Escalation is the fetcher's job, not the caller's.** A caller never chooses a tier; it
+  states a URL and gets text or an honest failure.
+
+## `do` — carry out a task on a site
+
+A browser session driven by the Fara computer-use model: apply the site's own filters, page
+through listings, follow a flow across screens. It returns **an answer**, not a document —
+that is the whole difference from `fetch`, which returns the page. It is the only verb that can
+change anything on a site, and it is deliberately kept visible-but-separate rather than folded
+into `fetch` as an automatic escalation: handing control to an acting agent must be a
+deliberate choice, because auto-escalation would mean the model could sign in or submit
+something without ever choosing to.
 
 ```
 python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 25] [--confirm]
 ```
 
-The `fetch`/`do` split is text versus answer. Use `fetch` when you want what the page says; use
-`do` when reaching the answer takes several steps. Both can end up driving the same browser —
-they differ in what comes back.
+Contract details: `status: complete` carries the answer; `needs_input` carries a question for
+the user; `max_rounds`/`timed_out` carry partial findings. Budgets differ from `fetch`'s
+escalation path — a standalone `do` runs up to **30 minutes**, versus the 900s agent rung
+inside a `fetch` climb (*Timeout budget* below). Architecture, setup and the Fara scaffold are
+in the browser-tier part of the architecture section.
 
-## Why this exists
+**Acting is gated by `--confirm`, and the gate is honest about what it is:** without it, a
+strict read-only instruction is prepended to the task — an instruction to the model, not a
+browser-level sandbox. With it, the script may act, and `SKILL.md` ties that flag to the
+user having approved that exact action. The browser carries a real identity (pre-seeded
+cookies are, where seeded, a logged-in session), so an acting run acts *as the user*. Treat
+`--confirm` as a strong norm backed by user approval, never as a technical guarantee.
 
-Hermes' built-in `web` toolset picks a backend from whatever API keys happen to be in the
-environment, ranking a paid provider first. On 2026-07-31 a stale key silently outranked the
-self-hosted stack and an entire research stage failed on a service nobody had used in weeks.
-Naming the backend in one script we own removes that class of failure, and an agent granted only
-these scripts cannot reach anything else — which is what let the `web`, `search`, and `browser`
-toolsets be removed from those profiles entirely.
+(The call forms above keep their shape: after the migration the CLI shim
+(`web_access.py`) is a thin POST to the service — callers swap transport, not
+syntax, and the JSON contract is unchanged. There is no local fallback: if
+the service is down the shim fails cleanly, because the backends it would
+have reached are not exposed to the LAN.)
 
-## Why this absorbed browse-task (2026-08-03)
+---
 
-`search`/`fetch` and the multi-step browser agent shipped as two skills. They were never
-siblings: this skill's most expensive fetch tier already shelled out to the other one. That left
-two problems the merge fixes structurally rather than by documentation.
+# Interfaces and deployment
 
-**Both skills claimed the JavaScript-page case.** browse-task's description invited the model to
-use it directly for "a single page the ordinary fetch could not read"; this skill said to use
-`fetch --browser`. Those are the same case, and the browse-task route skipped this module's
-cache, its cheaper tiers, and its per-host gate. One skill with one entry point cannot be
-mis-routed.
+*(decided 2026-08-23)* The verbs are served from a **Docker container on the docker host
+(`.226`)** over two facades backed by **one handler core**:
 
-**`--browser` was a seam the model had to reason about.** Escalation is a property of the
-fetcher, not a decision for the caller: it fires only on `unreadable`, which means the server
-answered and withheld the document — the one failure a render can fix. It is automatic now.
-`--no-browser` remains for a caller that would rather fail than spend the seconds.
+- **MCP shim — the preferred surface, used everywhere else.** Every agent profile reaches the
+  verbs as typed tools (`mcp_webaccess_search` / `_fetch` / `_do`). Typed schemas guide the
+  model instead of SKILL.md discipline, and profiles can expose the verbs without granting a
+  general shell.
+- **HTTP API — kept for rx-review and debug.** rx-review is a pipeline of plain Python that
+  calls `fetch()` as a function; scripts cannot invoke MCP tools, and bolting an MCP client
+  into the pipeline would buy nothing — the client speaks HTTP underneath anyway. And when a
+  fetch misbehaves, `curl` beats an MCP inspector, especially inside cron post-mortems.
 
-The verb `do` stays visible and separate on purpose. `fetch` is deterministic plumbing; `do`
-hands control to an LLM computer-use agent with a step budget, a timeout, and the ability to
-act. Auto-escalating into it would mean the model could sign in or submit something without ever
-choosing to, and the `--confirm` gate only means something if invoking the actor is deliberate.
+A thin CLI shim (~30 lines: POST, print JSON) preserves the old command-line shape for the
+cron hook during migration.
 
-## Tiers
+## Why the code lives in a container
+
+Agents run with file tools on this machine as `dputzolu`. Today the orchestrator source,
+`config.env` (LiteLLM/browserbase keys), the page cache and `learned.json` are all readable by
+any agent that goes looking — the credential guard filters *terminal command text*, not
+`read_file`. Moving them into a container removes that class of exposure structurally rather
+than by another text filter. It also deletes bladebro's SSH hop (the service runs beside it on
+`.226`) and creates one place where every fetch can be audited.
+
+## One implementation, two transports
+
+MCP is mounted **on top of** the HTTP API's verb handlers — the GitHub-MCP-server pattern. The
+product is the three verbs as JSON; `/search`, `/fetch`, `/do` and their MCP tool equivalents
+delegate to identical functions. No second implementation exists anywhere; "shim" means thin
+facade, not separate codepath.
+
+## What moves and what stays
+
+| Into the container | Stays on this machine |
+|---|---|
+| `web_access.py` / `rxfetch.py` / `browse_task.py` | rx-review's 88-line binding (`~/.hermes/rx-review/rxfetch.py`), re-pointed at HTTP behind its existing `fetch()` signatures |
+| `config.env` → container env / compose secrets | the CLI shim, replacing the old script path |
+| page cache, `learned.json`, lock dir → named volumes | cron hook (`cron-terminal-web-access-only.sh`), rewritten to allowlist only the shim |
+| Fara scaffold + patched fork, Playwright/Chromium, xvfb | SKILL.md, updated to document both call forms |
+
+Full v1: all three verbs live in the container from day one, Fara/Playwright/xvfb baked into
+the image. The Fara patches documented under *Local patches to the Fara scaffold* must be
+applied inside the image build (the cookie hook, `FARA_DUMP_MARKDOWN`, landed-URL sidecar) —
+they are load-bearing for `fetch`'s agent tier.
+
+## Access model
+
+Two layers, deliberately different in strength:
+
+1. **Network boundary (capability).** The container binds LAN-only. Anything on the LAN can
+   reach all three verbs.
+2. **Per-profile registration (visibility).** Each Hermes profile lists the MCP server in its
+   own `config.yaml`; registering injects the three tools into every conversation in that
+   profile; not registering keeps them out of the catalog entirely. Registration controls
+   salience, not reachability — an unregistered-but-code-capable profile can still hand-write
+   three lines of urllib against the API.
+
+That limitation is **accepted** for `search`/`fetch` (read-only; matches today's posture).
+For `do` it is also accepted for now: no token today; the boolean `--confirm` plus per-profile
+exclusion carries the weight, exactly as it does in the current CLI world.
+
+## Migration
+
+- **Cron jobs:** the weekly research jobs eventually drop `terminal` entirely — three typed
+  MCP tools replace the hook dance. Jobs pin their model at creation; each needs editing as it
+  moves.
+- **Hook retirement:** `cron-terminal-web-access-only.sh` is removed only after no cron job
+  still depends on it. Both paths coexist during transition.
+- **Rollback:** the old CLI keeps working until the hook flips; run both until then.
+- **JSON contracts unchanged:** same output shapes as today, so callers migrate by swapping
+  transport, not parsing.
+
+## Known future options (not built)
+
+- A bearer token on `/do` alone — injected via `${VAR}` in the MCP headers block like TRMNL's
+  key — if the no-token posture ever feels thin. No redesign needed; it slots into the existing
+  facade.
+- An arm/execute protocol for acting tasks (arm returns a short-TTL token; execution requires
+  presenting it), which would make `--confirm` service-enforced instead of model-normed.
+- An MCP facade variant exposing `search`/`fetch` while excluding `do` per profile, via the
+  existing per-server `tools:` filter.
+
+---
+
+# Architecture
+
+## The fetch ladder
 
 `fetch` tries the cheapest source that could work and stops at the first that yields usable
 text, reporting which one did in `via`:
@@ -80,26 +219,22 @@ text, reporting which one did in `via`:
 | 6 | `browserbase` | a **remote managed** Chromium built to defeat bot detection; **OFF by default** (`WEB_ALLOW_BROWSERBASE=1` to enable), driven via `browse_task --mode browserbase` | none | seconds **plus money** — metered third party |
 
 **Render order is cheapest-that-works, and each rung escalates only on a *detected* failure**
-(HTTP shell/interstitial → Firecrawl; Firecrawl blocked/empty → bladebro; both free rungs failed →
-browserbase). The complementary A/B is the reason for the order: Firecrawl wins JS/full-text/speed
-and clears most walls, while bladebro's narrow win is stealth against the hardest commercial
-anti-bot — so trying Firecrawl then bladebro covers each one's blind spot for free before paying.
+(HTTP shell/interstitial → Firecrawl; Firecrawl blocked/empty → bladebro; both free rungs
+failed → browserbase). The complementary A/B is the reason for the order: Firecrawl wins
+JS/full-text/speed and clears most walls, while bladebro's narrow win is stealth against the
+hardest commercial anti-bot — so trying Firecrawl then bladebro covers each one's blind spot
+for free before paying.
 
-**No render tier uses a chat model.** Every rung returns the document itself: cache/ncbi/http are
-plumbing; `firecrawl` and `browser:bladebro` are model-free renderers; `browserbase` is a remote
-browser. The retired local render (headless/headful Playwright and the fara screenshot→action
-agent loop) is commented out in `rxfetch.py`, kept only for rollback.
-
-**Order is by cost, and `browserbase` is always last.** Layers 4, 5 and 6 all use the same free
-local browser and differ in how hard they try: 4 loads the page, 5 loads it convincingly, 6 works
-it. Spending the model is cheaper than spending money, so the agent always precedes the managed
-browser. Layer 7 is the only rung that leaves the machine and bills a metered account (free tier:
-1 browser-hour/month) — **currently switched off entirely via `BROWSE_NO_BROWSERBASE=true`.**
+**Order is by cost, and `browserbase` is always last.** Layers 4, 5 and 6 all use the same
+free local browser and differ in how hard they try. Spending the model is cheaper than
+spending money, so the agent always precedes the managed browser. Layer 6 is the only rung
+that leaves the machine and bills a metered account (free tier: 1 browser-hour/month) —
+**currently switched off entirely via `BROWSE_NO_BROWSERBASE=true`.**
 
 The ordering is enforced, not merely described: `rxfetch._browser_attempt` passes
-`--no-browserbase` unconditionally, so the render tier can never jump to layer 7 on a site whose
-policy names browserbase (costco.com does). Without it, `http` would escalate straight to the
-paid remote browser past every free rung.
+`--no-browserbase` unconditionally, so the render tier can never jump to the paid rung on a
+site whose policy names browserbase (costco.com does). Without it, `http` would escalate
+straight to the paid remote browser past every free rung.
 
 ### How `fetch` climbs
 
@@ -108,16 +243,14 @@ where "usable" means at least `--min-chars` (200 by default) and not an intersti
 it tried, and what that rung returned, comes back in `attempts`, so a failure says where it got
 to rather than just that it failed.
 
-`via` names the rung that produced the text: `cache`, `ncbi-api`, `http`, `browser:headless`,
-`browser:headful`, `agent:headful`, or `browserbase`. A caller can therefore tell a free local
-render from a paid remote one, and an audit that distrusts model-touched text can refuse
-anything prefixed `agent:`.
+`via` names the rung that produced the text. A caller can therefore tell a free local render
+from a paid remote one, and an audit that distrusts model-touched text can refuse it.
 
 **Prior experience skips rungs below, never replaces the ladder.** If a site is known to need
-headful, the ladder starts at headful and keeps browserbase above it in reserve; retrying a rung
-already known to fail for that host is pure latency. What worked is written back to the learned
-cache (`BROWSE_LEARNED_POLICY`, default `~/.config/browse-task/learned.json`) so the next fetch
-of that site starts there.
+headful, the ladder starts at headful and keeps the dearer rungs above it in reserve; retrying
+a rung already known to fail for that host is pure latency. What worked is written back to the
+learned cache (`BROWSE_LEARNED_POLICY`, default `~/.config/browse-task/learned.json`) so the
+next fetch of that site starts there.
 
 **`--all-layers` ignores that knowledge and climbs from the bottom.** The learned cache is only
 as good as the code that wrote it: an entry recorded while a rung was broken says "this rung
@@ -138,34 +271,34 @@ Two other switches shape the ladder: `--no-agent` stops it at the plain renders,
 | 6 agent (fara) | yes — navigates, then returns the landed page's markdown | yes; this *is* `do`, and it returns the answer instead |
 | 7 browserbase | yes when enabled, always last | last rung |
 
-**The same layer 6, used two different ways.** `do` lets the agent read the page and returns its
-answer. `fetch` uses the agent purely as a *navigator* — dismiss the consent wall, clear the
-interstitial, reach the real page — and then takes `get_page_markdown()` from the landed page in
-the same session, so cookies and JS state the agent just established still apply. What comes
-back is the document. That is what keeps the citation audit working, and it needs the
-`FARA_DUMP_MARKDOWN` patch listed below, because fara's own read action extracts that markdown
-and then discards it in favour of the model's prose.
+**The same agent rung, used two different ways.** `do` lets the agent read the page and returns
+its answer. `fetch` uses the agent purely as a *navigator* — dismiss the consent wall, clear
+the interstitial, reach the real page — and then takes `get_page_markdown()` from the landed
+page in the same session, so cookies and JS state the agent just established still apply. What
+comes back is the document. That is what keeps the citation audit working, and it needs the
+`FARA_DUMP_MARKDOWN` patch listed under *Local patches*, because fara's own read action
+extracts that markdown and then discards it in favour of the model's prose.
 
-`ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL only
-for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not exist and
-`http` is the first request made. NCBI Bookshelf (StatPearls) is deliberately excluded — `efetch
-db=books` answers with a 193-byte id list while a plain GET of the page returns ~94KB of real
-text, so routing it would swap working content for an empty request.
+`ncbi-api` is conditional, not a step every fetch walks through. `_ncbi_url()` returns a URL
+only for a PubMed article or a PMC id on an NCBI host; for anything else the tier does not
+exist and `http` is the first request made. NCBI Bookshelf (StatPearls) is deliberately
+excluded — `efetch db=books` answers with a 193-byte id list while a plain GET of the page
+returns ~94KB of real text, so routing it would swap working content for an empty request.
 
 There used to be a `hermes-cache` tier between `http` and `browser`: it scavenged text that
 Hermes' own built-in `web` toolset had left in `~/.hermes/cache/web/`. It was removed on
-2026-08-03. The profiles that fed it — `rx-research`, `rx-audit`, `rx-redteam` — no longer carry
-the `web` toolset (removing it is the payoff described above), so those 601 files were frozen
-residue that could only ever answer for pages already read. It was also the one tier that
-matched fuzzily, by host plus a guessed identifier, which cost two incidents of auditing
-citations against the wrong document. A tier that cannot gain new entries is not worth the
-matching risk.
+2026-08-03. The profiles that fed it — `rx-research`, `rx-audit`, `rx-redteam` — no longer
+carry the `web` toolset (removing it is the payoff described in the overview), so those 601
+files were frozen residue that could only ever answer for pages already read. It was also the
+one tier that matched fuzzily, by host plus a guessed identifier, which cost two incidents of
+auditing citations against the wrong document. A tier that cannot gain new entries is not worth
+the matching risk.
 
-The order is the point: everything above `browser` costs one request or nothing, so trying them
-first is nearly free. The browser is the only tier that can read a JavaScript-rendered page and
-by far the most expensive, so it is reached only after a cheaper tier returned `unreadable` —
-the one failure rendering can fix. A page that never responded will not respond to a browser,
-and a 404 is an answer, not a bot wall; neither spends a render.
+The order is the point: everything above the renders costs one request or nothing, so trying
+them first is nearly free. The browser is the only tier that can read a JavaScript-rendered
+page and by far the most expensive, so it is reached only after a cheaper tier returned
+`unreadable` — the one failure rendering can fix. A page that never responded will not respond
+to a browser, and a 404 is an answer, not a bot wall; neither spends a render.
 
 ### Which failures escalate
 
@@ -195,25 +328,63 @@ for a browser to reach either.
 
 Worth knowing what this does *not* fix: Best Buy answers a real headful Chromium with
 `net::ERR_HTTP2_PROTOCOL_ERROR` — it resets the connection on TLS/H2 fingerprint before any page
-loads. Verified 2026-08-03. No local mode helps; that is what layer 7 is for.
+loads. Verified 2026-08-03. No local mode helps; that is what the paid rung is for.
 
 The browser tier runs `scripts/browse_task.py` with `--dump-text`, which returns the rendered
 text with no agent in the loop — deliberately, because a citation audit locates exact quotes and
 a model's paraphrase would break that silently.
 
-It is still reached as a **subprocess by path**, not an import, even though it now sits in the
+It is still reached as a **subprocess by path**, not an import, even though it sits in the
 same directory. Its dependencies (Playwright, the fara-cli venv, xvfb) are not `rxfetch`'s. A
 box with no browser installed must fail that one tier rather than fail to import `rxfetch` and
 take every cheap tier down with it — rx-review's CI has no browser and imports `rxfetch`
 through `verify.py`, so an import-time dependency there stops the pipeline's tests dead.
 `web_access_test.py` asserts this.
 
-## Throttling
+### The 200-character floor
 
-Every tier that makes a **request** runs inside one cross-process host gate — `ncbi-api`, `http`
-and `browser`, plus `search` in `web_access.py`. The `cache` tier takes no gate and should not:
-reading a local file is not traffic, and throttling it would make the cheap path pay for the
-expensive one's politeness. Rate limiting begins where the network does.
+A response shorter than `--min-chars` (default 200) is treated as an interstitial rather than a
+document. Lowering it to 1 to accommodate short pages was tried and immediately reported a
+141-character JavaScript shell as `ok: true`. The two errors are not symmetric:
+
+- a short real page called `unreadable` → the browser tier escalates and gets it
+- a JavaScript shell called `ok` → the caller writes conclusions from an empty page
+
+The escalation makes the first harmless, so the conservative default is the correct one.
+
+### `unreachable` vs `unreadable`
+
+`unreadable` means the server answered and withheld the document (JavaScript shell, bot wall,
+login). `unreachable` means no usable response arrived. A caller that cannot tell them apart
+writes "the source does not support this claim" when the truth is "we were throttled" — which is
+how one citation audit came to judge claims against the text "Checking your browser before
+accessing pubmed". Hence the distinct outcomes and the explicit guidance in SKILL.md never to
+report an unread page as an empty one.
+
+### Verified against real failures
+
+Checked against the pages that actually failed a pipeline run on 2026-07-31. Thorne's product
+pages return a 141-character shell to a plain read; via the browser tier they return ~8,000
+characters including the Supplement Facts panel:
+
+| Product | Panel |
+|---|---|
+| Magnesium Bisglycinate | 200 mg |
+| Super EPA | EPA 425 mg / DHA 270 mg |
+| Sacro-B | *Saccharomyces boulardii* 250 mg |
+| Advanced Iron Complex | 25 mg |
+
+Two are independently confirmed: the user read Magnesium and Sacro-B off the bottles by hand
+when those cards blocked, and the tier agrees.
+
+Amazon needs no browser at all — it returns fully over plain HTTP.
+
+## Throttling and caching
+
+Every tier that makes a **request** runs inside one cross-process host gate — `ncbi-api`,
+`http` and the browser rungs, plus `search` in `web_access.py`. The `cache` tier takes no gate
+and should not: reading a local file is not traffic, and throttling it would make the cheap
+path pay for the expensive one's politeness. Rate limiting begins where the network does.
 
 A politeness interval that one client honours and another ignores is not a rate limit; before
 this, the browser driver ran at whatever rate an agent asked for while `rxfetch` carefully
@@ -256,49 +427,12 @@ holds a partial document, and `looks_unusable` declares anything at or above `SU
 (20,000) a document without further inspection — so a large page torn mid-write would read back
 as complete. In this pipeline that is a citation judged against half a source.
 
-## The 200-character floor
+## The browser tier and `do`
 
-A response shorter than `--min-chars` (default 200) is treated as an interstitial rather than a
-document. Lowering it to 1 to accommodate short pages was tried and immediately reported a
-141-character JavaScript shell as `ok: true`. The two errors are not symmetric:
+Everything from here on concerns the agent-driven browser: `fetch`'s expensive rungs and the
+whole of `do`.
 
-- a short real page called `unreadable` → the browser tier escalates and gets it
-- a JavaScript shell called `ok` → the caller writes conclusions from an empty page
-
-The escalation makes the first harmless, so the conservative default is the correct one.
-
-## `unreachable` vs `unreadable`
-
-`unreadable` means the server answered and withheld the document (JavaScript shell, bot wall,
-login). `unreachable` means no usable response arrived. A caller that cannot tell them apart
-writes "the source does not support this claim" when the truth is "we were throttled" — which is
-how one citation audit came to judge claims against the text "Checking your browser before
-accessing pubmed". Hence the distinct outcomes and the explicit guidance in SKILL.md never to
-report an unread page as an empty one.
-
-## Verification
-
-Checked against the pages that actually failed a pipeline run on 2026-07-31. Thorne's product
-pages return a 141-character shell to a plain read; via the browser tier they return ~8,000
-characters including the Supplement Facts panel:
-
-| Product | Panel |
-|---|---|
-| Magnesium Bisglycinate | 200 mg |
-| Super EPA | EPA 425 mg / DHA 270 mg |
-| Sacro-B | *Saccharomyces boulardii* 250 mg |
-| Advanced Iron Complex | 25 mg |
-
-Two are independently confirmed: the user read Magnesium and Sacro-B off the bottles by hand
-when those cards blocked, and the tier agrees.
-
-Amazon needs no browser at all — it returns fully over plain HTTP.
-
----
-
-# The browser agent (`do`, and the browser tier)
-
-## Architecture
+### Architecture
 
 Three layers — the model-facing skill never sees the lower two:
 
@@ -318,9 +452,9 @@ Three layers — the model-facing skill never sees the lower two:
    is the model contract and deliberately speaks only in web-task terms — none of the
    Fara / LiteLLM / screenshot machinery leaks into the model's context.
 
-## Setup
+### Setup
 
-### 1. LiteLLM route (transport)
+#### 1. LiteLLM route (transport)
 Add a route so the scaffold can reach the model through your proxy:
 
 ```yaml
@@ -333,7 +467,7 @@ Add a route so the scaffold can reach the model through your proxy:
 ```
 Restart LiteLLM and confirm `fara` appears in `/v1/models`.
 
-### 2. Install the Fara scaffold
+#### 2. Install the Fara scaffold
 ```bash
 git clone https://github.com/microsoft/fara.git ~/fara
 cd ~/fara
@@ -345,13 +479,13 @@ playwright install chromium
 This provides `~/fara/.venv/bin/fara-cli`. Also install **xvfb** for headful mode
 (below): `sudo apt-get install -y xvfb`.
 
-### 3. Configure
+#### 3. Configure
 ```bash
-cd ~/.hermes/skills/web-access/scripts
+cd ~/hermes-skills/web-access/scripts
 cp ../templates/config.env.example config.env
 # edit config.env:
 #   FARA_HOME=/home/<you>/fara
-#   BROWSE_BASE_URL=http://192.168.1.226:4000/v1   (your LiteLLM)
+#   BROWSE_BASE_URL=http://docker.putzolu.com:4000/v1   (your LiteLLM)
 #   BROWSE_MODEL=fara
 #   BROWSE_API_KEY=<your LiteLLM key>
 ```
@@ -361,7 +495,7 @@ Smoke test:
 python3 scripts/web_access.py do --task "Find the current time in Tokyo and report it"
 ```
 
-## Safety model
+### Safety model
 
 - **Read-only is the default.** Without `--confirm`, the script appends a strict
   instruction telling the agent to only read and report — not to sign in, submit,
@@ -376,7 +510,7 @@ python3 scripts/web_access.py do --task "Find the current time in Tokyo and repo
   accounts, an acting run can take real actions as the user. Keep the profile
   logged out of anything you don't want an agent touching.
 
-## Pre-seeding cookies (skip location / login setup)
+### Pre-seeding cookies (skip location / login setup)
 
 Sites like Costco geo-default the delivery ZIP (and reject deep-links/search),
 so the agent otherwise burns many slow steps clicking the location into place —
@@ -404,10 +538,11 @@ if _os.environ.get("FARA_INIT_COOKIES"):
 ```
 The wrapper sets `FARA_INIT_COOKIES` when `--cookies`/`BROWSE_COOKIES` is given.
 
-## Local patches to the Fara scaffold
+### Local patches to the Fara scaffold
 
 `~/fara` is a clone of `microsoft/fara`. These edits live in that working tree and are **lost on
-any re-clone or upgrade** — re-apply them and re-run the checks below.
+any re-clone or upgrade** — re-apply them and re-run the checks below. Under containerization
+they move into the image build.
 
 **1. `src/fara/environments/playwright/environment.py` — `_connect_browserbase_once`.** The
 session was created with `browser_settings={"advanced_stealth": True, ...}` hardcoded.
@@ -422,7 +557,7 @@ second, older BrowserBase path. Patched identically. Note the *live* path is (1)
 names `environment.py`. Patching only (2) changes nothing — that mistake cost a debug cycle.
 
 **3. `src/fara/environments/playwright/environment.py` — `_setup_browser` cookie hook.** See
-*Pre-seeding cookies* below.
+*Pre-seeding cookies* above.
 
 **4. `src/fara/run_fara.py` — `FARA_DUMP_MARKDOWN`.** Before the browser is torn down, if that
 env var names a path, write `await env.get_page_markdown()` to it. The capability was already
@@ -431,7 +566,7 @@ extracts PDFs), but `fara-cli` exposes no way to ask for it — the full option 
 `--task --start_page --headful --output_folder --save_screenshots --max_rounds --browserbase
 --endpoint_config --api_key --base_url --model`. The agent's own `read_page_answer_question`
 calls it, then throws the markdown away and returns the model's answer. This patch is what lets
-layer 6 serve `fetch` with the document instead of a paraphrase.
+the agent rung serve `fetch` with the document instead of a paraphrase.
 
 Check both settings are honoured:
 
@@ -448,7 +583,7 @@ characters of site navigation were accepted as the product page. `looks_unusable
 that: the dump is long and carries no bot-wall marker. `run_agent_dump` compares host and path
 and refuses a mismatch.
 
-## One identity, and why headful matters
+### One identity, and why headful matters
 
 Every layer sends the same User-Agent (`RXFETCH_UA`, default a plain `Chrome/124.0` string).
 They did not: `search` went out as `Python-urllib/3.x` and the renders as
@@ -463,7 +598,7 @@ under xvfb gets the real homepage (4,087 chars) even with no UA set at all. The 
 headless browser itself, not the string it sends. Plain `urllib` also gets in, so on that site
 the ladder's cheapest and third-cheapest rungs work while the second does not.
 
-## Probing is evidence, and only sometimes
+### Probing is evidence, and only sometimes
 
 `probe_ladder` returns `(mode, proven)`. Three outcomes, deliberately distinct:
 
@@ -483,7 +618,7 @@ leaves a site warier of the next one: lowes.com refused headless at 20:15:53 and
 seconds later, yet the same headful probe run alone minutes afterwards came back `OK`. The
 cheapest rung was manufacturing the block the dearer one then measured.
 
-## Timeout budget
+### Timeout budget
 
 There are **two** agent budgets, because there are two code paths and they are not the same run.
 
@@ -501,7 +636,7 @@ the one the *Notes* section refers to. So "agent 900s" and "caps a run at 30 min
 correct and describe different verbs: 900s is `fetch`'s escalation into the agent, 1800s is a
 standalone `do`.
 
-## Browser modes — per-site policy
+### Browser modes — per-site policy
 
 This section describes how a **single** browser mode is chosen — which is what the `do` verb and
 the legacy single-shot path do. `fetch` no longer picks one mode; it *climbs* them (see *How
@@ -539,7 +674,7 @@ User rules are checked before the built-ins, so you can override any site.
 The mode ladder is shared: the browser *tier* of `fetch` reuses it via `--dump-text`, which is
 the part worth reusing — this skill already knows which sites need headful or browserbase.
 
-### Auto-detect for unknown sites
+#### Auto-detect for unknown sites
 
 For a site with **no** rule (not in the table, learned cache, or an override), the wrapper runs
 a quick pre-flight **probe** of the start URL — headless, then headful, then browserbase when
@@ -557,7 +692,7 @@ Caveat unchanged: the probe checks the *start URL*, so a site whose homepage loa
 deeper pages are blocked — Costco, and as of 2026-08-03 Lowe's — still needs an explicit rule.
 That is why Costco is in the built-in table.
 
-### Switching the managed browser off
+#### Switching the managed browser off
 
 `--no-browserbase`, or `BROWSE_NO_BROWSERBASE=true` in `config.env`, keeps a run on the free
 local modes. Anything that resolves to `browserbase` — a policy rule, a learned rule, even an
@@ -583,7 +718,7 @@ order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
 `browserbase`-policy site fails with a clear "not fully configured" message
 (naming the missing var) rather than wasting a run.
 
-## Notes
+### Notes
 
 - **Logging.** Every run appends the command (API key redacted), the resolved
   browser mode, and the full agent stdout+stderr to a diagnostic log — by default
@@ -608,3 +743,38 @@ order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
 `scripts/requirements.txt` (PyMuPDF, for PDF extraction). The browser tier and the `do` verb
 additionally need the Fara scaffold above; without it, that one tier reports unavailable and
 `search` plus the cheaper `fetch` tiers still work.
+
+---
+
+# Appendix: prior decisions
+
+## Why this absorbed browse-task (2026-08-03)
+
+`search`/`fetch` and the multi-step browser agent shipped as two skills. They were never
+siblings: this skill's most expensive fetch tier already shelled out to the other one. That left
+two problems the merge fixes structurally rather than by documentation.
+
+**Both skills claimed the JavaScript-page case.** browse-task's description invited the model to
+use it directly for "a single page the ordinary fetch could not read"; this skill said to use
+`fetch --browser`. Those are the same case, and the browse-task route skipped this module's
+cache, its cheaper tiers, and its per-host gate. One skill with one entry point cannot be
+mis-routed.
+
+**`--browser` was a seam the model had to reason about.** Escalation is a property of the
+fetcher, not a decision for the caller: it fires only on `unreadable`, which means the server
+answered and withheld the document — the one failure a render can fix. It is automatic now.
+`--no-browser` remains for a caller that would rather fail than spend the seconds.
+
+The verb `do` stays visible and separate on purpose. `fetch` is deterministic plumbing; `do`
+hands control to an LLM computer-use agent with a step budget, a timeout, and the ability to
+act. Auto-escalating into it would mean the model could sign in or submit something without ever
+choosing to, and the `--confirm` gate only means something if invoking the actor is deliberate.
+
+## Records kept elsewhere
+
+- **SearXNG/Firecrawl migration** (why search and render are self-hosted):
+  `~/homelab/docs/hermes-web-search.md`
+- **CloakBrowser experiment** — stealth-browser A/B; decision: not adopted, an unknown
+  black-box binary was not worth the marginal gain:
+  `~/homelab/docs/web-access-cloakbrowser-experiment.md`
+- **`hermes-cache` tier removal** (2026-08-03): described under *How `fetch` climbs*.

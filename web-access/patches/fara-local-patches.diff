@@ -1,0 +1,153 @@
+diff --git a/src/fara/environments/playwright/environment.py b/src/fara/environments/playwright/environment.py
+index d89f922..51a0a8a 100644
+--- a/src/fara/environments/playwright/environment.py
++++ b/src/fara/environments/playwright/environment.py
+@@ -150,6 +150,11 @@ class PlaywrightEnvironment(BrowserEnvironment):
+             self._start_xvfb()
+ 
+         launch_args = {"headless": self.config.headless}
++        if os.geteuid() == 0:
++            # Chromium refuses its setuid sandbox as root (the service runs in a
++            # root container). The sandbox guards against page exploits, not the
++            # agent's own actions; headless and headful both need this there.
++            launch_args["args"] = ["--no-sandbox"]
+ 
+         if self.config.browser_channel == "chromium":
+             self._browser = await self._playwright.chromium.launch(**launch_args)
+@@ -224,10 +229,30 @@ class PlaywrightEnvironment(BrowserEnvironment):
+         """Run one BrowserBase bring-up: session, CDP, setup, captcha wait."""
+         self._captcha_event.set()
+ 
++        # LOCAL PATCH (see hermes-skills/web-access/README.md): honour the environment rather
++        # than hardcoding a paid tier. advanced_stealth is BrowserBase's "Verified mode",
++        # Enterprise-only, so hardcoding it True made every session 403 on a lesser plan —
++        # five retries, then a crash whose surface message was "try again or narrow the task".
++        import os as _os
++
++        def _envflag(name, default):
++            v = _os.environ.get(name)
++            return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
++
++        _proxies = _envflag("BROWSERBASE_PROXIES", True)
++        _stealth = _envflag("BROWSERBASE_ADVANCED_STEALTH", False)
++        _settings = {"enablePdfViewer": True}
++        if _stealth:
++            _settings["advanced_stealth"] = True
++        self.logger.info(
++            f"{self._tag()}BrowserBase session: proxies={_proxies} "
++            f"advanced_stealth={_stealth}"
++        )
++
+         self._session = self._bb.sessions.create(
+             project_id=project_id,
+-            proxies=True,
+-            browser_settings={"advanced_stealth": True, "enablePdfViewer": True},
++            proxies=_proxies,
++            browser_settings=_settings,
+             keep_alive=True,
+             timeout=7200,
+             api_timeout=3600,
+@@ -362,6 +387,21 @@ class PlaywrightEnvironment(BrowserEnvironment):
+         except Exception as e:
+             self.logger.warning(f"Failed to inject Bing same-tab cookie: {e}")
+ 
++        # browse-task hook: pre-seed cookies (e.g. a site's delivery location or a
++        # login) before the first navigation, from a JSON list of Playwright
++        # cookies named in FARA_INIT_COOKIES. Lets the wrapper set state
++        # deterministically instead of the agent clicking through it.
++        import os as _os
++        _init_cookies = _os.environ.get("FARA_INIT_COOKIES")
++        if _init_cookies:
++            try:
++                import json as _json
++                with open(_init_cookies) as _f:
++                    await self._context.add_cookies(_json.load(_f))
++                self.logger.info(f"Pre-seeded cookies from {_init_cookies}")
++            except Exception as e:
++                self.logger.warning(f"Failed to load FARA_INIT_COOKIES: {e}")
++
+         await self._page.goto(self.config.start_page, wait_until="commit")
+ 
+     async def _swap_to_new_page(self, new_page: Page) -> None:
+diff --git a/src/fara/fara_7b/browser/browser_bb.py b/src/fara/fara_7b/browser/browser_bb.py
+index d4a2e6f..2cc3c9d 100644
+--- a/src/fara/fara_7b/browser/browser_bb.py
++++ b/src/fara/fara_7b/browser/browser_bb.py
+@@ -139,12 +139,29 @@ class BrowserBB:
+         self.logger.info("Initializing BrowserBase session...")
+         self.bb = Browserbase(api_key=os.environ["BROWSERBASE_API_KEY"])
+ 
++        # LOCAL PATCH (see hermes-skills/web-access/README.md): honour the environment
++        # instead of hardcoding paid-tier features. advanced_stealth is Enterprise-only
++        # ("Verified mode is only available on the Enterprise plan"), so hardcoding it True
++        # made every browserbase session fail with a 403 on any lesser plan — five retries,
++        # then a crash, with the real reason visible only in the log.
++        def _envflag(name, default):
++            v = os.environ.get(name)
++            return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
++
++        proxies = _envflag("BROWSERBASE_PROXIES", True)
++        advanced_stealth = _envflag("BROWSERBASE_ADVANCED_STEALTH", False)
++        browser_settings = {"advanced_stealth": True} if advanced_stealth else {}
++        self.logger.info(
++            "BrowserBase session: proxies=%s advanced_stealth=%s",
++            proxies, advanced_stealth,
++        )
++
+         while True:  # Wait indefinitely until we get a session
+             try:
+                 self.session = self.bb.sessions.create(
+                     project_id=os.environ["BROWSERBASE_PROJECT_ID"],
+-                    proxies=True,
+-                    browser_settings={"advanced_stealth": True},
++                    proxies=proxies,
++                    browser_settings=browser_settings,
+                     keep_alive=True,
+                     timeout=7200,  # 2 hour timeout
+                     region="us-east-1",
+@@ -199,6 +216,8 @@ class BrowserBB:
+             self.start_xvfb()
+ 
+         launch_args: Dict[str, Any] = {"headless": self.headless}
++        if os.geteuid() == 0:
++            launch_args["args"] = ["--no-sandbox"]
+ 
+         if channel == "chromium":
+             self.browser = await self._playwright.chromium.launch(**launch_args)
+diff --git a/src/fara/run_fara.py b/src/fara/run_fara.py
+index 18509ee..64a6204 100755
+--- a/src/fara/run_fara.py
++++ b/src/fara/run_fara.py
+@@ -140,6 +140,32 @@ async def run_fara15_agent(
+             task_text = None
+             first_round = False
+     finally:
++        # LOCAL PATCH (see hermes-skills/web-access/README.md): emit the LANDED PAGE'S verbatim
++        # text before tearing the browser down. The environment already has this — the agent's
++        # own read_page_answer_question calls get_page_markdown() and then throws the markdown
++        # away in favour of the model's answer. web-access needs the opposite: an agent that
++        # navigates (consent walls, interstitials, multi-step flows) and then hands back the
++        # real document, because its citation audit locates verbatim quotes at real offsets and
++        # a paraphrase breaks that silently. Same session, so the cookies and JS state the agent
++        # just established are still in force.
++        dump_to = os.environ.get("FARA_DUMP_MARKDOWN")
++        if dump_to:
++            try:
++                md = await env.get_page_markdown()
++                Path(dump_to).write_text(md or "", encoding="utf-8")
++                # The LANDED url, beside the markdown. Without it the caller cannot tell the
++                # requested document from whatever the agent wandered to: on 2026-08-03 fara
++                # met Home Depot's error page, refreshed onto the HOMEPAGE, dismissed a popover
++                # and reported success — and 18,307 characters of site navigation were accepted
++                # as the product page.
++                try:
++                    landed = env._page.url
++                except Exception:  # noqa: BLE001
++                    landed = ""
++                Path(str(dump_to) + ".url").write_text(landed, encoding="utf-8")
++                print(f"Page markdown written to: {dump_to} ({len(md or '')} chars) from {landed}")
++            except Exception as e:  # noqa: BLE001
++                print(f"Page markdown dump failed: {type(e).__name__}: {e}")
+         await env.close()
+ 
+ 

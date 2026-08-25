@@ -113,9 +113,12 @@ chk("a malformed url still yields something", h("not a url") == "?")
 # enabled, and never queried. Cards were told to prefer PubMed while the backend could not
 # reach it.
 section("search scope maps to the right engines")
+# The search verb moved into the handler core (handlers.py) with the facades; the tests
+# target that core directly. run_search_impl is the backend (widening logic, returns
+# (body, widened)); run_search is the verb (cache + metrics + result dict).
 import importlib.util as _ilu
 _spec = _ilu.spec_from_file_location("wa", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                                        "web_access.py"))
+                                                        "handlers.py"))
 _wa = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_wa)
 chk("literature merges the science engines",
@@ -146,7 +149,7 @@ _real_ask = _wa._ask
 _wa._ask = _fake_ask
 try:
     _calls.clear()
-    body, widened = _wa.run_search("q", "products")
+    body, widened = _wa.run_search_impl("q", "products", 30)
     chk("an empty primary widens", widened and len(body["results"]) == 1)
     chk("it tried the preferred engine first", _calls[0].get("engines") == _wa.PRIMARY_WEB_ENGINE,
         "(%s)" % _calls[0])
@@ -155,13 +158,13 @@ try:
     _calls.clear()
     _wa._ask = lambda q, sel, t: (_calls.append(sel) or
                                   {"results": [{"url": "u", "engine": "brave api"}]})
-    body, widened = _wa.run_search("q", "products")
+    body, widened = _wa.run_search_impl("q", "products", 30)
     chk("a primary WITH results does not widen", not widened and len(_calls) == 1,
         "(%d call(s))" % len(_calls))
 
     _calls.clear()
     _wa._ask = _fake_ask
-    body, widened = _wa.run_search("q", "literature")
+    body, widened = _wa.run_search_impl("q", "literature", 30)
     chk("literature never widens", not widened and len(_calls) == 1,
         "science engines are complementary, so a merge is correct there")
 finally:
@@ -194,29 +197,25 @@ os.environ["RX_METRICS"] = "1"                      # this test VERIFIES emissio
 _ncalls = {"n": 0}
 
 
-def _one_result(query, scope, timeout=30):
+def _one_result_impl(query, scope, timeout=30):
     _ncalls["n"] += 1
     return ({"results": [{"title": "T", "url": "http://x/y", "content": "snip",
                           "engine": "brave api"}]}, False)
 
 
-def _run_search_cmd(query="magnesium glycinate dose", scope="products", mx=10):
-    ns = _types.SimpleNamespace(query=query, scope=scope, max=mx, timeout=30)
-    buf = _io.StringIO()
-    with _clib.suppress(SystemExit), _clib.redirect_stdout(buf):
-        _wa.cmd_search(ns)
-    return _json.loads(buf.getvalue())
+def _run_search(query="magnesium glycinate dose", scope="products", mx=10):
+    return _wa.run_search(query, scope=scope, max_results=mx, timeout=30)
 
 
 try:
-    _wa.run_search = _one_result
-    _r1 = _run_search_cmd()
+    _wa.run_search_impl = _one_result_impl
+    _r1 = _run_search()
     chk("the first search asks the backend and is not cached",
         _ncalls["n"] == 1 and _r1["cached"] is False and _r1["count"] == 1)
-    _r2 = _run_search_cmd()
+    _r2 = _run_search()
     chk("an identical query+scope is served from cache, backend untouched",
         _ncalls["n"] == 1 and _r2["cached"] is True and _r2["results"][0]["url"] == "http://x/y")
-    _run_search_cmd(scope="literature")
+    _run_search(scope="literature")
     chk("a different scope is a different cache entry", _ncalls["n"] == 2,
         "the key is query AND scope")
 
@@ -238,11 +237,11 @@ try:
 
     # An empty result set is a fact, not cached: the next identical query re-asks.
     _ncalls["n"] = 0
-    _wa.run_search = lambda q, s, t=30: (_ncalls.__setitem__("n", _ncalls["n"] + 1)
-                                         or ({"results": []}, False))
-    _re = _run_search_cmd(query="zzz no such thing", scope="web")
+    _wa.run_search_impl = lambda q, s, t=30: (_ncalls.__setitem__("n", _ncalls["n"] + 1)
+                                              or ({"results": []}, False))
+    _re = _run_search(query="zzz no such thing", scope="web")
     chk("an empty result set is ok=True with count 0", _re["ok"] is True and _re["count"] == 0)
-    _run_search_cmd(query="zzz no such thing", scope="web")
+    _run_search(query="zzz no such thing", scope="web")
     chk("an empty search is not cached, so it is re-asked", _ncalls["n"] == 2,
         "a transient empty must not be pinned for the TTL")
 finally:
@@ -676,17 +675,14 @@ import io as _iof
 import json as _jsonf
 import types as _typesf
 import contextlib as _clibf
-_saved_fetch = _wa.rxfetch.fetch
+saved_fetch = _wa.rxfetch.fetch
 
 
 def _fetch_next(detail):
     _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("", "unreachable", detail)
-    ns = _typesf.SimpleNamespace(url="https://x/y", max_chars=1000, timeout=5,
-                                 no_browser=True, trace=None, min_chars=200)
-    buf = _iof.StringIO()
-    with _clibf.suppress(SystemExit), _clibf.redirect_stdout(buf):
-        _wa.cmd_fetch(ns)
-    return (_jsonf.loads(buf.getvalue()).get("next") or "")
+    body = _wa.cmd_fetch("https://x/y", max_chars=1000, timeout=5,
+                         no_browser=True, trace=None, min_chars=200)
+    return (body.get("next") or "")
 
 
 try:
@@ -699,7 +695,7 @@ try:
     _nto = _fetch_next("TimeoutError")
     chk("a generic unreachable keeps the reach caveat", "reach" in _nto, "(%s)" % _nto)
 finally:
-    _wa.rxfetch.fetch = _saved_fetch
+    _wa.rxfetch.fetch = saved_fetch
 
 
 # ══ Reddit: the surface the model is handed is not the surface that answers ═══════════════════
@@ -890,12 +886,8 @@ _saved_fetch2 = _wa.rxfetch.fetch
 try:
     _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("thread " * 200, "ok", "stub",
                                                             via="firecrawl")
-    _ns = _typesf.SimpleNamespace(url=SHARE_OLD, max_chars=1000, timeout=5,
-                                  no_browser=False, trace=None, min_chars=200)
-    _buf = _iof.StringIO()
-    with _clibf.suppress(SystemExit), _clibf.redirect_stdout(_buf):
-        _wa.cmd_fetch(_ns)
-    _out = _jsonf.loads(_buf.getvalue())
+    _out = _wa.cmd_fetch(SHARE_OLD, max_chars=1000, timeout=5,
+                         no_browser=False, trace=None, min_chars=200)
     chk("fetch reports the surface it read, not the alias it was given",
         _out.get("url") == SHARE_WWW, "(got %r)" % _out.get("url"))
 finally:
