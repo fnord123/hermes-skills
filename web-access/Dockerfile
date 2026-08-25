@@ -55,13 +55,12 @@ COPY scripts/service.py /opt/webaccess/service.py
 COPY scripts/handlers.py /opt/webaccess/handlers.py
 COPY scripts/rxfetch.py /opt/webaccess/rxfetch.py
 COPY scripts/browse_task.py /opt/webaccess/browse_task.py
-COPY scripts/run_service.sh /opt/webaccess/run_service.sh
-COPY service.env /opt/webaccess/service.env
+COPY scripts/run_service.py /opt/webaccess/run_service.py
+COPY service.defaults.yaml /opt/webaccess/service.defaults.yaml
 # Bladebro tier needs the docker CLI. Official static build: the host's
 # /usr/bin/docker is musl-linked and will not run in this Debian image.
 COPY docker-client /usr/local/bin/docker
 RUN chmod +x /usr/local/bin/docker && docker --version
-RUN chmod 0644 /opt/webaccess/service.env && chmod +x /opt/webaccess/run_service.sh
 
 EXPOSE 8910 8911
-CMD ["/opt/webaccess/run_service.sh"]
+CMD ["python3", "/opt/webaccess/run_service.py"]

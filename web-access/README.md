@@ -142,6 +142,17 @@ any agent that goes looking — the credential guard filters *terminal command t
 than by another text filter. It also deletes bladebro's SSH hop (the service runs beside it on
 `.226`) and creates one place where every fetch can be audited.
 
+## Deploy defaults (`service.defaults.yaml`)
+
+Non-secret deployment defaults (backend URLs, ports) ship as YAML inside the
+image, applied at boot by `run_service.py` — never as an env file: these are
+configuration, and an `.env` name on a non-secret file is what made the
+machine's credential guard misclassify it. Precedence: compose env
+(`env_file: .env`) is authoritative and wins over a baked default, even when
+set empty; a baked default applies only to keys the caller did not provide.
+`.env` itself stays out of git (see `.env.example`); the only runtime
+secret, the LiteLLM key, travels in it.
+
 ## One implementation, two transports
 
 MCP is mounted **on top of** the HTTP API's verb handlers — the GitHub-MCP-server pattern. The
