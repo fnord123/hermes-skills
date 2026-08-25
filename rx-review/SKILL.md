@@ -61,6 +61,7 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `start` | Begins the review. Run **once**, after `uploads-done` and after you have resolved the regimen. It refuses until both are done. |
 | `staged` | What is waiting to be transcribed, across upload rounds. |
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
+| `fib4` | The FIB-4 liver-fibrosis risk score, from the newest draw that reports AST, ALT and a platelet count together. Runs on demand; it is also surfaced in the labs-confirmation message under "Derived scores". |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
 | `doctor` | Explains why a regimen item is still held: the answers on record, whether each item's answer matched, which manufacturer file resolved, and the gate card's state. Run this when the user says an answer "didn't work" or an item keeps re-asking. |
 | `correct-item-slug-request "<reply>"` | The ONE verb for a regimen-review reply. `approved` (or a synonym) completes the barrier; `<n> <correction>` / `<n> drop` route by the number the user wrote. Then do exactly what it prints. |
@@ -71,7 +72,7 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
 | `labs-accept` | Confirms the lab transcription and closes the labs-complete gate. |
 
-Those nine are yours. Every other verb the script accepts belongs to the pipeline — it runs
+Those are yours. Every other verb the script accepts belongs to the pipeline — it runs
 them itself, on its own schedule.
 
 ## 1. Collect the labs — over as many rounds as they need
@@ -171,6 +172,8 @@ notification is only a one-line signal — **read the card for the detail**:
 ### "CONFIRM YOUR LABS" / "Labs review"
 
 The card reports how many out-of-range markers were found. Show those to the user so they can confirm. Then ask whether that matches their results.
+
+The same confirmation carries a **Derived scores** section, which includes the FIB-4 liver-fibrosis risk score. FIB-4 is the first pipeline need for the user's age, which the pipeline does not otherwise carry — so if it is not yet recorded, record it now: write `Age: <n>` (or `DOB: <date>`) to `~/.hermes/rx-review/inputs/patient.md`, then run `rx.py fib4` to confirm it resolves. Until age is recorded, the report says FIB-4 is not computable, which is the correct refusal.
 
 If they confirm, run:
 
@@ -279,7 +282,8 @@ never repeated, and a re-sent file is recognised by content and ignored.
 ## If something fails
 
 Report the exact error and ask how they want to proceed. Do not edit files under
-`~/.hermes/rx-review/` other than `regimen.txt` and `CONFIRMED.txt`, and never create, edit or
+`~/.hermes/rx-review/` other than `regimen.txt`, `CONFIRMED.txt`, and `inputs/patient.md`
+(the user's age, for FIB-4), and never create, edit or
 complete a kanban card by hand — unblocking a card the pipeline blocked is the one exception.
 
 - Copying a lab PDF into `inputs/raw/` fails → say which file and ask for it again. Never

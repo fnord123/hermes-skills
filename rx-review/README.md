@@ -28,3 +28,48 @@ Reports land in `~/.hermes/reports/rx-review/`. The run is done when both
 
 The brief is evidence and questions for a prescriber or pharmacist to confirm.
 It is not medical advice and nothing in it recommends a dose.
+
+## FIB-4 (liver fibrosis risk)
+
+`rx.py fib4` computes `(age * AST) / (platelets * sqrt(ALT))` and `labs-report`
+surfaces it under **Derived scores**. Implementation notes:
+
+- **Age is a new input.** `inputs/patient.md` carries `Age: <n>` or `DOB: <date>`;
+  `patient_age()` reads it and returns `0` when absent. FIB-4 refuses to compute
+  without an age rather than guess one — an invented age in a clinical score is
+  worse than no score. The SKILL.md "If something fails" guard whitelists
+  `inputs/patient.md` alongside `regimen.txt`/`CONFIRMED.txt` because the agent
+  may be the one to record it at labs confirmation.
+- **One draw only.** The score is computed from the newest draw that reports
+  AST, ALT and a platelet count *together*; it is never stitched across draws.
+  This is deliberately stricter than `DERIVED_MARKERS` (non-HDL), whose inputs
+  may come from separate draws: non-HDL is an exact identity, whereas FIB-4 is a
+  validated single-time-point ratio, and cross-draw inputs are a value the
+  formula was never validated on. When no draw has all three, it reports which
+  inputs are missing — the score is not invented.
+- **Band boundaries** follow the conventional cut points: `<1.30` low,
+  `1.30–3.27` indeterminate, `>3.27` high.
+
+## Transaminase override in trend dispatch
+
+Stage 6c triages each trend and may judge it "ordinary variation", in which case
+the dispatch writes a skip report and stops. That is the exact dismissal that
+let ALT/SGPT 26 → 29 → 35 over five months go un-researched, so the regimen-driver
+question (a statin and a JAK inhibitor both move these) never ran.
+
+`phase_trend_dispatch` now carries a deterministic gate: when the marker is a
+transaminase (`rx.is_transaminase`) and the triage verdict is `MEANINGFUL: no`,
+the dispatch **overrides** the verdict and deepens anyway — parts 2/3 and the
+synthesis are created as for a meaningful trend, and the intro carries a NOTE
+explaining the override so the cards don't re-justify a dismissal. Two invariants:
+
+- The gate is **marker-qualified**. A `no` on anything else (creatinine, sodium)
+  still writes the skip report and stops; only liver enzymes are force-deepened.
+- It is a **deterministic gate, not a prompt nudge**: an LLM triage that already
+  said "no" is the wrong second opinion, so the override is code, and it fires
+  on the parsed verdict file, not on re-reading the trend.
+
+`is_transaminase()` lives in `rx.py` next to `_norm_marker` — one normaliser, one
+answer — so fanout never re-derives the classification. It is tolerant of
+`ALT`/`AST`/`ALT/SGPT`/`AST/SGOT` vendor spellings; the bare `SGPT`/`SGOT` are
+*not* treated as transaminases on their own.
