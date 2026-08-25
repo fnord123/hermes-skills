@@ -142,16 +142,18 @@ any agent that goes looking — the credential guard filters *terminal command t
 than by another text filter. It also deletes bladebro's SSH hop (the service runs beside it on
 `.226`) and creates one place where every fetch can be audited.
 
-## Deploy defaults (`service.defaults.yaml`)
+## Deploy config (`service.yaml`)
 
-Non-secret deployment defaults (backend URLs, ports) ship as YAML inside the
-image, applied at boot by `run_service.py` — never as an env file: these are
-configuration, and an `.env` name on a non-secret file is what made the
-machine's credential guard misclassify it. Precedence: compose env
-(`env_file: .env`) is authoritative and wins over a baked default, even when
-set empty; a baked default applies only to keys the caller did not provide.
-`.env` itself stays out of git (see `.env.example`); the only runtime
-secret, the LiteLLM key, travels in it.
+Non-secret deployment config (backend URLs and the like) ships as YAML
+inside the image, applied at boot by `run_service.py` — never as an
+env file: these are configuration, and a dot-suffixed name on a plain
+config file is what made this machine's guard misclassify the old
+version as a secret and block the commit that would have carried it.
+Precedence: compose env (the host secrets `env_file`) is authoritative
+and wins over a baked value, even when set empty; a baked key applies
+only if the caller did not already provide it. The host secrets file
+stays out of git; the only runtime secret, the LiteLLM key, travels
+there.
 
 ## One implementation, two transports
 

@@ -1,4 +1,4 @@
 # PDF text extraction; fetch() converts PDF URLs to text.
 PyMuPDF
-# Entry-point only: run_service.py loads service.defaults.yaml at boot.
+# Entry-point only: run_service.py loads service.yaml at boot.
 PyYAML

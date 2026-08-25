@@ -1,0 +1,31 @@
+# Non-secret runtime configuration for the webaccess service.
+#
+# Consumed at boot by run_service.py; baked into the image at build time.
+# Precedence: the compose process env (environment: / env_file) is
+# authoritative and wins over any key set here, even when set empty; a key
+# here applies only if the caller did not already provide it.
+#
+# Secrets do NOT go here. The image is public-ish: anyone who can read it
+# can read this file. The LiteLLM key (and BrowserBase creds, if ever
+# enabled) come from the compose env_file — the secrets file on the docker
+# host, maintained separately.
+
+env:
+  # SearXNG on the docker host (self-hosted, LAN-only).
+  SEARXNG_URL: http://docker.putzolu.com:8888
+  # Host-side services, reached from inside the container by name (container
+  # DNS resolves docker.putzolu.com to the host LAN IP; verified 2026-08-23).
+  FIRECRAWL_API_URL: http://docker.putzolu.com:3002
+  RX_LOKI_URL: http://docker.putzolu.com:3100/loki/api/v1/push
+
+  # bladebro tier: run the one-shot container locally through the docker CLI
+  # (the daemon socket is mounted into this container). "sh -c" is the prefix
+  # rxfetch executes the command string with — locally that means a shell,
+  # not the code's ssh default, so this one must be baked.
+  BLADEBRO_SSH: "sh -c"
+  # BLADEBRO_IMAGE is the code default (bladebro-mcp:local); no entry needed.
+
+  # The metered rung stays off. Enable deliberately, with the key in the
+  # host secrets file. Matches the code defaults; kept for explicitness.
+  WEB_ALLOW_BROWSERBASE: "0"
+  BROWSE_NO_BROWSERBASE: "true"
