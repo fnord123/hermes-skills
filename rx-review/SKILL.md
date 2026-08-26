@@ -55,7 +55,7 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 
 | Verb | Purpose |
 |---|---|
-| `regimen --from <path>` / `regimen --stdin` | Records the regimen text you have already resolved and saved. |
+| `regimen --from <path>` / `regimen --stdin` / `regimen --from-gdoc <id>` | Records the patient document — regimen lines and, when present, a `Name:` / `Age:` / `DOB:` line, which the pipeline materialises for FIB-4 and any other age-weighted score. |
 | `stage` | Copies every document Hermes has received into the intake folder. Run after **every** message that carries attachments. Creates nothing, so it is safe to repeat. |
 | `uploads-done` | Records that the user said every lab document has been sent. Run it when they say so, and again if more arrive afterwards. |
 | `start` | Begins the review. Run **once**, after `uploads-done` and after you have resolved the regimen. It refuses until both are done. |
@@ -120,6 +120,10 @@ drifting inside its reference range is invisible without them.
 
 ## 2. Collect the regimen
 
+The patient's ONE document is the input surface: the regimen lines and, when present, a
+`Name:` / `Age:` / `DOB:` line at the top. The same `regimen` verb records the regimen and
+materialises those fact lines for FIB-4 — see the labs-confirmation section below.
+
 Take whichever the user offers:
 
 **A source they already keep** — "it's in my regimen doc", "search my docs", "~/notes/meds.md".
@@ -173,7 +177,9 @@ notification is only a one-line signal — **read the card for the detail**:
 
 The card reports how many out-of-range markers were found. Show those to the user so they can confirm. Then ask whether that matches their results.
 
-The same confirmation carries a **Derived scores** section, which includes the FIB-4 liver-fibrosis risk score. FIB-4 is the first pipeline need for the user's age, which the pipeline does not otherwise carry — so if it is not yet recorded, record it now: write `Age: <n>` (or `DOB: <date>`) to `~/.hermes/rx-review/inputs/patient.md`, then run `rx.py fib4` to confirm it resolves. Until age is recorded, the report says FIB-4 is not computable, which is the correct refusal.
+The same confirmation carries a **Derived scores** section, which includes the FIB-4 liver-fibrosis risk score. FIB-4 is the first pipeline need for the user's age, which the pipeline does not otherwise carry. The age travels in the patient document itself: if it carries a `Name:` / `Age:` / `DOB:` line, `rx.py regimen` already materialised it to `~/.hermes/rx-review/inputs/patient.md` at ingest. If FIB-4 reports the age unrecorded, add a `DOB:` line to the document (prefer `DOB:` over `Age:` — the code recomputes the age at read time, so the score stays correct on the next birthday without anyone bumping a number) and re-run the same `regimen` verb; the file refreshes itself. As a fallback you may write `Age: <n>` (or `DOB: <date>`) to `~/.hermes/rx-review/inputs/patient.md` directly, then run `rx.py fib4` to confirm it resolves. Until an age is recorded, the report says FIB-4 is not computable, which is the correct refusal.
+
+**The document is the surface; `inputs/patient.md` is what the pipeline reads from** — the same split the regimen itself has (`regimen.txt`). The materialiser never deletes, so a document that drops its fact lines keeps the last recorded age in place. Note also that `fib4` exists only once the FIB-4 branch of the pipeline code is merged to main; until then the verb is absent from the running pipeline even if the age file is in place.
 
 If they confirm, run:
 

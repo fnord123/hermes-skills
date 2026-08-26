@@ -34,12 +34,21 @@ It is not medical advice and nothing in it recommends a dose.
 `rx.py fib4` computes `(age * AST) / (platelets * sqrt(ALT))` and `labs-report`
 surfaces it under **Derived scores**. Implementation notes:
 
-- **Age is a new input.** `inputs/patient.md` carries `Age: <n>` or `DOB: <date>`;
-  `patient_age()` reads it and returns `0` when absent. FIB-4 refuses to compute
-  without an age rather than guess one — an invented age in a clinical score is
-  worse than no score. The SKILL.md "If something fails" guard whitelists
-  `inputs/patient.md` alongside `regimen.txt`/`CONFIRMED.txt` because the agent
-  may be the one to record it at labs confirmation.
+- **Age is a property of the person, carried in the one input document.** The user
+  keeps a single document — regimen lines plus a `Name:` / `Age:` / `DOB:` line.
+  `_write_patient_facts()` runs at `rx.py regimen` ingest (all three routes, including
+  the house JSON envelope) and materialises those fact lines into
+  `inputs/patient.md`; `patient_age()` reads that file and returns `0` when absent.
+  The document is the surface, the file is what the pipeline reads from — the same
+  split the regimen itself has (`regimen.txt`). A re-ingest *replaces* the file, and
+  it never *deletes*: a document that drops its fact lines leaves the last recorded
+  age in place, because a stale, visible age beats a silent score. FIB-4 refuses to
+  compute without an age rather than guess one — an invented age in a clinical score
+  is worse than no score. The stage-2 worker prompt marks fact lines as NOT products
+  so the transcriber cannot turn a `DOB:` line into a supplement row. The SKILL.md
+  "If something fails" guard whitelists `inputs/patient.md` alongside
+  `regimen.txt`/`CONFIRMED.txt` because a re-ingest of the document is the supported
+  way to change it.
 - **One draw only.** The score is computed from the newest draw that reports
   AST, ALT and a platelet count *together*; it is never stitched across draws.
   This is deliberately stricter than `DERIVED_MARKERS` (non-HDL), whose inputs
