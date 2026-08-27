@@ -39,6 +39,8 @@ Google Docs API v1 + Drive API v3  — service-account auth (ADC via GOOGLE_APPL
    │  create → Drive files.create (mimeType google-apps.document) in the shared folder
    │  edit   → Docs documents.batchUpdate (insertText / replaceAllText /
    │           updateTextStyle / updateParagraphStyle)
+   │  comments → Drive v3 REST (files comments list/create) — the Docs API
+   │           has no comment request at all
    │  images → Docs batchUpdate (insertInlineImage from a public URL /
    │           deleteContentRange); Google fetches the URL at insert time.
    │           --file uploads a local image to the Shared Drive, shares it
@@ -131,8 +133,8 @@ $PY $D read    $ID                                   # inspect the result
 
 ## The verbs
 
-`create` · `find` · `read` · `read-comments` · `append` · `insert` · `replace` ·
-`style` · `delete` · `insert-image` · `resize-image` · `delete-image` — see
+`create` · `find` · `read` · `read-comments` · `comment` · `append` · `insert` ·
+`replace` · `style` · `delete` · `insert-image` · `resize-image` · `delete-image` — see
 [`SKILL.md`](./SKILL.md) for the model-facing contract and the word→call
 mapping. Each prints one JSON object; failures are `{"ok": false, "error": "…"}`
 with exit 1. `delete` and `delete-image` are destructive and refuse to run
@@ -148,11 +150,23 @@ without `--confirm`.
   shared folder; folder access is what makes them visible to the user.
 - **Destructive-op guard.** `delete` and `delete-image` require `--confirm`,
   matching the repo's footgun convention for a local small-model audience.
-- **Images are URL-only.** `insert-image` takes a public HTTPS image URL that
-  Google fetches at insert time (`insertInlineImage.uri`) — no local-file upload
-  and no Drive round-trip. `--replace "<placeholder>"` swaps a text marker (e.g.
-  `[IMAGE:x]`) for the image in one atomic batch. Passing only `--width` (points)
-  preserves the image's aspect ratio.
+- **Comments are quote-based, not highlighted.** The Docs API has no request
+  that creates a comment, so `comment` goes through the Drive v3 REST
+  (`files comments create`, the same surface `read-comments` reads from).
+  Google's Drive docs state that a developer-supplied anchor is *saved* but
+  treated as un-anchored by the Workspace apps — the editor will not highlight
+  the section (verified live: `quotedFileContent` comes back empty and the
+  comment survives its text being deleted). So the verb quotes the section as
+  the comment's first line (`"section text"\n<note>`), which is the most the
+  API can guarantee, and sends a best-effort text-range anchor
+  (`{"r":"head","a":"{\"startIndex\":N,\"endIndex\":M}"}`) so the API record
+  carries the location. `read-comments` reports `quoted_anchor` empty for
+  these comments — expected, not an error.
+- **Images.** `insert-image` takes a public HTTPS image URL that
+  Google fetches at insert time (`insertInlineImage.uri`). `--replace
+  "<placeholder>"` swaps a text marker (e.g. `[IMAGE:x]`) for the image in one
+  atomic batch. Passing only `--width` (points) preserves the image's aspect
+  ratio.
 - **Resize is delete-and-reinsert.** The Docs API has *no* request to change an
   existing image's size, so `resize-image` deletes the target image and
   re-inserts it (hence it needs `--url` again) at the new size and same position,

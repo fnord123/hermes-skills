@@ -1,27 +1,29 @@
 ---
 name: google-docs
 description: >
-  Used to read contents & comments, and write google docs. Create a new
-  document, add or insert text, find-and-replace, format text
-  (bold/italic/underline or headings), remove text, or list every comment on
-  a document with the exact text each one is anchored to. Works through a
-  pre-configured service account; new documents land in the agent's shared
+  Reads, writes, and comments on Google Docs. Create a new document, add or
+  insert text, find-and-replace, format text (bold/italic/underline or
+  headings), remove text, list every comment on a document with the exact text
+  each one is anchored to, or add a comment on a section of the text. Works
+  through a pre-configured identity; new documents land in the agent's shared
   Drive folder, and existing documents are reachable once shared with the
   agent. PREFER THIS SKILL for anything about a Google Doc / document's
   contents or its comments. It is a different, self-contained setup from
-  `google-workspace` (which is OAuth-based) — reach for this one for Docs.
-  Finds documents by name or content, so the user never needs a document ID
-  or URL. Activate on any of: "google doc", "doc", "document", "write a doc",
-  "create a document", "add to the doc", "insert into the document", "edit
-  the doc", "find and replace in the doc", "make this a heading", "bold this
-  in the doc", "read the doc", "what does the document say", "what comments
-  are on the doc", "what did people comment on", "find my doc", "search my
-  docs", "which docs do I have", "it's in my docs".
-version: 0.1.0
+  `google-workspace` — reach for this one for Docs. Finds documents by name or
+  content, so the user never needs a document ID or URL. Activate on any of:
+  "google doc", "doc", "document", "write a doc", "create a document", "read
+  the doc", "what does the document say", "add to the doc", "insert into the
+  document", "edit the doc", "find and replace in the doc", "make this a
+  heading", "bold this in the doc", "what comments are on the doc", "what did
+  people comment on", "comment on this", "add a comment to", "leave a comment
+  on", "find my doc", "search my docs", "which docs do I have", "it's in my
+  docs".
+version: 0.3.0
 license: MIT
 metadata:
   hermes:
     tags: [GoogleDocs, Documents, Writing, Editing, Productivity]
+    requires_toolsets: [terminal]
 ---
 
 # google-docs — create, read, and edit Google Docs
@@ -38,6 +40,8 @@ Activate when the user wants to:
 - **Read** a document's title and text back.
 - **Read the comments** on a document — what people wrote and the text each
   comment is anchored to.
+- **Comment on a section** of a document — attach the agent's own note to
+  specific text.
 - **Add** text to the end of a document, or **insert** text at a located spot.
 - **Replace** text throughout a document (find-and-replace).
 - **Format** occurrences of some text (bold, italic, underline, or a heading).
@@ -69,6 +73,7 @@ and url; keep them to edit the same document afterward.
 | `create --title "<t>" [--text "<initial>"]` | Creates a new document in the shared folder. Returns its `document_id` and `url`. |
 | `read <doc_id>` | Gets a document's title and full plain text. |
 | `read-comments <doc_id>` | Lists every comment on the document, each with its `quoted_anchor` — the exact highlighted text the comment was attached to — plus author, resolved state, and replies. Pagination is handled internally. |
+| `comment <doc_id> --text "<note>" --on "<section>"` | Adds a comment to a section of the document. The section is quoted as the first line of the comment, followed by the note. The section must be text that appears in the document (case-insensitive by default). |
 | `append <doc_id> --text "<t>"` | Adds text as a new paragraph at the end. |
 | `insert <doc_id> --text "<t>" --after "<anchor>"` | Inserts text right after the first occurrence of the anchor text. |
 | `insert <doc_id> --text "<t>" --at-start` | Inserts text at the very beginning. |
@@ -79,9 +84,9 @@ and url; keep them to edit the same document afterward.
 | `resize-image <doc_id> (--url "<public_url>" \| --file "<local_path>") (--nth N \| --after "<anchor>") [--width N] [--height N]` | Resizes an existing image. Pass its source again (`--url` or `--file`) — the resize re-inserts it. |
 | `delete-image <doc_id> (--nth N \| --after "<anchor>") --confirm` | **Destructive.** Removes an image. Needs `--confirm`. |
 
-Add `--match-case` to `insert --after`, `replace`, `style`, `delete`, or the
-image verbs when the match must respect capitalization; by default matching
-ignores case.
+Add `--match-case` to `insert --after`, `replace`, `style`, `comment`,
+`delete`, or the image verbs when the match must respect capitalization; by
+default matching ignores case.
 
 **Images:** give the image with EITHER `--url` (a public HTTPS image URL) OR
 `--file` (a path to a local PNG/JPEG/GIF, which is uploaded for you) — not both.
@@ -102,6 +107,8 @@ the user names.
 | "make a doc titled Notes that says 'Hello team'" | `create --title "Notes" --text "Hello team"` |
 | "what does the doc say / read it back" | `read <doc_id>` |
 | "what comments are on the doc / what did people comment on" | `read-comments <doc_id>` |
+| "comment on 'Day 1' that it needs a second pass" | `comment <doc_id> --text "Needs a second pass" --on "Day 1"` |
+| "leave a comment on the Rome section: it's too short" | `comment <doc_id> --text "Too short — expand it" --on "Rome trip"` |
 | "add a line: 'Bring sunscreen'" | `append <doc_id> --text "Bring sunscreen"` |
 | "put a title line at the top: 'Agenda'" | `insert <doc_id> --text "Agenda\n" --at-start` |
 | "after 'Day 1' add 'Fly to Rome'" | `insert <doc_id> --text " Fly to Rome" --after "Day 1"` |
@@ -126,6 +133,7 @@ Notes:
 - `create` → `{"ok": true, "document_id": "1AbC...", "title": "Trip Plan", "url": "https://docs.google.com/document/d/1AbC.../edit"}`
 - `read` → `{"ok": true, "document_id": "1AbC...", "title": "Trip Plan", "text": "Day 1\nFly to Rome\n..."}`
 - `read-comments` → `{"ok": true, "document_id": "1AbC...", "count": 2, "comments": [{"id": "...", "content": "Can we ship this Friday?", "author": "Jane", "quoted_anchor": "launch on Monday", "anchor_segment": "kix.abc123", "resolved": false, "created": "2026-08-24T23:00:00Z", "replies": []}]}`
+- `comment` → `{"ok": true, "document_id": "1AbC...", "action": "commented", "comment_id": "...", "section": "Day 1", "created": "2026-08-24T23:00:00Z"}`
 - `append` → `{"ok": true, "document_id": "1AbC...", "action": "appended", "characters": 16}`
 - `insert` → `{"ok": true, "document_id": "1AbC...", "action": "inserted", "at_index": 42, "characters": 12}`
 - `replace` → `{"ok": true, "document_id": "1AbC...", "action": "replaced", "occurrences": 3}`
@@ -184,6 +192,14 @@ replace <id> --find "Rome" --with "Milan"
 read <id>
 ```
 
+### "Comment on the Day 1 line that it needs a second pass."
+```
+comment <id> --text "Needs a second pass" --on "Day 1"
+  → "Commented on 'Day 1'."
+```
+The comment's first line is the quoted section, so the reader always sees
+what the note refers to, even though the editor does not highlight it.
+
 ### "Delete the 'do not send' warning."
 ```
 # confirm the exact text with the user first, then:
@@ -198,6 +214,24 @@ create --title "Theme Nights" --text "Thursday — GENTS & MAIDS\n[IMAGE:Gents]\
 insert-image <id> --url "https://…/gents.jpg"  --replace "[IMAGE:Gents]"  --width 468
 insert-image <id> --url "https://…/desert.jpg" --replace "[IMAGE:Desert]" --width 468
 ```
+
+## Pitfalls learned the hard way
+
+- **`style --find` matches SUBSTRINGS, case-insensitively.** `style --find "Alerting" --heading 3` hit every paragraph containing the word (9 in one doc: section headings, bullet lines, numbered items, "Alerting layer detail"). Use a longer near-unique anchor, or do headings via a positional script (below), and verify with a paragraph-style dump afterwards.
+- **`comment` cannot produce a highlighted selection.** Google's Drive API cannot create a comment whose text is highlighted in the editor: the Docs API has no comment request, and a developer-supplied anchor is stored but treated as un-anchored by the Workspace apps (verified live — the text never highlights and `quotedFileContent` comes back empty). Do NOT try to "fix" this with different anchor shapes or raw-API calls; the section is quoted as the comment's first line instead, which is the most the API allows. `read-comments` reports `quoted_anchor` empty for these comments — that is expected, not an error.
+- **For surgical edits beyond the verbs, drive the raw API.** Import the script as a module:
+  ```python
+  import sys; sys.path.insert(0, "${HERMES_SKILL_DIR}/scripts")
+  import docs as d
+  docs = d._docs()
+  doc = d._get_doc(docs, DOC_ID)
+  # paragraphs: doc["body"]["content"] -> [{"paragraph": {"elements":[...], "paragraphStyle": {...}}}]
+  # run text: el["paragraph"]["elements"][i]["textRun"]["content"]; indexes: element["startIndex"]
+  d._batch(docs, DOC_ID, [requests...])
+  ```
+  Verified request names (the API rejects unknowns with 400): `replaceAllText` (find/replace), `insertText` (`location: {index}` + `text`; a `\n` in the text creates the paragraph break), `updateParagraphStyle` (`range` + `paragraphStyle: {namedStyleType}` + `fields: "namedStyleType"`; `NORMAL_TEXT` resets), `deleteContentRange` (range is INCLUSIVE of the trailing `\n`). There is no `deleteText` and no `deleteRange` request — those names 400.
+- **Index discipline in one batch:** requests apply in order against a mutating document. Collect all positional requests, then sort by index DESCENDING and send as one batch — nothing applied later shifts a range you already applied. Compute indexes from a fresh `d._get_doc` call, never from text read earlier in the session (edits between reads shift everything).
+- **Paragraph text runs include the trailing `\n`.** An equality check like `para_text(el) == "- some line"` misses because the run is `"- some line\n"`. Use `startswith`/`in`, or compare `para_text(el).rstrip("\n")`.
 
 ## When a verb reports an error
 

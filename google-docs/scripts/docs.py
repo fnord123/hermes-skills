@@ -17,6 +17,8 @@ Verbs (each prints ONE JSON object on stdout; exit 1 on error):
                                                 find docs by name/content — no id needed
   read    <doc_id>                              title + plain-text body
   read-comments <doc_id>                        all comments with their quoted anchor text
+  comment <doc_id> --text <t> --on "<section>" [--match-case]
+                                                 comment on a section of the document
   append  <doc_id> --text <t>                    add text as a new paragraph at the end
   insert  <doc_id> --text <t> (--after "<anchor>" | --at-start)
                                                  insert text at a located spot
@@ -737,6 +739,60 @@ def cmd_read_comments(args):
          "comments": comments})
 
 
+def cmd_comment(args):
+    """Attach a comment to a section of the document.
+
+    The Docs API cannot create a highlighted (anchored) comment — there is
+    no batchUpdate request for it — and Google's Drive docs state that a
+    developer-defined anchor is saved but treated as UN-ANCHORED by the
+    Workspace apps (verified live: the selection never highlights). So the
+    section is quoted into the comment body as line 1 — that is what the
+    reader actually sees — and a best-effort text-range anchor is sent so
+    the API record carries the location too. Created through a direct
+    Drive v3 REST call, the same path read-comments uses."""
+    if not args.text:
+        fail("comment needs --text (the words of the comment).")
+    docs = _docs()
+    try:
+        doc = _get_doc(docs, args.doc_id)
+        text, idx_map = _flatten(doc)
+        hay = text if args.match_case else text.lower()
+        ndl = args.on if args.match_case else args.on.lower()
+        i = hay.find(ndl)
+        if i < 0:
+            fail(f"couldn't find {args.on!r} in the document to comment on.")
+        start = idx_map[i]
+        end = idx_map[i + len(ndl) - 1] + 1
+        quoted = text[i:i + len(ndl)]
+        body = _nl(args.text)
+        comment_text = f'"{quoted}"\n{body}'
+        anchor = json.dumps({"r": "head",
+                             "a": json.dumps({"startIndex": start, "endIndex": end})})
+        payload = json.dumps({"content": comment_text, "anchor": anchor}).encode("utf-8")
+        creds = _creds()
+        try:
+            import google.auth.transport.requests as _tr
+            creds.refresh(_tr.Request())
+        except Exception:  # noqa: BLE001  (creds may already carry a token)
+            pass
+        url = (f"https://www.googleapis.com/drive/v3/files/{args.doc_id}"
+               f"/comments?fields=id,content,anchor,createdTime,author(displayName)")
+        req = urllib.request.Request(
+            url, data=payload, method="POST",
+            headers={"Authorization": "Bearer " + creds.token,
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                created = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            fail(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}")
+        out({"ok": True, "document_id": args.doc_id, "action": "commented",
+             "comment_id": created.get("id"), "section": quoted,
+             "created": created.get("createdTime")})
+    except Exception as e:  # noqa: BLE001
+        fail(e)
+
+
 def main():
     _log({"argv": [_truncate(a) for a in sys.argv[1:]]})
     p = argparse.ArgumentParser(prog="docs", description=__doc__)
@@ -767,6 +823,13 @@ def main():
     g = sub.add_parser("read-comments", help="list all comments with their quoted anchor text")
     g.add_argument("doc_id")
     g.set_defaults(func=cmd_read_comments)
+
+    g = sub.add_parser("comment", help="add a comment to a section of the document")
+    g.add_argument("doc_id")
+    g.add_argument("--text", required=True, help="the words of the comment")
+    g.add_argument("--on", required=True, help="the section of text to comment on")
+    g.add_argument("--match-case", dest="match_case", action="store_true")
+    g.set_defaults(func=cmd_comment)
 
     g = sub.add_parser("append", help="add text as a new paragraph at the end")
     g.add_argument("doc_id")
