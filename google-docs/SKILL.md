@@ -1,18 +1,21 @@
 ---
 name: google-docs
 description: >
-  Create, read, and edit Google Docs documents — write a new document, read one
-  back, add or insert text, find-and-replace, format text (bold/italic/underline
-  or headings), or remove text. Works through a pre-configured service account;
-  new documents land in the agent's shared Drive folder, and existing documents
-  are reachable once shared with the agent. PREFER THIS SKILL for anything about
-  a Google Doc / document's contents. It is a different, self-contained setup
-  from `google-workspace` (which is OAuth-based) — reach for this one for Docs.
-  Finds documents by name or content, so the user never needs a document ID or
-  URL. Activate on any of: "google doc", "doc", "document", "write a doc",
-  "create a document", "add to the doc", "insert into the document", "edit the
-  doc", "find and replace in the doc", "make this a heading", "bold this in the
-  doc", "read the doc", "what does the document say", "find my doc", "search my
+  Used to read contents & comments, and write google docs. Create a new
+  document, add or insert text, find-and-replace, format text
+  (bold/italic/underline or headings), remove text, or list every comment on
+  a document with the exact text each one is anchored to. Works through a
+  pre-configured service account; new documents land in the agent's shared
+  Drive folder, and existing documents are reachable once shared with the
+  agent. PREFER THIS SKILL for anything about a Google Doc / document's
+  contents or its comments. It is a different, self-contained setup from
+  `google-workspace` (which is OAuth-based) — reach for this one for Docs.
+  Finds documents by name or content, so the user never needs a document ID
+  or URL. Activate on any of: "google doc", "doc", "document", "write a doc",
+  "create a document", "add to the doc", "insert into the document", "edit
+  the doc", "find and replace in the doc", "make this a heading", "bold this
+  in the doc", "read the doc", "what does the document say", "what comments
+  are on the doc", "what did people comment on", "find my doc", "search my
   docs", "which docs do I have", "it's in my docs".
 version: 0.1.0
 license: MIT
@@ -33,6 +36,8 @@ headings, find-and-replace — and never track positions or state yourself.
 Activate when the user wants to:
 - **Create** a new document, optionally with starting text.
 - **Read** a document's title and text back.
+- **Read the comments** on a document — what people wrote and the text each
+  comment is anchored to.
 - **Add** text to the end of a document, or **insert** text at a located spot.
 - **Replace** text throughout a document (find-and-replace).
 - **Format** occurrences of some text (bold, italic, underline, or a heading).
@@ -63,6 +68,7 @@ and url; keep them to edit the same document afterward.
 | `find [query] [--title-only] [--anywhere] [--limit N]` | **Finds documents without an id.** No query lists everything in the folder, newest first. A query matches the title *and* the body text. `--anywhere` looks beyond the folder at everything shared with the agent. Returns `document_id`, `title`, `url`, `modified` for each. |
 | `create --title "<t>" [--text "<initial>"]` | Creates a new document in the shared folder. Returns its `document_id` and `url`. |
 | `read <doc_id>` | Gets a document's title and full plain text. |
+| `read-comments <doc_id>` | Lists every comment on the document, each with its `quoted_anchor` — the exact highlighted text the comment was attached to — plus author, resolved state, and replies. Pagination is handled internally. |
 | `append <doc_id> --text "<t>"` | Adds text as a new paragraph at the end. |
 | `insert <doc_id> --text "<t>" --after "<anchor>"` | Inserts text right after the first occurrence of the anchor text. |
 | `insert <doc_id> --text "<t>" --at-start` | Inserts text at the very beginning. |
@@ -95,6 +101,7 @@ the user names.
 | "start a doc called Trip Plan" | `create --title "Trip Plan"` |
 | "make a doc titled Notes that says 'Hello team'" | `create --title "Notes" --text "Hello team"` |
 | "what does the doc say / read it back" | `read <doc_id>` |
+| "what comments are on the doc / what did people comment on" | `read-comments <doc_id>` |
 | "add a line: 'Bring sunscreen'" | `append <doc_id> --text "Bring sunscreen"` |
 | "put a title line at the top: 'Agenda'" | `insert <doc_id> --text "Agenda\n" --at-start` |
 | "after 'Day 1' add 'Fly to Rome'" | `insert <doc_id> --text " Fly to Rome" --after "Day 1"` |
@@ -118,6 +125,7 @@ Notes:
 
 - `create` → `{"ok": true, "document_id": "1AbC...", "title": "Trip Plan", "url": "https://docs.google.com/document/d/1AbC.../edit"}`
 - `read` → `{"ok": true, "document_id": "1AbC...", "title": "Trip Plan", "text": "Day 1\nFly to Rome\n..."}`
+- `read-comments` → `{"ok": true, "document_id": "1AbC...", "count": 2, "comments": [{"id": "...", "content": "Can we ship this Friday?", "author": "Jane", "quoted_anchor": "launch on Monday", "anchor_segment": "kix.abc123", "resolved": false, "created": "2026-08-24T23:00:00Z", "replies": []}]}`
 - `append` → `{"ok": true, "document_id": "1AbC...", "action": "appended", "characters": 16}`
 - `insert` → `{"ok": true, "document_id": "1AbC...", "action": "inserted", "at_index": 42, "characters": 12}`
 - `replace` → `{"ok": true, "document_id": "1AbC...", "action": "replaced", "occurrences": 3}`

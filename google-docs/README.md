@@ -1,10 +1,11 @@
 # google-docs
 
-Create, read, and edit Google Docs documents for the Hermes agent. The user
-speaks in document terms ("start a doc called Trip Plan", "change every 'Rome'
-to 'Milan'", "make 'Agenda' a heading"); the agent calls one small CLI and the
-change lands in a real Google Doc — no Docs-API request-model or character-index
-thinking required of the model.
+Used to read contents & comments, and write google docs — for the Hermes
+agent. The user speaks in document terms ("start a doc called Trip Plan",
+"change every 'Rome' to 'Milan'", "make 'Agenda' a heading", "what did
+people comment on this?"); the agent calls one small CLI and the change lands
+in a real Google Doc — no Docs-API request-model or character-index thinking
+required of the model.
 
 Backed by the Google Docs + Drive APIs under a service account. The model-facing
 surface (`SKILL.md` + the CLI's verbs/output) speaks only in documents; this
@@ -18,6 +19,7 @@ README is the human/developer side — setup, the backend, and rationale.
 - *"Change every 'Rome' to 'Milan'."*
 - *"Make 'Agenda' a heading and bold 'urgent'."*
 - *"What does the document say?"*
+- *"What comments are on the doc — and what text are they attached to?"*
 
 ## What this is NOT for
 
@@ -129,11 +131,12 @@ $PY $D read    $ID                                   # inspect the result
 
 ## The verbs
 
-`create` · `read` · `append` · `insert` · `replace` · `style` · `delete` ·
-`insert-image` · `resize-image` · `delete-image` — see [`SKILL.md`](./SKILL.md)
-for the model-facing contract and the word→call mapping. Each prints one JSON
-object; failures are `{"ok": false, "error": "…"}` with exit 1. `delete` and
-`delete-image` are destructive and refuse to run without `--confirm`.
+`create` · `find` · `read` · `read-comments` · `append` · `insert` · `replace` ·
+`style` · `delete` · `insert-image` · `resize-image` · `delete-image` — see
+[`SKILL.md`](./SKILL.md) for the model-facing contract and the word→call
+mapping. Each prints one JSON object; failures are `{"ok": false, "error": "…"}`
+with exit 1. `delete` and `delete-image` are destructive and refuse to run
+without `--confirm`.
 
 ## Design notes
 

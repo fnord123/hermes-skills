@@ -16,6 +16,7 @@ Verbs (each prints ONE JSON object on stdout; exit 1 on error):
   find    [query] [--title-only] [--anywhere] [--limit N]
                                                 find docs by name/content — no id needed
   read    <doc_id>                              title + plain-text body
+  read-comments <doc_id>                        all comments with their quoted anchor text
   append  <doc_id> --text <t>                    add text as a new paragraph at the end
   insert  <doc_id> --text <t> (--after "<anchor>" | --at-start)
                                                  insert text at a located spot
@@ -46,6 +47,9 @@ if _VENV.exists() and sys.executable != str(_VENV):
 
 import argparse
 import json
+import urllib.parse
+import urllib.request
+import urllib.error
 
 CONFIG_DIR = Path.home() / ".config" / "google-docs"
 CONFIG_ENV = CONFIG_DIR / "config.env"
@@ -663,6 +667,76 @@ def cmd_delete_image(args):
         fail(e)
 
 
+# ── comments ─────────────────────────────────────────────────────────────────
+# Drive v3 files.comments.list REQUIRES a fields parameter (400 without one),
+# and only accepts real Comment field names — anything invented is a 400
+# "Invalid field selection". Verified against the Drive v3 discovery doc.
+_COMMENT_FIELDS = ("nextPageToken,comments(id,content,anchor,quotedFileContent,"
+                   "resolved,createdTime,modifiedTime,"
+                   "author(displayName),replies(id,content,createdTime,"
+                   "modifiedTime,author(displayName)))")
+
+
+def _comment_anchor(c):
+    """Normalize a comment's anchor to its text segment id ("" if absent).
+    Some responses carry the anchor as a plain segmentId string."""
+    a = c.get("anchor")
+    if isinstance(a, str):
+        return a
+    if isinstance(a, dict):
+        return ((a.get("location") or {}).get("segmentId") or "")
+    return ""
+
+
+def cmd_read_comments(args):
+    """List every comment on a document with the text each one is anchored
+    to (its quotedFileContent — the selection the comment was attached to).
+    Uses a direct REST call: files.comments.list is not exposed as a nested
+    method on the python client's files() resource."""
+    creds = _creds()
+    try:
+        import google.auth.transport.requests as _tr
+        creds.refresh(_tr.Request())
+    except Exception:  # noqa: BLE001  (user creds may already carry a token)
+        pass
+    comments, page_token = [], None
+    while True:
+        url = (f"https://www.googleapis.com/drive/v3/files/{args.doc_id}"
+               f"/comments?fields={urllib.parse.quote(_COMMENT_FIELDS)}")
+        if page_token:
+            url += f"&pageToken={urllib.parse.quote(page_token)}"
+        try:
+            req = urllib.request.Request(url,
+                                         headers={"Authorization": "Bearer " + creds.token})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            fail(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}")
+        except Exception as e:  # noqa: BLE001
+            fail(e)
+        for c in data.get("comments", []):
+            quoted = (c.get("quotedFileContent") or {}).get("value", "")
+            comments.append({
+                "id": c.get("id"),
+                "content": c.get("content", ""),
+                "author": (c.get("author") or {}).get("displayName") or "unknown",
+                "quoted_anchor": quoted,
+                "anchor_segment": _comment_anchor(c),
+                "resolved": c.get("resolved", False),
+                "created": c.get("createdTime"),
+                "replies": [{
+                    "author": (r.get("author") or {}).get("displayName") or "unknown",
+                    "content": r.get("content", ""),
+                    "created": r.get("createdTime"),
+                } for r in c.get("replies", [])],
+            })
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    out({"ok": True, "document_id": args.doc_id, "count": len(comments),
+         "comments": comments})
+
+
 def main():
     _log({"argv": [_truncate(a) for a in sys.argv[1:]]})
     p = argparse.ArgumentParser(prog="docs", description=__doc__)
@@ -689,6 +763,10 @@ def main():
                         "the text without a shell pipe - piping python3 into python3 trips "
                         "the security scanner and forces a manual approval prompt.")
     g.set_defaults(func=cmd_read)
+
+    g = sub.add_parser("read-comments", help="list all comments with their quoted anchor text")
+    g.add_argument("doc_id")
+    g.set_defaults(func=cmd_read_comments)
 
     g = sub.add_parser("append", help="add text as a new paragraph at the end")
     g.add_argument("doc_id")
