@@ -170,9 +170,17 @@ python3 tools/lint_skills.py --skill donations
 python3 tools/lint_skills.py --severity critical
 ```
 
-`critical` means a broken install (undeclared third-party imports) or broken routing (no
-PREFER clause, no trigger list) — the two failures a user actually notices. CI runs this on
-every push and fails the build on any critical finding.
+`critical` gates the build. It means a broken install (undeclared third-party
+imports, a script that does not parse), broken routing (no PREFER clause, no
+trigger list, or a trigger dropped from the description against the committed
+baseline), or a silent capability gap (a skill that uses a toolset without
+declaring it, a destructive subcommand with no `--confirm` guard, a directory
+outside the four Hermes ones, a "NEVER read" section, or broken frontmatter).
+CI runs this on every push and fails the build on any critical finding.
+
+`major` is the conformance layer: domain vocabulary in model context, missing
+tools tables, failure-prime prose, and so on. It is tracked in TODO.md and fixed
+in order, but it does not block a merge.
 
 `tools/skill_json.py` implements the JSON contract in the Scripts section above. Vendor it
 into a skill as `scripts/skill_json.py` and use `ok()` / `fail()` / `@guard` rather than

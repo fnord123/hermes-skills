@@ -278,6 +278,29 @@ case("B14 failure prime 'tends to'", lambda: make_skill(LAB, "x", script=BASE_SC
                                   "The model tends to call do-thing twice.")),
      {"body/model-context"})
 
+# Negative controls (2026-08-28, added as the four sibling rules were promoted to
+# critical): at critical a false positive blocks a merge, so the must-not-fire side
+# of model-context gets pinned here too. Both inputs are sound prose that the rule
+# correctly leaves alone (verified against the shipped patterns before asserting).
+case("B14a 'tendency to' is not a failure prime", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+     skillmd=BASE_SKILLMD.replace("When the user asks for the thing.",
+                                  "A tendency to over-fetch is common with new models.")),
+     set(), must_not={"body/model-context"})
+
+case("B14b 'Background:' in prose is not a rationale heading", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+     skillmd=BASE_SKILLMD.replace("When the user asks for the thing.",
+                                  "Background: the thing runs nightly in Pacific time.")),
+     set(), must_not={"body/model-context"})
+
+# KNOWN LIMITATIONS of model-context, discovered while adding these controls: the rule
+# scans raw body text (fences are stripped only for the domain-leak scan), and the
+# heading test matches any of five words. So it fires on (a) a comment that looks like
+# a heading inside a code fence ("# why this is fast"), and (b) a legitimate
+# operational heading "## Background processing". Until the rule is fixed (strip
+# fences before scanning; narrow the heading words), it stays major — at critical,
+# either limitation would block a correct merge. Do not promote without a fence-stripping
+# fix and negative controls for both shapes.
+
 case("B15 domain leak in prose", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd=BASE_SKILLMD.replace("Does one thing well.", "Sits on a spreadsheet backend.")),
      {"body/domain-leak"})

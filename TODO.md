@@ -1,7 +1,10 @@
 # Outstanding conventions work
 
-Snapshot: **113 findings — 0 critical, 73 major, 40 minor** across 16 skills.
-CI is green; it gates on criticals only, so everything below is non-blocking.
+Snapshot: **94 findings — 0 critical, 54 major, 40 minor** across 16 skills
+(post-promotion, 2026-08-28). CI is green; it gates on criticals only —
+`layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets` and
+`routing/triggers-baseline` are critical as of this snapshot, the remaining
+majors are conformance work and non-blocking.
 
 Regenerate this picture at any time:
 

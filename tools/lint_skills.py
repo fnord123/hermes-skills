@@ -324,7 +324,7 @@ def lint_skill(name, baseline=None):
     subs = {x for x in os.listdir(d)
             if os.path.isdir(os.path.join(d, x)) and not x.startswith(".")}
     for bad in sorted(subs - ALLOWED_SUBDIRS):
-        add("major", "layout/dirs",
+        add("critical", "layout/dirs",
             "'%s/' is outside the four Hermes directories - invisible to supporting-file "
             "discovery and unwritable by the agent" % bad)
     if not os.path.exists(os.path.join(d, "README.md")):
@@ -432,7 +432,7 @@ def lint_skill(name, baseline=None):
             block = src[m.start():m.end() + (nxt.start() if nxt else 2000)]
             if not re.search(r'--confirm\b', block):
                 line = src[:m.start()].count("\n") + 1
-                add("major", "scripts/confirm",
+                add("critical", "scripts/confirm",
                     "destructive subcommand %r has no --confirm guard — a hallucinated "
                     "call runs it with no footgun brake" % sub,
                     "%s:%d" % (rel, line))
@@ -466,7 +466,7 @@ def lint_skill(name, baseline=None):
                    for m in re.finditer(pat, text)):
                 needs.add(tool)
         if needs and not hermes.get("requires_toolsets"):
-            add("major", "frontmatter/requires-toolsets",
+            add("critical", "frontmatter/requires-toolsets",
                 "uses %s but declares no metadata.hermes.requires_toolsets - if the toolset is "
                 "absent the skill activates anyway and fails confusingly"
                 % ", ".join(sorted(needs)))
@@ -476,9 +476,12 @@ def lint_skill(name, baseline=None):
     # triggers (19→10, the whole write side) and the linter passed it. A presence check
     # can only see "no list"; it cannot see "the list shrank". This compares against a
     # committed baseline (tools/trigger_baseline.json). Adding triggers is always safe
-    # (it widens routing), so only REMOVALS fire. Removal is major, not critical: the
-    # skill is not broken, it is just quieter — and CI currently gates on critical only,
-    # by design (majors are advisory until the staging decision).
+    # (it widens routing), so only REMOVALS fire. Removal is critical: a trigger gone
+    # from the description silently narrows routing — the skill stops matching
+    # conversations it used to — which is the "broken routing" class critical exists
+    # for. (It was major while majors were advisory and CI gated on critical only;
+    # promoting it here makes a dropped trigger block a merge, because an accidental
+    # drop would otherwise ship unnoticed.)
     #
     # The baseline is a committed artifact, NOT a diff against git HEAD, for two reasons:
     # (a) CI's checkout is clean (HEAD == worktree) so the diff is always empty there;
@@ -489,7 +492,7 @@ def lint_skill(name, baseline=None):
     if fm is not None and baseline is not None and name in baseline:
         missing = sorted(set(baseline[name]) - set(triggers))
         if missing:
-            add("major", "routing/triggers-baseline",
+            add("critical", "routing/triggers-baseline",
                 "trigger(s) in the baseline but gone from the description: %s — if this "
                 "was deliberate, review the diff and run --update-triggers"
                 % ", ".join(missing))
