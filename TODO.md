@@ -108,17 +108,24 @@ Backend vocabulary in model context. The model reasons about the words in front 
 
 ---
 
-## 5. Structure — 10 findings
+## 5. Structure — 6 findings
 
 - [ ] `body/tools-table` (5) — the four investment skills and `pet-care-tracker` have no tools
       table because they invoke no scripts. Either exempt script-less skills in the linter or
       give `pet-care-tracker` the `scripts/pet_care.py` it should have had (it currently hands
       the model raw `curl`, `jq` and a bearer token, which defeats the domain-abstraction rule
       wholesale).
-- [ ] `frontmatter/requires-toolsets` (2) — `calendar`, `donations`.
-- [ ] `body/error-sentence` (1), `body/section-flow` (1), `body/model-context` (1).
+- [x] `frontmatter/requires-toolsets` (2) — closed 2026-08-28: `pallo-logistics` declared
+      `requires_toolsets: [terminal]`; `agentmail-lite` was a false positive (the scan matched
+      `curl` inside the sentence that *forbids* it) — fixed in the linter with a clause-scoped
+      negation filter (`_in_negation`) + battery cases E3/E4.
+- [x] `body/model-context` (1) — closed 2026-08-28: `donations` rephrased ("Don't reach for it"
+      → "Out of scope").
+- [x] `layout/dirs` (1) — closed 2026-08-28: `web-access/patches/` → `web-access/assets/`
+      (Dockerfile `COPY` updated).
+- [ ] `body/error-sentence` (1), `body/section-flow` (1).
 - [ ] `body/explicit-verb` (6), `frontmatter/tags` (2). (`frontmatter/version` (1)
-      closed 2026-08-28: `daily-briefing` was the lone `1.0.0` outlier; now `0.1.0`.)
+      closed 2026-08-28: `daily-briefing` was the lone `1.0.0` outlier; now `0.2.0`.)
 
 ---
 

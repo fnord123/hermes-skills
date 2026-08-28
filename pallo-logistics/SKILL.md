@@ -21,6 +21,7 @@ metadata:
     - Calendar
     - Travel
     category: pets
+    requires_toolsets: [terminal]
 ---
 
 # pallo-logistics — Pallo's boarding + Model-X coordination

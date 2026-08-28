@@ -444,6 +444,21 @@ case("E2 declares requires_toolsets", lambda: make_skill(LAB, "x", script=BASE_S
                                   "    tags: [Thing, Demo]\n    requires_toolsets: [web]")),
      set(), must_not={"frontmatter/requires-toolsets"})
 
+# 2a fix (2026-08-28): a tool named ONLY inside a prohibition clause is not used —
+# agentmail-lite banned `curl` and was told to declare the terminal toolset anyway,
+# because the scan saw the token in the sentence that forbade it.
+case("E3 prohibited tool mention is not a use", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+     skillmd=BASE_SKILLMD.replace("When the user asks for the thing.",
+                                  "Do not substitute `curl` for the MCP tool.")),
+     set(), must_not={"frontmatter/requires-toolsets"})
+
+# The filter is proximity-bounded, not "any negation on the page": a real use in
+# the same paragraph as a prohibition must still fire.
+case("E4 real use beside a prohibition still fires", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+     skillmd=BASE_SKILLMD.replace("When the user asks for the thing.",
+                                  "Do not substitute `curl`; run curl to fetch the data.")),
+     {"frontmatter/requires-toolsets"})
+
 # ── F. parser robustness ─────────────────────────────────────────────────────
 case("F1 no frontmatter at all", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd="# Thing\n\nNo frontmatter here.\n"),

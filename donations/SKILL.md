@@ -41,8 +41,8 @@ Activate when the user wants to:
 - **Cash donations.** This skill tracks only itemized goods (things with a
   quantity and a per-item value). If the user is logging a cash gift, tell them
   cash isn't handled here yet.
-- **Anything that isn't logging donated goods.** Don't reach for it for general
-  record-keeping, lists, or math.
+- **Anything that isn't logging donated goods.** Out of scope: general
+  record-keeping, lists, and math.
 
 ## The tool
 

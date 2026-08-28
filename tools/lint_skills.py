@@ -170,6 +170,33 @@ def read_skill_triggers(name):
     return extract_triggers(str(fm.get("description") or ""))
 
 
+# Negation cue for the requires-toolsets tool scan: a tool named inside a
+# prohibition ("Do not substitute curl", "Never make outbound requests via curl")
+# is not used — the skill says the opposite. The linter scans whole raw SKILL.md
+# text, so without this it flags the very sentence that bans the tool.
+TOOLSET_NEGATION = ("do not", "don't", "dont", "never", "must not", "avoid",
+                    "forbid", "prohibit", "no")
+
+
+def _in_negation(text, pos, window=80):
+    """True when a negation cue governs a tool mention — i.e. it sits in the
+    same CLAUSE, before the token, within `window` chars.
+
+    A raw proximity window is not enough: "No sign-in needed. | `python3
+    script.py`" or "do not rewrite it from memory. - `web_search` …" put a
+    negation within 40 chars of a *genuine* use in the next clause/cell. A
+    negation only governs what follows before a clause break (`. ! ? , ; | )`
+    or a newline), so the check starts at the last break before the token.
+    This keeps "Do not substitute `curl`" suppressed while "No sign-in needed.
+    | `python3 …`" still counts as a terminal use."""
+    lo = max(0, pos - window)
+    seg = text[lo:pos]
+    breaks = [m.end() for m in re.finditer(r"[.!?,\n;|)]", seg)]
+    clause = seg[breaks[-1]:] if breaks else seg
+    return any(re.search(r"\b" + re.escape(n) + r"\b", clause, re.I)
+               for n in TOOLSET_NEGATION)
+
+
 def lint_skill(name, baseline=None):
     d = os.path.join(ROOT, name)
     sk = os.path.join(d, "SKILL.md")
@@ -434,7 +461,9 @@ def lint_skill(name, baseline=None):
         for tool, pat in (("web", r"\bweb_search\b|\bweb_extract\b"),
                           ("browser", r"\bbrowser_\w+\b"),
                           ("terminal", r"\bpython3 \S+\.py\b|\bcurl\b")):
-            if re.search(pat, text):
+            # a mention inside a prohibition clause is a non-use (see _in_negation)
+            if any(not _in_negation(text, m.start())
+                   for m in re.finditer(pat, text)):
                 needs.add(tool)
         if needs and not hermes.get("requires_toolsets"):
             add("major", "frontmatter/requires-toolsets",

@@ -35,7 +35,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # identically). The patch is part of the build, not a hand step: the README
 # says it moves into the image build, and a re-clone must not be able to
 # lose it.
-COPY patches/fara-local-patches.diff /tmp/fara-local-patches.diff
+COPY assets/fara-local-patches.diff /tmp/fara-local-patches.diff
 COPY fara /opt/fara
 RUN set -eux; \
     python3 -m venv /opt/fara/.venv; \
