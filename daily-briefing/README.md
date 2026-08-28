@@ -1,12 +1,12 @@
 # daily-briefing — setup
 
-A morning briefing pipeline that runs once a day under your crontab, gathers calendar / weather / news / lottery / market data, composes a fixed-format message, and posts it to a Discord channel via webhook. The accompanying [`SKILL.md`](./SKILL.md) is the **runtime companion** — it lets the Hermes agent edit the pipeline's policy files in plain English ("add Reuters to my trusted sources", "stop tracking GLW", etc.). The agent doesn't generate briefings; cron does.
+A morning briefing pipeline that runs once a day under your crontab, gathers calendar / weather / news / market / lottery data, composes a fixed-format message, and posts it to a Discord channel via webhook. The pipeline lives in its own repo — [`fnord123/daily-briefing`](https://github.com/fnord123/daily-briefing), installed at `~/daily-briefing/` — which is the **single source of truth** for the pipeline code and the JSON config files. This skill is the **runtime companion**: it lets the Hermes agent edit those policy files in plain English ("add Reuters to my trusted sources", "stop tracking GLW"). The agent doesn't generate briefings; cron does.
 
 This README is for the human standing the pipeline up. The skill never reads it.
 
 ## Heads up: this is "as-is" and takes some assembly
 
-This skill bundles a working pipeline but doesn't pretend setup is push-button. You'll need accounts and API keys with three providers (Brave, Twelve Data, Discord), a Google Calendar iCal URL, an NWS gridpoint lookup, a Python venv for `yfinance`, a per-channel prompt edit in your Hermes config, and a cron job. Plan for 30–60 minutes the first time; less if you're already comfortable with all of those moving parts. There's no installer.
+You'll need a Discord webhook, a Google Calendar iCal URL, a Twelve Data key, an NWS gridpoint lookup, a Python venv for `yfinance`, a per-channel prompt edit in your Hermes config, and a cron job. Plan for 30–60 minutes the first time; less if you're already comfortable with all of those moving parts. There's no installer.
 
 ### Why the pipeline lives outside the agent
 
@@ -16,7 +16,7 @@ Originally I tried to have the Hermes agent itself produce the briefing — fetc
 - Small models have a strong pull toward generic `terminal` invocations and improvise hallucinated CLI commands when typed tools don't exactly fit.
 - Even when it ran end-to-end, it was slow (multiple LLM calls × per-day cost) and brittle (one bad tool selection wrecked the whole briefing).
 
-What I ended up with — and what this skill ships — is **scripts do the boring deterministic work, the agent only does what scripts can't**:
+What I ended up with — and what the pipeline ships — is **scripts do the boring deterministic work, the agent only does what scripts can't**:
 
 - **Shell + jq + a few Python helpers** are far more robust and far cheaper than asking an LLM to do them. The whole pipeline runs in under a second total wall-clock once it's warm.
 - **Cron-driven pipelines are easy to debug**: one log per fetcher, plain exit codes, no token budgets, no context-window failure modes.
@@ -35,7 +35,7 @@ If you're running on a frontier model (Claude / GPT-4 / Gemini), you could likel
    ┌────┬────┬───┴────┬────┬───────┐              │
    ▼    ▼    ▼        ▼    ▼       ▼              │
  cal   wx   news    jackpots tickers              │
- (iCal)(NWS)(Brave) (browser)(TwelveData/yf)      │
+ (iCal)(NWS)(web-access)(browser)(12D/yf)         │
    │    │    │        │      │                    │
    └────┴────┴────────┴──────┘                    │
                  │                                │
@@ -52,7 +52,7 @@ Hermes sees the post in the channel (via `DISCORD_ALLOW_BOTS=all` plus a per-cha
 
 Most "today's briefing didn't show up" failures are shell-debuggable from `/var/tmp/daily-briefing*.log` — not a context-window problem inside the agent.
 
-See [`references/overview.md`](./references/overview.md) for the full architecture deep-dive (debugging tips, log file locations, memory-system integration, etc.).
+See [`references/overview.md`](./references/overview.md) for the full architecture deep-dive (component behavior, debugging tips, log file locations, memory-system integration). It mirrors the pipeline repo's `Morning-Briefing-Overview.md`.
 
 ## Prerequisites
 
@@ -60,16 +60,16 @@ See [`references/overview.md`](./references/overview.md) for the full architectu
 - **`bash`, `curl`, `jq`, `python3`** (3.10+ recommended for `zoneinfo`)
 - **A Discord server** where you can create a webhook
 - **A Hermes Agent** install with the Discord platform enabled, listening to the channel
+- **The [hermes-skills](https://github.com/fnord123/hermes-skills) repo cloned to `~/hermes-skills`** — the news fetcher calls the `web-access` skill's CLI, hardcoded at `$HOME/hermes-skills/web-access/scripts/web_access.py`. If your clone lives elsewhere, edit `WEB_ACCESS` in `~/daily-briefing/fetch-news.sh` to match. News degrades to a warning (briefing still posts) if the CLI is missing.
 
-API keys you'll need (all free tiers are sufficient):
+API keys you'll need:
 
-| Service | Used for | Free-tier limits | Sign-up |
-|---|---|---|---|
-| **Brave Search** | News headlines per topic | 2,000 queries/month | https://brave.com/search/api/ |
-| **Twelve Data** | US ticker prices in `__Markets__` block | 800 calls/day, 8/min | https://twelvedata.com/pricing |
-| **Google Calendar** | Today's calendar events | n/a | calendar.google.com → Settings → "Secret address in iCal format" |
+| Service | Used for | Sign-up |
+|---|---|---|
+| **Twelve Data** | US ticker prices in `__Markets__` block (free tier: 800 calls/day, 8/min) | https://twelvedata.com/pricing |
+| **Google Calendar** | Today's calendar events | calendar.google.com → Settings → "Secret address in iCal format" |
 
-`yfinance` (used for non-US tickers) is keyless — it scrapes Yahoo Finance.
+News search is **keyless** — `fetch-news.sh` uses the web-access multi-engine search CLI. `yfinance` (used for non-US tickers) is keyless too — it scrapes Yahoo Finance.
 
 ## Setup
 
@@ -79,26 +79,27 @@ API keys you'll need (all free tiers are sufficient):
 hermes skills install fnord123/hermes-skills/daily-briefing
 ```
 
-This places `SKILL.md` and `scripts/` under `~/.hermes/skills/daily-briefing/`. The skill is now active in Hermes; the rest of these steps stand up the cron pipeline that the skill talks about.
+This places `SKILL.md` under `~/.hermes/skills/daily-briefing/`. The skill is now active in Hermes; the rest of these steps stand up the cron pipeline that the skill manages.
 
-### 2. Copy the pipeline scripts to your home dir
+### 2. Get the pipeline
 
 ```bash
-mkdir -p ~/daily-briefing
-cp -r ~/.hermes/skills/daily-briefing/scripts/. ~/daily-briefing/
-cp ~/.hermes/skills/daily-briefing/templates/.env.example ~/daily-briefing/.env
+git clone git@github.com:fnord123/daily-briefing.git ~/daily-briefing
 chmod +x ~/daily-briefing/*.sh ~/daily-briefing/*.py
 ```
 
-(The skill assumes the pipeline lives at `~/daily-briefing/`. If you put it somewhere else, update the path references in `SKILL.md` accordingly — but the path convention is what makes natural-language edits like "add NVDA to my watchlist" land in the right place.)
+The pipeline repo contains the fetcher scripts, the JSON config files, and an `.env.example` at its root. Runtime state (`news-seen.json`, `archive/`) is created on first run.
 
 ### 3. Get API keys and fill in `.env`
 
-Edit `~/daily-briefing/.env` (created in step 2). Required:
+```bash
+cp ~/daily-briefing/.env.example ~/daily-briefing/.env
+```
+
+Edit `~/daily-briefing/.env`. Required:
 
 ```
 GCAL_ICAL_KEY=https://calendar.google.com/calendar/ical/<your-secret>/basic.ics
-BRAVE_API_KEY=<your Brave key>
 TWELVE_DATA_API_KEY=<your Twelve Data key>
 NWS_GRIDPOINT=OKX/33,42       # NYC; see step 4 to find yours
 BRIEFING_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
@@ -200,37 +201,24 @@ This fetches everything but skips the Discord post. If the output looks right, y
 - "Follow the AI capex topic in my news."
 - "Map alex@example.com to Alex in my calendar people list."
 
-The agent edits the JSON files; the next briefing reflects the change.
+The agent edits the JSON files in `~/daily-briefing/`; the next briefing reflects the change.
 
-## Files in this skill
+## Files
 
 ```
+This skill (model-facing companion):
 daily-briefing/
-├── SKILL.md                         model-facing companion (Hermes uses this)
+├── SKILL.md                         what the agent manages, and how
 ├── README.md                        this file
-├── references/
-│   └── overview.md                  full architecture / debugging guide
-├── templates/
-│   └── .env.example                 copy to .env, fill in keys
-└── scripts/
-    ├── morning-briefing.sh          orchestrator (entry point for cron)
-    ├── fetch-calendar.sh            Google Calendar iCal → today's events
-    ├── fetch-news.sh                Brave News API → 1 story per topic
-    ├── fetch-tickers.sh             Bash wrapper for fetch-tickers.py
-    ├── fetch-tickers.py             Twelve Data + yfinance hybrid
-    ├── fetch-weather.sh             NWS forecast API → 1-line summary
-    ├── news-dedup.py                source-pref ranking + dedup
-    ├── source-prefs.py              optional curses TUI for prefs
-    ├── news-topics.json             {"topics": [...]}
-    ├── news-source-prefs.json       {"trusted": [...], "untrusted": [...]}
-    ├── tickers.json                 [{"ticker": "..."}]
-    └── calendar-people.json         {"default": ..., "organizers": {...}}
+└── references/
+    └── overview.md                  full architecture / debugging guide
+
+The pipeline (separate repo — source of truth for everything it runs):
+git clone git@github.com:fnord123/daily-briefing.git ~/daily-briefing
 ```
+
+The pipeline repo's own `Morning-Briefing-Overview.md` documents its full file layout (fetchers, config JSONs, state files). Keep pipeline changes there — do not fork copies of the pipeline into this repo; the agent only ever touches the four config JSONs, and it touches them where cron reads them: `~/daily-briefing/`.
 
 ## Roadmap
 
-- **Non-US weather** — currently NWS-only. Open-meteo support would make this work globally.
-- **Multi-channel routing** — post different sections to different channels.
-- **Per-day topic rotations** — e.g. tech news weekdays, sports weekends.
-
-PRs welcome via the parent [hermes-skills](https://github.com/fnord123/hermes-skills) repo.
+Pipeline changes (non-US weather, multi-channel routing, per-day topic rotations, …) belong in the [`daily-briefing` pipeline repo](https://github.com/fnord123/daily-briefing). Skill changes go in the parent [hermes-skills](https://github.com/fnord123/hermes-skills) repo.

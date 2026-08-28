@@ -52,8 +52,12 @@ assuming it did. That is how a booking script reports success it never achieved.
 
 - [ ] `pallo-logistics` — 16 scripts
 - [ ] `square-appointments` — 6 scripts
-- [ ] `daily-briefing` — 3 scripts
 - [ ] `web-access`, `whatsapp-backfill`, `google-docs` — 1-2 each
+
+(`daily-briefing` left this list 2026-08-28: its three pipeline `.py` files
+were vendored mirror copies of `~/daily-briefing/` (the cron pipeline's own
+git repo, single source of truth) — the skill is now a pure config companion
+and the mirror is gone, not rewritten.)
 
 ### Linter accuracy — fixed
 
@@ -113,8 +117,8 @@ Backend vocabulary in model context. The model reasons about the words in front 
       wholesale).
 - [ ] `frontmatter/requires-toolsets` (2) — `calendar`, `donations`.
 - [ ] `body/error-sentence` (1), `body/section-flow` (1), `body/model-context` (1).
-- [ ] `body/explicit-verb` (6), `frontmatter/tags` (2), `frontmatter/version` (1) —
-      `daily-briefing` is still `1.0.0`.
+- [ ] `body/explicit-verb` (6), `frontmatter/tags` (2). (`frontmatter/version` (1)
+      closed 2026-08-28: `daily-briefing` was the lone `1.0.0` outlier; now `0.1.0`.)
 
 ---
 

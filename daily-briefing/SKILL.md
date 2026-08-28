@@ -10,7 +10,7 @@ description: 'Change what''s in the user''s daily briefing — add or block news
   "stop showing me <source>", "block <publisher>", "trust <publisher>", "follow <topic>", "track <ticker>",
   "add <ticker> to my briefing", "remove <ticker>", "what''s in my briefing", "change my news sources",
   "my morning briefing".'
-version: 1.0.0
+version: 0.2.0
 license: MIT
 metadata:
   hermes:
@@ -23,6 +23,8 @@ metadata:
     - Markets
     - Productivity
     - Config
+    requires_toolsets:
+    - web
 ---
 
 # Daily Briefing — Configuration Companion
@@ -36,7 +38,8 @@ user cron — Hermes plays no role in producing it. This skill exists
 only to handle natural-language management of the policy files that
 the pipeline reads.
 
-Do **not** use this skill for:
+## When NOT to use
+
 - Generating a briefing on demand (it's a cron pipeline; just wait
   for tomorrow, or run the script manually outside Hermes).
 - Answering follow-up questions about today's briefing (the briefing
@@ -47,7 +50,7 @@ Do **not** use this skill for:
 | Path | Purpose | Schema |
 |---|---|---|
 | `~/daily-briefing/news-source-prefs.json` | Trusted (priority-ordered) and untrusted (blocklist) news sources by domain. | `{ "trusted": ["domain", ...], "untrusted": ["domain", ...] }` |
-| `~/daily-briefing/news-topics.json` | Keywords searched on the Brave News API each morning. | `{ "topics": ["keyword", ...] }` |
+| `~/daily-briefing/news-topics.json` | Keywords searched for news each morning. | `{ "topics": ["keyword", ...] }` |
 | `~/daily-briefing/tickers.json` | Stock tickers shown in the `__Markets__` block (prior session close + day-over-day Δ). | `[{"ticker": "<symbol>"}, ...]` |
 | `~/daily-briefing/calendar-people.json` | Organizer-email → display-name mapping for the `[Name]` calendar prefix. | `{ "default": "Name", "organizers": { "email": "Name", ... } }` |
 
@@ -71,7 +74,7 @@ priority. The `untrusted` list is unordered.
 | "Add `<source>` to my trusted list" | Resolve to domain. Append to `trusted`. Remove from `untrusted` if present. |
 | "Add `<source>` to my trusted list at the top" | Insert at index 0 of `trusted`. Remove from `untrusted` if present. |
 | "Add `<source>` to my trusted list above `<other>`" | Find `<other>` index in `trusted`, insert `<source>` at that index. Remove from `untrusted` if present. |
-| "Add `<source>` to my trusted list below `<other>`" | Find `<other>` index, insert at index+1. |
+| "Add `<source>` to my trusted list below `<other>`" | Find `<other>` index in `trusted`, insert at index+1. |
 | "Move `<source>` up / down in my trusted list" | Find current index, swap with neighbor. |
 | "Add `<source>` to my untrusted list" | Append to `untrusted`. Remove from `trusted` if present. |
 | "Move `<source>` from trusted to untrusted" / "untrust `<source>`" | Remove from `trusted`, append to `untrusted`. |
@@ -92,7 +95,7 @@ writing.
 2. Among surviving candidates, the one with the lowest index in
    `trusted` wins.
 3. If no candidate's domain is in `trusted`, the first surviving
-   candidate (Brave's relevance order) wins.
+   candidate (search relevance order) wins.
 4. If everything was untrusted for a topic, the topic produces no
    story that day.
 
@@ -102,9 +105,9 @@ trusted source wins on overlapping coverage.
 
 ### Watched news topics (`news-topics.json`)
 
-The `topics` array is the list of keyword strings sent to Brave News
-search. Order doesn't affect priority — every topic gets one story
-slot per day if a survivor exists.
+The `topics` array is the list of keyword strings the news fetcher
+searches for each morning. Order doesn't affect priority — every
+topic gets one story slot per day if a survivor exists.
 
 | User intent | Operation |
 |---|---|
@@ -113,7 +116,7 @@ slot per day if a survivor exists.
 | "What topics do I follow" | Read and list. |
 | "Rename `<old>` to `<new>`" | Find and replace one entry in place. |
 
-Topics are passed verbatim to Brave; quoted strings (e.g.
+Topics are passed verbatim to the news search; quoted strings (e.g.
 `"AI capex"`) work as phrase searches.
 
 ### Watched stock tickers (`tickers.json`)
@@ -123,16 +126,16 @@ entry is a single object with one required field: `ticker`, the symbol
 in **Yahoo Finance convention** — bare for US listings, with an exchange
 suffix for international: `SU.PA`, `7203.T`, `0700.HK`, `RIO.L`.
 
-`fetch-tickers.sh` dispatches by suffix:
+The pipeline's ticker fetcher dispatches by suffix:
 
-- **Bare ticker** (no dot) → Twelve Data REST quote API. Reliable and
+- **Bare ticker** (no dot) → quote API. Reliable and
   official; covers US listings only on the free tier.
 - **Suffixed ticker** (has a dot) → yfinance via the local Python venv.
   Covers any market Yahoo Finance does, but unofficial — Yahoo can
   break the lib until maintainers patch.
 
 Class shares like `BRK.B` should be entered as **`BRK-B`** (Yahoo's
-hyphen form for share classes) so they route to Twelve Data instead
+hyphen form for share classes) so they route to the quote API instead
 of being treated as a foreign exchange suffix.
 
 | User intent | Operation |
@@ -195,7 +198,7 @@ the file.
 | "Set the default calendar name to `<name>`" | Update `default`. |
 | "What names are mapped in my calendar" | Read and list. |
 
-Emails are stored lowercased; the lookup in `fetch-calendar.sh`
+Emails are stored lowercased; the calendar fetcher
 lowercases before matching, so always lowercase on write.
 
 ## Verification
@@ -205,8 +208,8 @@ Before saving any edit, confirm:
 1. The file is one of `news-source-prefs.json`, `news-topics.json`,
    `tickers.json`, or `calendar-people.json` under `~/daily-briefing/`.
    Editing anything else through this skill is out of scope.
-2. The JSON parses after the edit (no trailing commas, no schema
-   drift — only the documented top-level keys).
+2. The JSON parses after the edit (no trailing commas, no top-level
+   key drift — only the documented top-level keys).
 3. For source-prefs edits: the same domain does not appear in both
    `trusted` and `untrusted`. The latest action wins; remove from the
    other list.
@@ -219,7 +222,8 @@ Before saving any edit, confirm:
 ## When an operation reports an error
 
 - The config file is missing → the briefing pipeline isn't set up on this
-  machine. Tell the user which file is absent and point them at `README.md`.
+  machine. Tell the user which file is absent and point them at this
+  skill's `README.md` for pipeline setup.
 - The file doesn't parse as JSON → report that it is malformed and name the
   file. Leave it as it is; do not rewrite it from memory.
 - A `web_search` for a ticker returns nothing conclusive → say the symbol
