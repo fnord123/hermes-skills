@@ -17,6 +17,7 @@ README is the human/developer side — setup, the backend, and rationale.
 - *"Add a line to the doc: 'Bring sunscreen'."*
 - *"After 'Day 1' insert 'Fly to Rome'."*
 - *"Change every 'Rome' to 'Milan'."*
+- *"Rename the doc to 'Trip Plan — v2'."*
 - *"Make 'Agenda' a heading and bold 'urgent'."*
 - *"What does the document say?"*
 - *"What comments are on the doc — and what text are they attached to?"*
@@ -37,6 +38,7 @@ docs.py <verb>
    ▼
 Google Docs API v1 + Drive API v3  — service-account auth (ADC via GOOGLE_APPLICATION_CREDENTIALS)
    │  create → Drive files.create (mimeType google-apps.document) in the shared folder
+   │  rename → Drive files.update (name) — title change, contents untouched
    │  edit   → Docs documents.batchUpdate (insertText / replaceAllText /
    │           updateTextStyle / updateParagraphStyle)
    │  comments → Drive v3 REST (files comments list/create) — the Docs API
@@ -125,6 +127,7 @@ PY=~/.hermes/hermes-agent/venv/bin/python
 D=~/.hermes/skills/google-docs/scripts/docs.py
 ID=$($PY $D create --title "Docs skill test" --text "Rome trip" | python3 -c 'import sys,json;print(json.load(sys.stdin)["document_id"])')
 $PY $D append  $ID --text "Day 1: fly to Rome"
+$PY $D rename  $ID --name "Docs skill test (renamed)"
 $PY $D replace $ID --find Rome --with Milan          # expect occurrences: 2
 $PY $D style   $ID --find "Milan trip" --heading 1
 $PY $D read    $ID                                   # inspect the result
@@ -133,8 +136,9 @@ $PY $D read    $ID                                   # inspect the result
 
 ## The verbs
 
-`create` · `find` · `read` · `read-comments` · `comment` · `append` · `insert` ·
-`replace` · `style` · `delete` · `insert-image` · `resize-image` · `delete-image` — see
+`create` · `find` · `read` · `rename` · `read-comments` · `comment` · `append` ·
+`insert` · `replace` · `style` · `delete` · `insert-image` · `resize-image` ·
+`delete-image` — see
 [`SKILL.md`](./SKILL.md) for the model-facing contract and the word→call
 mapping. Each prints one JSON object; failures are `{"ok": false, "error": "…"}`
 with exit 1. `delete` and `delete-image` are destructive and refuse to run

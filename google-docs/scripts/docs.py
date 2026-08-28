@@ -15,6 +15,7 @@ Verbs (each prints ONE JSON object on stdout; exit 1 on error):
   create  --title <t> [--text <initial>]        new document in the shared folder
   find    [query] [--title-only] [--anywhere] [--limit N]
                                                 find docs by name/content — no id needed
+  rename  <doc_id> --name <t>                    change the document's title
   read    <doc_id>                              title + plain-text body
   read-comments <doc_id>                        all comments with their quoted anchor text
   comment <doc_id> --text <t> --on "<section>" [--match-case]
@@ -52,6 +53,7 @@ import json
 import urllib.parse
 import urllib.request
 import urllib.error
+from typing import NoReturn
 
 CONFIG_DIR = Path.home() / ".config" / "google-docs"
 CONFIG_ENV = CONFIG_DIR / "config.env"
@@ -84,14 +86,14 @@ def _log(event):
         pass
 
 
-def out(d, code=0):
+def out(d, code=0) -> NoReturn:
     _log({"result": {k: (_truncate(v) if isinstance(v, str) else v)
                       for k, v in d.items()}})
     print(json.dumps(d))
     sys.exit(code)
 
 
-def fail(msg):
+def fail(msg) -> NoReturn:
     out({"ok": False, "error": str(msg)}, 1)
 
 
@@ -427,6 +429,29 @@ def cmd_find(args):
         out({"ok": True, "count": len(docs), "query": args.query or "",
              "scope": "all" if args.anywhere else "folder", "documents": docs})
     except Exception as e:  # noqa: BLE001
+        fail(e)
+
+
+def cmd_rename(args):
+    if not args.name:
+        fail("rename needs --name (the new title).")
+    drive = _drive()
+    try:
+        f = drive.files().update(
+            fileId=args.doc_id, body={"name": args.name}, fields="id, name",
+            supportsAllDrives=True).execute()
+        out({"ok": True, "document_id": args.doc_id, "action": "renamed",
+             "title": f.get("name", args.name),
+             "url": f"https://docs.google.com/document/d/{args.doc_id}/edit"})
+    except Exception as e:  # noqa: BLE001
+        from googleapiclient.errors import HttpError
+        if isinstance(e, HttpError):
+            code = e.status_code
+            body = (e.content or b"").decode(errors="replace")[:300]
+            if code == 404:
+                fail(f"document {args.doc_id} not found — check the id, or share "
+                     "the document with the agent (see the error-handling section).")
+            fail(f"rename failed: HTTP {code}: {body}")
         fail(e)
 
 
@@ -811,6 +836,11 @@ def main():
                    help="search everything the service account can see, not just the folder")
     g.add_argument("--limit", default=20)
     g.set_defaults(func=cmd_find)
+
+    g = sub.add_parser("rename", help="change a document's title")
+    g.add_argument("doc_id")
+    g.add_argument("--name", required=True, help="the new title")
+    g.set_defaults(func=cmd_rename)
 
     g = sub.add_parser("read", help="read a document's title and text")
     g.add_argument("doc_id")

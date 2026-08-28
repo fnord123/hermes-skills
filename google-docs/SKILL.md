@@ -1,24 +1,25 @@
 ---
 name: google-docs
 description: >
-  Reads, writes, and comments on Google Docs. Create a new document, add or
-  insert text, find-and-replace, format text (bold/italic/underline or
-  headings), remove text, list every comment on a document with the exact text
-  each one is anchored to, or add a comment on a section of the text. Works
-  through a pre-configured identity; new documents land in the agent's shared
-  Drive folder, and existing documents are reachable once shared with the
-  agent. PREFER THIS SKILL for anything about a Google Doc / document's
-  contents or its comments. It is a different, self-contained setup from
-  `google-workspace` — reach for this one for Docs. Finds documents by name or
-  content, so the user never needs a document ID or URL. Activate on any of:
-  "google doc", "doc", "document", "write a doc", "create a document", "read
-  the doc", "what does the document say", "add to the doc", "insert into the
-  document", "edit the doc", "find and replace in the doc", "make this a
-  heading", "bold this in the doc", "what comments are on the doc", "what did
-  people comment on", "comment on this", "add a comment to", "leave a comment
-  on", "find my doc", "search my docs", "which docs do I have", "it's in my
-  docs".
-version: 0.3.0
+  Reads, writes, renames, and comments on Google Docs. Create a new document,
+  add or insert text, find-and-replace, format text (bold/italic/underline or
+  headings), remove text, rename a document, list every comment on a document
+  with the exact text each one is anchored to, or add a comment on a section of
+  the text. Works through a pre-configured identity; new documents land in the
+  agent's shared Drive folder, and existing documents are reachable once shared
+  with the agent. PREFER THIS SKILL for anything about a Google Doc /
+  document's contents, its comments, or its title. It is a different,
+  self-contained setup from `google-workspace` — reach for this one for Docs.
+  Finds documents by name or content, so the user never needs a document ID or
+  URL. Activate on any of: "google doc", "doc", "document", "write a doc",
+  "create a document", "read the doc", "what does the document say", "add to
+  the doc", "insert into the document", "edit the doc", "find and replace in
+  the doc", "make this a heading", "bold this in the doc", "rename the doc",
+  "rename the document", "change the doc's title", "what comments are on the
+  doc", "what did people comment on", "comment on this", "add a comment to",
+  "leave a comment on", "find my doc", "search my docs", "which docs do I
+  have", "it's in my docs".
+version: 0.4.0
 license: MIT
 metadata:
   hermes:
@@ -72,6 +73,7 @@ and url; keep them to edit the same document afterward.
 | `find [query] [--title-only] [--anywhere] [--limit N]` | **Finds documents without an id.** No query lists everything in the folder, newest first. A query matches the title *and* the body text. `--anywhere` looks beyond the folder at everything shared with the agent. Returns `document_id`, `title`, `url`, `modified` for each. |
 | `create --title "<t>" [--text "<initial>"]` | Creates a new document in the shared folder. Returns its `document_id` and `url`. |
 | `read <doc_id>` | Gets a document's title and full plain text. |
+| `rename <doc_id> --name "<new title>"` | Changes the document's title. Returns the new `title`. |
 | `read-comments <doc_id>` | Lists every comment on the document, each with its `quoted_anchor` — the exact highlighted text the comment was attached to — plus author, resolved state, and replies. Pagination is handled internally. |
 | `comment <doc_id> --text "<note>" --on "<section>"` | Adds a comment to a section of the document. The section is quoted as the first line of the comment, followed by the note. The section must be text that appears in the document (case-insensitive by default). |
 | `append <doc_id> --text "<t>"` | Adds text as a new paragraph at the end. |
@@ -106,6 +108,7 @@ the user names.
 | "start a doc called Trip Plan" | `create --title "Trip Plan"` |
 | "make a doc titled Notes that says 'Hello team'" | `create --title "Notes" --text "Hello team"` |
 | "what does the doc say / read it back" | `read <doc_id>` |
+| "rename the doc to 'Trip Plan — v2'" | `rename <doc_id> --name "Trip Plan — v2"` |
 | "what comments are on the doc / what did people comment on" | `read-comments <doc_id>` |
 | "comment on 'Day 1' that it needs a second pass" | `comment <doc_id> --text "Needs a second pass" --on "Day 1"` |
 | "leave a comment on the Rome section: it's too short" | `comment <doc_id> --text "Too short — expand it" --on "Rome trip"` |
@@ -132,6 +135,7 @@ Notes:
 
 - `create` → `{"ok": true, "document_id": "1AbC...", "title": "Trip Plan", "url": "https://docs.google.com/document/d/1AbC.../edit"}`
 - `read` → `{"ok": true, "document_id": "1AbC...", "title": "Trip Plan", "text": "Day 1\nFly to Rome\n..."}`
+- `rename` → `{"ok": true, "document_id": "1AbC...", "action": "renamed", "title": "Trip Plan — v2", "url": "https://docs.google.com/document/d/1AbC.../edit"}`
 - `read-comments` → `{"ok": true, "document_id": "1AbC...", "count": 2, "comments": [{"id": "...", "content": "Can we ship this Friday?", "author": "Jane", "quoted_anchor": "launch on Monday", "anchor_segment": "kix.abc123", "resolved": false, "created": "2026-08-24T23:00:00Z", "replies": []}]}`
 - `comment` → `{"ok": true, "document_id": "1AbC...", "action": "commented", "comment_id": "...", "section": "Day 1", "created": "2026-08-24T23:00:00Z"}`
 - `append` → `{"ok": true, "document_id": "1AbC...", "action": "appended", "characters": 16}`
@@ -230,7 +234,9 @@ insert-image <id> --url "https://…/desert.jpg" --replace "[IMAGE:Desert]" --wi
   d._batch(docs, DOC_ID, [requests...])
   ```
   Verified request names (the API rejects unknowns with 400): `replaceAllText` (find/replace), `insertText` (`location: {index}` + `text`; a `\n` in the text creates the paragraph break), `updateParagraphStyle` (`range` + `paragraphStyle: {namedStyleType}` + `fields: "namedStyleType"`; `NORMAL_TEXT` resets), `deleteContentRange` (range is INCLUSIVE of the trailing `\n`). There is no `deleteText` and no `deleteRange` request — those names 400.
+  Request shapes (verified against the live API): `replaceAllText` needs `containsText: {"text": "…"}` and `replaceText: "…"` (add `matchCase` to `containsText` to respect capitalization). `insertText` at the very end of the document 400s — the index must be strictly less than the body's end index; use `d._end_index(doc)`. `batchUpdate` is ATOMIC: any invalid request aborts the whole batch and nothing is applied, so one bad index silently undoes every other request in the same batch.
 - **Index discipline in one batch:** requests apply in order against a mutating document. Collect all positional requests, then sort by index DESCENDING and send as one batch — nothing applied later shifts a range you already applied. Compute indexes from a fresh `d._get_doc` call, never from text read earlier in the session (edits between reads shift everything).
+- **A human editing the document live will break positional ops.** (Verified incident: a typo the user fixed in the Docs UI between the snapshot and a second batch shifted character indexes, and three positional deletes each clipped one character off a short line — `Plan`→`lan`, `Cost:`→`Cot:`.) The failure is silent: the batch succeeds and the corruption only shows up on re-read. Rules: before every batch of surgical edits, take a fresh snapshot (`read` or `d._get_doc`); after every batch, re-read and diff against it, and treat ANY diff beyond your own intended changes as corruption to fix. Prefer string-based ops (`replaceAllText`) over positional ones whenever the user might be in the document. When a planned string match comes back with 0 occurrences, do NOT retry it — the plan is stale; re-read the document, rebase the plan on the fresh text, and if the mismatch is unexpected ask the user what they changed rather than assuming the document is wrong. Fix corrupted short lines with short, unique string matches (a whole paragraph is fine; `lan`→`Plan` worked), then sweep the document for the corruption pattern (e.g. `lan|Cot:|Phae`) rather than trusting a visual pass.
 - **Paragraph text runs include the trailing `\n`.** An equality check like `para_text(el) == "- some line"` misses because the run is `"- some line\n"`. Use `startswith`/`in`, or compare `para_text(el).rstrip("\n")`.
 
 ## When a verb reports an error
