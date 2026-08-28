@@ -90,7 +90,11 @@ DIST = {
 
 
 def frontmatter(text):
-    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    # Tolerate a UTF-8 BOM and CRLF endings: the old ^---\n … \n---\n was LF-only and
+    # BOM-less, so a perfectly good file saved with either silently failed the match and
+    # fell back to {} - which then produced a wall of FALSE criticals (name mismatch,
+    # missing routing fields) on content that was actually fine.
+    m = re.match(r"^\ufeff?---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
     if not m:
         return {}, text
     raw = m.group(1)
@@ -110,7 +114,16 @@ def lint_skill(name):
         out.append({"skill": name, "severity": sev, "rule": rule,
                     "where": where or "SKILL.md", "message": msg})
 
-    text = open(sk, encoding="utf-8").read()
+    try:
+        text = open(sk, encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError) as e:
+        # One unreadable file must not mask the rest of the repo: the old behaviour was a
+        # UnicodeDecodeError crash with empty output, which in CI fails the build and
+        # reports nothing. Record a finding and continue instead.
+        add("major", "readability",
+            "SKILL.md could not be read (%s); its rules were not checked - repair the "
+            "file before this skill can be trusted" % e.__class__.__name__, "SKILL.md")
+        return out
     fm, body = frontmatter(text)
     lines = text.splitlines()
 
@@ -170,7 +183,10 @@ def lint_skill(name):
     # ── model-context discipline ───────────────────────────────────────────
     for pat, why in (
         (r"^#+.*\b(why|rationale|background|design|architecture)\b", "rationale belongs in README"),
-        (r"\b(tends to|models often|the model will try|a common mistake|don't reach for)\b",
+        # tend[s]? - the plural is CONVENTIONS.md's own canonical example ("small models
+        # tend to call a verb that does not exist"); the old pattern missed it, so the
+        # rule did not catch the sentence the rule was written from.
+        (r"\b(tend[s]? to|models often|the model will try|a common mistake|don't reach for)\b",
          "failure-mode discussion primes the mistake; move to README"),
     ):
         m = re.search(pat, body, re.I | re.M)
@@ -251,7 +267,10 @@ def lint_skill(name):
             # Confirm it actually CALLS them rather than merely importing - an unused import
             # would otherwise buy a free pass on all three checks.
             has_emit = re.search(r"\b(ok|fail)\s*\(", src)
-            has_guard = re.search(r"@guard\b", src)
+            # The guard can be applied bare (@guard) or dotted (@skill_json.guard); the
+            # old @guard\b pattern only saw the former, so the idiomatic dotted form got
+            # a false top-level-guard major on every vendored script that used it.
+            has_guard = re.search(r"@[\w.]*\bguard\b", src)
             if has_emit and has_guard:
                 continue
             if has_emit and not has_guard:
@@ -326,6 +345,11 @@ def main():
     for s in skills:
         findings += lint_skill(s)
 
+    # The gate must reflect what EXISTS, not what the operator chose to print: filtering
+    # by --severity before computing the exit code let a skill with a critical finding
+    # pass CI when linted with --severity major (exit 0 on a red repo).
+    criticals = [f for f in findings if f["severity"] == "critical"]
+
     order = {"critical": 0, "major": 1, "minor": 2}
     if args.severity:
         findings = [f for f in findings if f["severity"] == args.severity]
@@ -345,7 +369,7 @@ def main():
                 print("  %s" % cur)
             print("    [%-8s] %-28s %s" % (f["severity"], f["rule"], f["message"]))
             print("               %s" % f["where"])
-    return 1 if any(f["severity"] == "critical" for f in findings) else 0
+    return 1 if criticals else 0
 
 
 if __name__ == "__main__":
