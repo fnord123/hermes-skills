@@ -146,6 +146,22 @@ def rules(findings):
     return {f["rule"] for f in findings} if findings is not None else None
 
 
+def set_baseline(lab, data):
+    """Write (or remove, when data is None) the lab's tools/trigger_baseline.json.
+
+    Each trigger-baseline case sets its own state so the cases are order-independent
+    and can't leak a baseline into each other. The path mirrors lint_skills.py's
+    trigger_baseline_path() (linter's grandparent dir + tools/ = the lab root)."""
+    p = os.path.join(lab, "tools", "trigger_baseline.json")
+    if data is None:
+        if os.path.exists(p):
+            os.remove(p)
+        return
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w") as f:
+        json.dump(data, f, indent=1, sort_keys=True)
+
+
 # (name, build_fn, expected_rules_that_must_FIRE, rules_that_must_NOT_fire)
 CASES = []
 
@@ -366,6 +382,57 @@ case("D16 raise SystemExit(<var>) is clean", lambda: make_skill(LAB, "x", script
      '#!/usr/bin/env python3\nimport json\nrc = 0\nprint(json.dumps({"ok": True}))\nraise SystemExit(rc)\n'),
      set(), must_not={"scripts/exit-code"})
 
+# ── --confirm on destructive subcommands (fix #9, 2026-08-27) ─────────────
+# README motivation #2: a hallucinated `delete` call with no footgun brake. The check
+# anchors on the subparser NAME (a file-level scan false-positives on benign "clear"/
+# "remove" uses) and requires --confirm declared in that subparser's own block.
+CONFIRM_SCRIPT = (
+    '#!/usr/bin/env python3\nimport json, sys, argparse\n'
+    'def main():\n'
+    '    ap = argparse.ArgumentParser()\n'
+    '    sp = ap.add_subparsers()\n'
+    '    sp.add_parser("{sub}"){extra}\n'
+    '    ap.parse_args()\n'
+    '    print(json.dumps({{"ok": True}}))\n'
+    '    return 0\n'
+    'if __name__ == "__main__":\n    sys.exit(main())\n'
+)
+case("D17 destructive subcommand without --confirm",
+     lambda: make_skill(LAB, "x", script=CONFIRM_SCRIPT.format(sub="delete", extra="")),
+     {"scripts/confirm"})
+
+case("D18 destructive subcommand WITH --confirm is clean",
+     lambda: make_skill(LAB, "x", script=CONFIRM_SCRIPT.format(
+         sub="delete", extra='\n    _d.add_argument("--confirm")'
+         ).replace('sp.add_parser("delete")', '    _d = sp.add_parser("delete")')),
+     set(), must_not={"scripts/confirm"})
+
+case("D19 compound destructive name (delete-image) without --confirm",
+     lambda: make_skill(LAB, "x", script=CONFIRM_SCRIPT.format(sub="delete-image", extra="")),
+     {"scripts/confirm"})
+
+case("D20 non-destructive subcommand needs no --confirm",
+     lambda: make_skill(LAB, "x", script=CONFIRM_SCRIPT.format(sub="read", extra="")),
+     set(), must_not={"scripts/confirm"})
+
+# A --confirm declared once elsewhere does NOT guard a destructive subparser that lacks
+# it — the scoped-block requirement is what makes the check precise rather than "does the
+# file contain the string".
+case("D21 --confirm on a DIFFERENT subparser does not guard delete",
+     lambda: make_skill(LAB, "x", script=
+         '#!/usr/bin/env python3\nimport json, sys, argparse\n'
+         'def main():\n'
+         '    ap = argparse.ArgumentParser()\n'
+         '    sp = ap.add_subparsers()\n'
+         '    _r = sp.add_parser("read")\n'
+         '    _r.add_argument("--confirm")\n'
+         '    sp.add_parser("delete")\n'
+         '    ap.parse_args()\n'
+         '    print(json.dumps({"ok": True}))\n'
+         '    return 0\n'
+         'if __name__ == "__main__":\n    sys.exit(main())\n'),
+     {"scripts/confirm"})
+
 # ── E. toolsets ──────────────────────────────────────────────────────────────
 case("E1 uses web_search, undeclared", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd=BASE_SKILLMD.replace("When the user asks for the thing.",
@@ -382,9 +449,15 @@ case("F1 no frontmatter at all", lambda: make_skill(LAB, "x", script=BASE_SCRIPT
      skillmd="# Thing\n\nNo frontmatter here.\n"),
      {"frontmatter/name", "routing/prefer", "routing/triggers"})
 
-case("F2 broken YAML in frontmatter", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+# Contract after fix #7 (2026-08-27): broken YAML is ONE finding (frontmatter/yaml) and
+# the per-field checks are skipped — before the fix this same input produced a cascade
+# (name + prefer + triggers + …) that buried the real problem. Pin both: the yaml finding
+# MUST fire and the old cascade findings MUST NOT (that is the sharp edge).
+case("F2 broken YAML is one finding, not a cascade", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd="---\nname: [unclosed\ndescription: >\n  dangling\n---\n\n# Thing\n"),
-     {"frontmatter/name", "routing/prefer"})
+     {"frontmatter/yaml"},
+     must_not={"frontmatter/name", "routing/prefer", "routing/triggers",
+               "frontmatter/version", "frontmatter/license", "frontmatter/tags"})
 
 # Contract after fix #3 (2026-08-27): CRLF must parse as valid frontmatter and stay clean.
 # Before the fix this produced a wall of false criticals.
@@ -406,6 +479,44 @@ case("F5 invalid UTF-8 bytes", _build_f5, {"readability"})
 
 case("F6 empty SKILL.md", lambda: make_skill(LAB, "x", script=BASE_SCRIPT, skillmd=""),
      {"frontmatter/name", "routing/prefer", "routing/triggers"})
+
+# ── H. trigger-list regression baseline (fix #10, 2026-08-27) ──────────────
+# Gap 11: a description rewrite dropped 9 of google-docs' triggers (19→10) and the linter
+# passed it — presence was checked, completeness was not. The baseline (a committed
+# artifact, tools/trigger_baseline.json) makes the drop a finding. Only REMOVALS fire
+# (adding triggers widens routing — always safe). Each case sets its own baseline.
+def _h1():
+    make_skill(LAB, "x", script=BASE_SCRIPT)
+    set_baseline(LAB, {"x": ["do the thing", "thing status"]})   # matches the description
+case("H1 baseline matches description — clean", _h1,
+     set(), must_not={"routing/triggers-baseline"})
+
+def _h2():
+    make_skill(LAB, "x", script=BASE_SCRIPT)   # description has 2 triggers
+    set_baseline(LAB, {"x": ["do the thing", "thing status", "write to the doc"]})
+case("H2 a trigger was dropped (19→10 shape)", _h2,
+     {"routing/triggers-baseline"},
+     must_not={"routing/triggers"})   # the list is still PRESENT — presence is fine
+
+def _h3():
+    # the list itself was deleted — both rules must fire (presence critical + baseline major)
+    make_skill(LAB, "x", script=BASE_SCRIPT,
+               skillmd=BASE_SKILLMD.replace('Activate on any of: "do the thing", "thing status".', ""))
+    set_baseline(LAB, {"x": ["do the thing", "thing status"]})
+case("H3 whole trigger list deleted", _h3,
+     {"routing/triggers", "routing/triggers-baseline"})
+
+def _h4():
+    make_skill(LAB, "x", script=BASE_SCRIPT)
+    set_baseline(LAB, {"other-skill": ["do the thing"]})   # x not in the baseline
+case("H4 skill not in baseline — no check", _h4,
+     set(), must_not={"routing/triggers-baseline"})
+
+def _h5():
+    make_skill(LAB, "x", script=BASE_SCRIPT)
+    set_baseline(LAB, None)   # no baseline file (the hermetic-lab / fresh-clone posture)
+case("H5 no baseline file — check is inert", _h5,
+     set(), must_not={"routing/triggers-baseline"})
 
 # ── G. control ───────────────────────────────────────────────────────────────
 case("G1 pristine baseline is clean", lambda: make_skill(LAB, "x", script=CLEAN_SCRIPT),
@@ -455,6 +566,43 @@ def gate_tests(lab):
     ok = (findings is not None and "readability" in got and "layout/readme" in got)
     results.append(("G3 unreadable file does not mask the repo",
                     ok, err or "got %s" % sorted(got)))
+
+    # G4: --update-triggers must write a baseline that the linter itself accepts (the
+    # generator and the check share extract_triggers — a divergence between them is how
+    # the check would start flagging triggers it authored, so the round-trip is the test).
+    r = subprocess.run([sys.executable, os.path.join(lab2, "tools", "lint_skills.py"),
+                        "--update-triggers"], capture_output=True, text=True, timeout=60)
+    bpath = os.path.join(lab2, "tools", "trigger_baseline.json")
+    gen_ok = (r.returncode == 0 and os.path.exists(bpath))
+    if gen_ok:
+        base = json.load(open(bpath))
+        f2, e2 = run_lint(lab2)
+        got2 = rules(f2) or set()
+        gen_ok = "routing/triggers-baseline" not in got2
+        detail = e2 or ("%d skills baselined; re-lint: %s"
+                        % (len(base), sorted(got2) or "clean"))
+    else:
+        detail = "generator rc=%d %s" % (r.returncode, (r.stderr or r.stdout)[:60])
+    results.append(("G4 --update-triggers round-trips (generated baseline lints clean)",
+                    gen_ok, detail))
+
+    # G5: the sharp edge of the baseline check — a trigger the skill GAINED (baseline is
+    # a strict subset of the description) must NOT fire. Only removals gate; additions
+    # widen routing and are always safe. red's description carries two triggers; give it
+    # a baseline that is a proper subset of those and assert it stays quiet.
+    if os.path.exists(bpath):
+        base = json.load(open(bpath))
+        base["red"] = ["do the thing"]   # subset of red's actual ["do the thing", "thing status"]
+        json.dump(base, open(bpath, "w"))
+        f4, _ = run_lint(lab2)
+        got4 = {(f["skill"], f["rule"]) for f in f4} if f4 else set()
+        add_ok = ("red", "routing/triggers-baseline") not in got4
+        fired = sorted(g[0] for g in got4 if g[1] == "routing/triggers-baseline")
+        detail = "fired for %s" % fired if fired else "no false fire"
+    else:
+        add_ok, detail = False, "no baseline to test (see G4)"
+    results.append(("G5 gained trigger (baseline ⊂ description) does not fire",
+                    add_ok, detail))
 
     shutil.rmtree(lab2, ignore_errors=True)
     return results

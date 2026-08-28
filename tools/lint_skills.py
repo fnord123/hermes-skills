@@ -26,6 +26,15 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWED_SUBDIRS = {"references", "templates", "scripts", "assets"}
 
+# Subparser names whose operations are destructive (CONVENTIONS.md: "Any destructive
+# operation stays behind a --confirm flag and refuses to run without it"). The stems are
+# the convention's own vocabulary; a leading-stem match tolerates the house compound form
+# (delete-image, clear-history). Matched against the subparser NAME — not anywhere in the
+# file — because a word scan false-positives on benign uses ("clear" = browser-context
+# reset in a probe script, "remove" = deleting the tool's own temp files), which is
+# exactly how a rule learns to be ignored.
+DESTRUCTIVE_STEM = re.compile(r"^(delete|remove|trash|clear|reset|purge|revoke)[\w-]*$")
+
 ERROR_SENTENCE = ("Always ask the user for guidance when there is an error; "
                   "do not proactively try to resolve errors yourself.")
 
@@ -94,18 +103,74 @@ def frontmatter(text):
     # BOM-less, so a perfectly good file saved with either silently failed the match and
     # fell back to {} - which then produced a wall of FALSE criticals (name mismatch,
     # missing routing fields) on content that was actually fine.
+    #
+    # Returns (mapping | None, body). None means "a frontmatter block is PRESENT but is
+    # not valid YAML (or not a mapping)". The caller collapses that into a single
+    # frontmatter/yaml finding instead of running the per-field checks: on broken YAML
+    # every field is unreadable, so "name does not match" + "no PREFER" + "no triggers"
+    # + … (~12 findings) buries the one true problem. Absent frontmatter (no block at
+    # all) still returns {} - there the per-field findings are accurate, the fields
+    # really are missing.
     m = re.match(r"^\ufeff?---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
     if not m:
         return {}, text
     raw = m.group(1)
     try:
         import yaml
-        return (yaml.safe_load(raw) or {}), text[m.end():]
+        data = yaml.safe_load(raw)
     except Exception:                                          # noqa: BLE001
-        return {"_raw": raw}, text[m.end():]
+        return None, text[m.end():]
+    if not isinstance(data, dict):
+        return None, text[m.end():]
+    return data, text[m.end():]
 
 
-def lint_skill(name):
+def extract_triggers(desc):
+    """Return the quoted trigger phrases from the 'Activate on any of:' list, or [].
+
+    The single source of truth for "what is a trigger" — both the baseline check in
+    lint_skill() and the --update-triggers generator call this, so the two can never
+    disagree about what counts (a divergence here is how the check would start flagging
+    triggers it itself authored)."""
+    i = desc.find("Activate on any of")
+    if i < 0:
+        return []
+    return re.findall(r'"([^"]+)"', desc[i + len("Activate on any of"):])
+
+
+def trigger_baseline_path():
+    return os.path.join(ROOT, "tools", "trigger_baseline.json")
+
+
+def load_baseline():
+    """Read tools/trigger_baseline.json, or {} when absent/malformed.
+
+    An empty baseline means "no regression check" — which is exactly the right posture
+    for the hermetic test lab (the linter is copied there alone, no baseline follows it)
+    and for a fresh clone before the file is committed. Never raises."""
+    try:
+        with open(trigger_baseline_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def read_skill_triggers(name):
+    """Current trigger list for a skill, or None when it can't be read (unreadable file,
+    broken YAML, no description). --update-triggers uses this to regenerate the baseline
+    and to warn about skills it could not include."""
+    try:
+        text = open(os.path.join(ROOT, name, "SKILL.md"), encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        return None
+    fm, _ = frontmatter(text)
+    if not fm:
+        return None
+    return extract_triggers(str(fm.get("description") or ""))
+
+
+def lint_skill(name, baseline=None):
     d = os.path.join(ROOT, name)
     sk = os.path.join(d, "SKILL.md")
     out = []
@@ -133,29 +198,45 @@ def lint_skill(name):
                 return "SKILL.md:%d" % i
         return "SKILL.md"
 
+    # (bound before the if/else so the toolset + trigger-baseline checks below see them either way)
+    hermes = {}
+    triggers = []
     # ── frontmatter ────────────────────────────────────────────────────────
-    if fm.get("name") != name:
-        add("critical", "frontmatter/name",
-            "name %r does not match the folder" % fm.get("name"))
-    desc = str(fm.get("description") or "")
-    if "PREFER" not in desc:
-        add("critical", "routing/prefer",
-            "description has no PREFER clause - the model cannot tell this skill from its neighbours")
-    if "Activate on any of" not in desc:
-        add("critical", "routing/triggers",
-            "description has no 'Activate on any of:' trigger list")
-    if not re.match(r"^0\.\d+\.\d+$", str(fm.get("version") or "")):
-        add("minor", "frontmatter/version",
-            "version %r is not 0.x.y" % fm.get("version"))
-    if str(fm.get("license") or "") != "MIT":
-        add("minor", "frontmatter/license", "no 'license: MIT'")
-    hermes = (fm.get("metadata") or {}).get("hermes") or {}
-    tags = hermes.get("tags") or []
-    if not tags:
-        add("major", "frontmatter/tags", "no metadata.hermes.tags")
-    for t in tags:
-        if str(t) != str(t).strip() or not str(t)[:1].isupper():
-            add("minor", "frontmatter/tags", "tag %r is not Capitalized" % t)
+    # Broken YAML is ONE finding, not a cascade. Before this, a single malformed line
+    # made every field unreadable and produced name + prefer + triggers + version +
+    # license + tags + toolsets — the real problem ("the YAML does not parse") was
+    # buried in the wreckage, and an author who fixed `name` saw the rest and gave up.
+    if fm is None:
+        add("critical", "frontmatter/yaml",
+            "frontmatter is not valid YAML — none of the routing fields could be read; "
+            "fix the YAML before any of this skill's other rules can be checked")
+    else:
+        if fm.get("name") != name:
+            add("critical", "frontmatter/name",
+                "name %r does not match the folder" % fm.get("name"))
+        desc = str(fm.get("description") or "")
+        if "PREFER" not in desc:
+            add("critical", "routing/prefer",
+                "description has no PREFER clause - the model cannot tell this skill from its neighbours")
+        if "Activate on any of" not in desc:
+            add("critical", "routing/triggers",
+                "description has no 'Activate on any of:' trigger list")
+        # The trigger list, parsed — the SAME extract_triggers() that --update-triggers
+        # uses to write the baseline, so the check and the generator cannot disagree
+        # about what counts as a trigger.
+        triggers = extract_triggers(desc)
+        if not re.match(r"^0\.\d+\.\d+$", str(fm.get("version") or "")):
+            add("minor", "frontmatter/version",
+                "version %r is not 0.x.y" % fm.get("version"))
+        if str(fm.get("license") or "") != "MIT":
+            add("minor", "frontmatter/license", "no 'license: MIT'")
+        hermes = (fm.get("metadata") or {}).get("hermes") or {}
+        tags = hermes.get("tags") or []
+        if not tags:
+            add("major", "frontmatter/tags", "no metadata.hermes.tags")
+        for t in tags:
+            if str(t) != str(t).strip() or not str(t)[:1].isupper():
+                add("minor", "frontmatter/tags", "tag %r is not Capitalized" % t)
 
     # ── forbidden / required body content ──────────────────────────────────
     if re.search(r"NEVER read", text, re.I):
@@ -308,6 +389,27 @@ def lint_skill(name):
                 "'except: pass' swallows a real failure silently",
                 "%s:%d" % (rel, src[:m.start()].count("\n") + 1))
 
+        # ── --confirm on destructive subcommands ───────────────────────────
+        # README motivation #2 (local models hallucinate dangerous calls) is answered by
+        # exactly one convention — "destructive ops stay behind --confirm" — and it was the
+        # only convention with zero enforcement. Check the subparser NAMES against the
+        # destructive stems, and require --confirm declared within that subparser's block.
+        # A bare file-level "does --confirm appear" would pass any script that has the flag
+        # once and guard nothing; a name scan of the whole file false-positives on benign
+        # uses. Subparser-name + scoped-block is the precise, false-positive-free form.
+        for m in re.finditer(r'add_parser\(\s*["\']([\w-]+)["\']', src):
+            sub = m.group(1)
+            if not DESTRUCTIVE_STEM.match(sub):
+                continue
+            nxt = re.search(r'add_parser\(\s*["\']', src[m.end():])
+            block = src[m.start():m.end() + (nxt.start() if nxt else 2000)]
+            if not re.search(r'--confirm\b', block):
+                line = src[:m.start()].count("\n") + 1
+                add("major", "scripts/confirm",
+                    "destructive subcommand %r has no --confirm guard — a hallucinated "
+                    "call runs it with no footgun brake" % sub,
+                    "%s:%d" % (rel, line))
+
     third = {i for i in imports if i not in STDLIB and
              not any(os.path.basename(s)[:-3] == i for s in scripts)}
     if third:
@@ -325,17 +427,43 @@ def lint_skill(name):
                 "scripts/requirements.txt")
 
     # ── toolset declaration ────────────────────────────────────────────────
-    needs = set()
-    for tool, pat in (("web", r"\bweb_search\b|\bweb_extract\b"),
-                      ("browser", r"\bbrowser_\w+\b"),
-                      ("terminal", r"\bpython3 \S+\.py\b|\bcurl\b")):
-        if re.search(pat, text):
-            needs.add(tool)
-    if needs and not hermes.get("requires_toolsets"):
-        add("major", "frontmatter/requires-toolsets",
-            "uses %s but declares no metadata.hermes.requires_toolsets - if the toolset is "
-            "absent the skill activates anyway and fails confusingly"
-            % ", ".join(sorted(needs)))
+    # Skipped when the frontmatter is broken: the declaration side is unreadable, and
+    # "declares no requires_toolsets" against unparseable YAML is a lie.
+    if fm is not None:
+        needs = set()
+        for tool, pat in (("web", r"\bweb_search\b|\bweb_extract\b"),
+                          ("browser", r"\bbrowser_\w+\b"),
+                          ("terminal", r"\bpython3 \S+\.py\b|\bcurl\b")):
+            if re.search(pat, text):
+                needs.add(tool)
+        if needs and not hermes.get("requires_toolsets"):
+            add("major", "frontmatter/requires-toolsets",
+                "uses %s but declares no metadata.hermes.requires_toolsets - if the toolset is "
+                "absent the skill activates anyway and fails confusingly"
+                % ", ".join(sorted(needs)))
+
+    # ── trigger-list regression (baseline) ─────────────────────────────────
+    # Gap 11: the 2026-08 incident where a description rewrite dropped 9 of google-docs'
+    # triggers (19→10, the whole write side) and the linter passed it. A presence check
+    # can only see "no list"; it cannot see "the list shrank". This compares against a
+    # committed baseline (tools/trigger_baseline.json). Adding triggers is always safe
+    # (it widens routing), so only REMOVALS fire. Removal is major, not critical: the
+    # skill is not broken, it is just quieter — and CI currently gates on critical only,
+    # by design (majors are advisory until the staging decision).
+    #
+    # The baseline is a committed artifact, NOT a diff against git HEAD, for two reasons:
+    # (a) CI's checkout is clean (HEAD == worktree) so the diff is always empty there;
+    # (b) the commit that *introduced* the regression is exactly the point where worktree
+    # and HEAD agree. Updating the baseline is a deliberate act — `--update-triggers` —
+    # whose diff the author reviews, so an intentional drop is seen there and an
+    # accidental one still fires in CI.
+    if fm is not None and baseline is not None and name in baseline:
+        missing = sorted(set(baseline[name]) - set(triggers))
+        if missing:
+            add("major", "routing/triggers-baseline",
+                "trigger(s) in the baseline but gone from the description: %s — if this "
+                "was deliberate, review the diff and run --update-triggers"
+                % ", ".join(missing))
 
     return out
 
@@ -346,6 +474,11 @@ def main():
     ap.add_argument("--skill", help="lint one skill")
     ap.add_argument("--severity", choices=["critical", "major", "minor"])
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--update-triggers", action="store_true",
+                    help="regenerate tools/trigger_baseline.json from the current "
+                         "descriptions and exit (does not lint). Run this ONLY when a "
+                         "trigger change was deliberate; the diff it produces is the "
+                         "record of what you chose to drop.")
     args = ap.parse_args()
 
     skills = sorted(x for x in os.listdir(ROOT)
@@ -354,9 +487,44 @@ def main():
     if args.skill:
         skills = [s for s in skills if s == args.skill]
 
+    if args.update_triggers:
+        # Start from the existing baseline so a skill whose description is currently
+        # unreadable (broken YAML) keeps its old entry: the check is inert while the YAML
+        # is broken (fm is None), and when the author fixes the YAML the old entry
+        # reminds them to re-run this. A from-scratch dict would silently drop it.
+        base = dict(load_baseline())
+        skipped = []
+        for s in skills:
+            tr = read_skill_triggers(s)
+            if tr is None:
+                skipped.append(s)          # broken YAML / unreadable — keep its old entry
+                continue
+            base[s] = sorted(tr)
+        # Prune skills that no longer exist — but only on a FULL-repo run. With --skill
+        # the `skills` list is filtered to one, so pruning here would wipe every other
+        # skill's baseline. A deleted skill left in the baseline would rot: the check
+        # would keep demanding a trigger no skill has, and the finding would look like a
+        # linter bug rather than a stale baseline.
+        if not args.skill:
+            stale = sorted(set(base) - set(skills))
+            for s in stale:
+                del base[s]
+            if stale:
+                print("dropped baseline entry for deleted skill(s): %s" % ", ".join(stale))
+        path = trigger_baseline_path()
+        with open(path, "w") as f:
+            json.dump(base, f, indent=1, sort_keys=True)
+            f.write("\n")
+        print("wrote %d skills to %s" % (len(base), path))
+        if skipped:
+            print("warning: could not read triggers for %s — their baseline was left "
+                  "untouched" % ", ".join(skipped))
+        return 0
+
+    baseline = load_baseline()
     findings = []
     for s in skills:
-        findings += lint_skill(s)
+        findings += lint_skill(s, baseline=baseline)
 
     # The gate must reflect what EXISTS, not what the operator chose to print: filtering
     # by --severity before computing the exit code let a skill with a critical finding

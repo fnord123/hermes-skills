@@ -22,9 +22,11 @@ jobs:
         # not fail the build yet - see the baseline in tools/lint_skills.py's commit message.
         run: python3 tools/lint_skills.py
       - name: Linter self-test (negative battery)
-        # 59 cases mutate a compliant skill in exactly one way each and assert which rules
-        # fire and which must not. A linter that only passes on clean inputs is a promise,
-        # not a mechanism - this is what keeps the audit fixes from rotting (2026-08-27).
+        # 71 cases mutate a compliant skill in exactly one way each and assert which rules
+        # fire and which must not, plus gate behaviours (exit code, crash-masking, and the
+        # --update-triggers round-trip). A linter that only passes on clean inputs is a
+        # promise, not a mechanism — this is what keeps the audit fixes from rotting.
+        # 2026-08-27: 55 → 59 (robustness fixes) → 71 (#7/#9/#10).
         run: python3 tools/test_lint_skills.py
       - name: Vendored copies match their source
         # A skill must be self-contained for `hermes skills install`, so shared modules are
