@@ -283,8 +283,21 @@ def lint_skill(name):
             add("major", "scripts/json-contract",
                 "prints no 'ok' field; the model cannot tell success from failure by a "
                 "stable rule", rel)
-        if not re.search(r"(sys\.)?exit\(\s*1\s*\)|SystemExit\(\s*1\s*\)", src):
-            add("major", "scripts/exit-code", "never exits 1 on failure", rel)
+        # A literal `sys.exit(1)` is only ONE shape of "exits non-zero on failure". The
+        # house pattern (CONVENTIONS.md; donations, google-docs, web-access, ...) is
+        # `def out(d, code=0): ... sys.exit(code)` or `sys.exit(main())` — a computed
+        # status propagated, never the literal 1. Requiring the literal made the rule fire
+        # on 39 of the repo's own scripts (the named "exemplar" included), which trains
+        # authors to ignore the linter. Accept a propagated exit code — an identifier or a
+        # main() call, never a literal digit — so a script whose only exit is
+        # `sys.exit(0)` still fires: it genuinely cannot signal failure. Verified against
+        # all 39 findings on 2026-08-27: 24 house patterns cleared, 15 no-exit scripts
+        # (mostly imported modules) keep firing — that is a separate, pre-existing class.
+        if not re.search(
+                r"(?:sys\.)?exit\(\s*1\s*\)|SystemExit\(\s*1\s*\)"
+                r"|sys\.exit\(\s*(?:main\(\)|[A-Za-z_]\w*)\s*\)"
+                r"|raise\s+SystemExit\(\s*[A-Za-z_]\w*\s*\)", src):
+            add("major", "scripts/exit-code", "never exits non-zero on failure", rel)
         # An unguarded main() can die with a traceback and NO json on stdout.
         if "def main(" in src and not re.search(r"except Exception", src):
             add("major", "scripts/top-level-guard",

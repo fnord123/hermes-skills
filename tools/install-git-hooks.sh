@@ -13,7 +13,7 @@ cat > "$HOOK" <<'EOF'
 #!/usr/bin/env bash
 # Run what CI runs, before it becomes public. On 2026-07-31 a skill was pushed with three
 # critical findings (no PREFER clause, no trigger list, an undeclared dependency) and the break
-# was noticed only because someone asked. This takes about a second.
+# was noticed only because someone asked. This takes about three seconds.
 set -uo pipefail
 REPO="$(git rev-parse --show-toplevel)"
 cd "$REPO" || exit 0
@@ -21,6 +21,9 @@ cd "$REPO" || exit 0
 fail=0
 if ! python3 tools/lint_skills.py --severity critical >/tmp/hs-lint.log 2>&1; then
     echo; sed -n '1,25p' /tmp/hs-lint.log; fail=1
+fi
+if ! python3 tools/test_lint_skills.py >/tmp/hs-linttest.log 2>&1; then
+    echo; tail -20 /tmp/hs-linttest.log; fail=1
 fi
 if ! python3 tools/vendor.py check >/tmp/hs-vendor.log 2>&1; then
     echo; sed -n '1,15p' /tmp/hs-vendor.log; fail=1
@@ -35,7 +38,7 @@ if [ "$fail" -ne 0 ]; then
     echo "          override with: git push --no-verify"
     exit 1
 fi
-echo "pre-push: lint, vendor and tests ok"
+echo "pre-push: lint, lint self-test, vendor and tests ok"
 EOF
 
 chmod +x "$HOOK"
