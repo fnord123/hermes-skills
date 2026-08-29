@@ -1,10 +1,13 @@
 # Outstanding conventions work
 
-Snapshot: **94 findings — 0 critical, 54 major, 40 minor** across 16 skills
-(post-promotion, 2026-08-28). CI is green; it gates on criticals only —
-`layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets` and
-`routing/triggers-baseline` are critical as of this snapshot, the remaining
-majors are conformance work and non-blocking.
+Snapshot: **80 findings — 0 critical, 26 major, 54 minor** across 16 skills
+(post entry-point Phase 1, 2026-08-28). CI is green; it gates on criticals only —
+`layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets`,
+`routing/triggers-baseline` (and the seven pre-existing criticals) block a merge,
+the remaining major/minor are conformance work and non-blocking. The three script
+contract rules now scope to **derived entry points** (SKILL.md code references),
+which dropped 28 premise-false findings (probes, service files, imported helpers)
+and added 14 `scripts/undocumented-shebang` warnings — see §2.
 
 Regenerate this picture at any time:
 
@@ -28,11 +31,12 @@ Ordered by what actually costs something, not by count.
 
 - [ ] **`bambu-store`'s remaining browser probes are model-visible.** `auth_probe.py`,
       `store_login.py`, `bambu_login.py`, `token_mint_probe.py`, `cart_capture.py`,
-      `store_sso_test.py`, `camou_test.py`, `har_analyze.py` sit under `scripts/`, which Hermes
-      announces to the model, and account for all 23 of that skill's findings. None writes to
-      the cart or spends, so this is not urgent — but the payment scripts were deleted for
-      exactly this reason, and the same argument applies. `har_analyze.py` additionally prints
-      raw request/response bodies, redacting only a fixed key list.
+      `store_sso_probe.py`, `har_analyze.py` (the seven shebang'd probes — see
+      `scripts/undocumented-shebang`, §2) sit under `scripts/`, which Hermes
+      announces to the model. None writes to the cart or spends, so this is not
+      urgent — but the payment scripts were deleted for exactly this reason, and the
+      same argument applies. `har_analyze.py` additionally prints raw
+      request/response bodies, redacting only a fixed key list.
 
 - [ ] **`pallo-stays.py` still drops unparsed reservation cards silently.** Same shape as the
       fail-open overlap guard that was fixed in `pallo-book-trip.py`, but read-only, so it
@@ -40,22 +44,39 @@ Ordered by what actually costs something, not by count.
 
 ---
 
-## 2. Script contract — 66 findings
+## 2. Script contract — 13 findings
 
-`scripts/exit-code` (35), `scripts/json-contract` (17), `scripts/top-level-guard` (14).
+`scripts/top-level-guard` (9), `scripts/json-contract` (4). All 9 files in two skills:
+`pallo-logistics` (gina-pending, gina-where, pallo-modify-stay, pallo-trip-plan/prep/status)
+and `square-appointments` (customer-info, list-merchants, square-list).
+
+**28 findings removed, not fixed, by the 2026-08-28 entry-point Phase 1:** the contract
+rules now apply to derived entry points (scripts SKILL.md references in code), so the
+premise-false class — `triplib.py` (imported, never invoked), bambu's probes/logins,
+web-access's service files — no longer carries a contract the agent can never trigger.
+Those files are still hygiene-checked (silent-except, destructive subcommands).
+`scripts/exit-code` hit 0 findings at Phase 1 and is promotion-safe the moment the set
+is final; `json-contract` + `top-level-guard` become promotion-safe after the Phase 2
+fixes below (reserved call, per the gate policy).
 
 The fix is the same everywhere and already written: vendor `tools/skill_json.py` into the
-skill's `scripts/` and use `ok()` / `fail()` / `@guard`. `calendar`, `bambu-store` and
-`donations` have adopted it; `pallo-logistics` (34 findings) and `square-appointments` (24)
-have not, which is most of the remaining count.
+skill's `scripts/` and use `ok()` / `fail()` / `@guard`.
 
 Why it matters: without `@guard`, an uncaught exception prints a traceback to stderr and
 **nothing to stdout**, so the model cannot tell whether the action happened — and defaults to
 assuming it did. That is how a booking script reports success it never achieved.
 
-- [ ] `pallo-logistics` — 16 scripts
-- [ ] `square-appointments` — 6 scripts
-- [ ] `web-access`, `whatsapp-backfill`, `google-docs` — 1-2 each
+- [ ] `pallo-logistics` — 6 files (Phase 2)
+- [ ] `square-appointments` — 3 files (Phase 2)
+
+### New: undocumented shebangs — 14 findings (minor)
+
+`scripts/undocumented-shebang` (3a, entry-point spec): a shebang says "run me", but
+SKILL.md code never references the file. `bambu-store` ×7 (auth_probe, bambu_login,
+cart_capture, har_analyze, store_login, store_sso_probe, token_mint_probe) and
+`web-access` ×7 (app, browse_task, handlers, mcp_server, run_service, rxfetch, service).
+Warning-layer by design — minor, never gates. The fix is to document a file that is
+really an entry point or drop the shebang from what is not.
 
 (`daily-briefing` left this list 2026-08-28: its three pipeline `.py` files
 were vendored mirror copies of `~/daily-briefing/` (the cron pipeline's own
@@ -77,7 +98,7 @@ ordinary English.
 
 ---
 
-## 3. Silent excepts — 31 findings
+## 3. Silent excepts — 30 findings
 
 `except Exception: pass` swallowing a real failure. Audited individually; most are legitimate
 Playwright selector fallbacks with a second strategy immediately after, or best-effort
@@ -92,26 +113,22 @@ screenshots. The ones that hide a real failure:
 
 ---
 
-## 4. Domain leaks — 9 findings
+## 4. Domain leaks — 8 findings
 
 Backend vocabulary in model context. The model reasons about the words in front of it.
 
-- [ ] `pallo-logistics` — "Gingr", "storage-state", "auth cookies", "portal rate limiting";
-      `Gingr` is also a tag. Say "the kennel's booking system".
-- [ ] `square-appointments` — "AgentMail", "bearer tokens", "internal selector state";
-      `Square` is a tag.
-- [ ] `whatsapp-backfill` — "Hindsight", "bank", "retain", "operation ids" throughout, and
-      `Hindsight` is a tag. Say "the agent's memory"; rename `--bank` to `--collection`.
-- [ ] `google-docs` — "service account", "Drive", `GOOGLE_APPLICATION_CREDENTIALS` in the
-      error section.
-- [ ] `donations` — the only leak in an otherwise clean surface: raw `googleapiclient`
-      exceptions pass through as `error`, rendering the spreadsheet id and A1 ranges.
-- [ ] Four reported leaks are false positives — "formula" meaning *show your math*, "cells"
-      meaning table cells, "webhook" inside a literal URL. Consider narrowing the rule.
+- [ ] `pallo-logistics` — "agentmail", "gingr"; `Gingr` is also a tag. Say "the kennel's booking system".
+- [ ] `square-appointments` — "agentmail", "playwright", "selector"; `Square` is a tag.
+- [ ] `whatsapp-backfill` — "hindsight"; `Hindsight` is a tag. Say "the agent's memory".
+- [ ] `agentmail-lite` — "agentmail", "schema" (the product name is the domain here; consider an allow-list entry like `bambu-store`'s `myshopify`).
+- [ ] `calendar` — "oauth" (it drives a Google calendar; "sign-in" is the domain word).
+- [ ] `pet-care-tracker` — "home assistant".
+- [ ] `web-access` — "firecrawl" (a backend; the domain word is "the web").
+- [ ] `daily-briefing` — "schema" (its four JSON config files are data, not backend vocabulary).
 
 ---
 
-## 5. Structure — 6 findings
+## 5. Structure — 15 findings
 
 - [ ] `body/tools-table` (5) — the four investment skills and `pet-care-tracker` have no tools
       table because they invoke no scripts. Either exempt script-less skills in the linter or
@@ -126,9 +143,12 @@ Backend vocabulary in model context. The model reasons about the words in front 
       → "Out of scope").
 - [x] `layout/dirs` (1) — closed 2026-08-28: `web-access/patches/` → `web-access/assets/`
       (Dockerfile `COPY` updated).
-- [ ] `body/error-sentence` (1), `body/section-flow` (1).
-- [ ] `body/explicit-verb` (6), `frontmatter/tags` (2). (`frontmatter/version` (1)
-      closed 2026-08-28: `daily-briefing` was the lone `1.0.0` outlier; now `0.2.0`.)
+- [x] `body/error-sentence` (1), `body/section-flow` (1) — closed with A1 (`9f82ad5`):
+      both findings were the daily-briefing mirror's; the mirror deletion removed the
+      offending SKILL.md (0 findings post-A1, verified in the census chain).
+- [ ] `body/explicit-verb` (8: rx-review 2, square-appointments 6), `frontmatter/tags` (2:
+      bambu-store, calendar). (`frontmatter/version` (1) closed 2026-08-28: `daily-briefing`
+      was the lone `1.0.0` outlier; now `0.2.0`.)
 
 ---
 

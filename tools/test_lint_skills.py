@@ -70,7 +70,7 @@ When they ask for something else.
 
 | Tool | Purpose |
 |------|---------|
-| `do-thing` | Runs the thing and reports the result. |
+| `tool.py` | Runs the thing and reports the result. |
 
 ## Output
 
@@ -106,6 +106,16 @@ CLEAN_SCRIPT = ('#!/usr/bin/env python3\nimport json, sys\n'
                 '        sys.exit(1)\n'
                 'if __name__ == "__main__":\n'
                 '    print(main())\n')
+
+# A contract-violating script with NO shebang: no "ok" field (json-contract) and a
+# def main() with no top-level guard (top-level-guard). Used to prove the entry-point
+# gate — it only produces those findings when the file is a DERIVED entry point.
+BAD_SCRIPT = ('import json, sys\n'
+              'def main():\n'
+              '    print(json.dumps({"result": "x"}))\n'
+              '    return 0\n'
+              'if __name__ == "__main__":\n'
+              '    sys.exit(main())\n')
 
 
 def make_skill(lab, name, skillmd=BASE_SKILLMD, readme=BASE_README, script=None,
@@ -247,7 +257,7 @@ case("B7 lowercase section heading", lambda: make_skill(LAB, "x", script=BASE_SC
      set(), must_not={"body/section-flow"})  # re.I tolerates case
 
 case("B8 no tools table", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
-     skillmd=BASE_SKILLMD.replace("## Tools\n\n| Tool | Purpose |\n|------|---------|\n| `do-thing` | Runs the thing and reports the result. |\n\n",
+     skillmd=BASE_SKILLMD.replace("## Tools\n\n| Tool | Purpose |\n|------|---------|\n| `tool.py` | Runs the thing and reports the result. |\n\n",
                                   "## Tools\n\nRun the tool directly.\n\n")),
      {"body/tools-table"})
 
@@ -562,6 +572,105 @@ case("G1 pristine baseline is clean", lambda: make_skill(LAB, "x", script=CLEAN_
                       "body/section-flow", "body/tools-table", "body/domain-leak",
                       "scripts/json-contract", "scripts/exit-code",
                       "scripts/top-level-guard", "layout/readme", "layout/dirs"})
+
+
+# ── I. entry-point derivation (spec 2026-08-28; gate on SKILL.md code, 3a) ───
+# The contract rules are for what the agent CAN invoke: a script referenced in a
+# SKILL.md code span or fence. Prose never counts. This is what removed the 28
+# premise-false findings (triplib.py, bambu probes, web-access service files) and
+# what the cases below pin — both directions, per house rule: a gate must be shown
+# to fire on a true entry point AND stay silent on a helper.
+def _i1():
+    # tool.py is declared in the tools table; an UNDOCUMENTED probe with the same
+    # violations must stay silent: it is not an entry point, so it carries no contract.
+    make_skill(LAB, "x", script=BAD_SCRIPT, extra_files={
+        "scripts/har_probe.py":
+            '#!/usr/bin/env python3\nimport json\n'
+            'def main():\n    print(json.dumps({"probe": 1}))\n    return 0\n'
+            'if __name__ == "__main__":\n    sys.exit(main())\n'})
+case("I1 undocumented script with contract violations is silent", _i1,
+     {"scripts/json-contract", "scripts/top-level-guard"},
+     must_not={"scripts/exit-code"})   # exit-code fires on the declared tool.py, never on the probe
+
+case("I2 prose mention is not an entry point",
+     lambda: make_skill(LAB, "x", script=BAD_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("| `tool.py` | Runs the thing and reports the result. |",
+                                      "The tool runs the thing and reports the result.")),
+     set(), must_not={"scripts/json-contract", "scripts/top-level-guard"})
+
+case("I3 a documented code span IS an entry point (the gate fires)",
+     lambda: make_skill(LAB, "x", script=BAD_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("Runs the thing and reports the result.",
+                                      "Runs `python3 scripts/tool.py` to do the thing.")),
+     {"scripts/json-contract", "scripts/top-level-guard"})
+
+# 3a: a shebang says "run me"; if the docs never reference the file the executable
+# bit is a promise the docs don't back. Warning-layer only — minor, never a gate.
+case("I4 shebang'd script, documented, is clean",
+     lambda: make_skill(LAB, "x", script='#!/usr/bin/env python3\n' + BAD_SCRIPT),
+     set(), must_not={"scripts/undocumented-shebang"})
+
+case("I5 shebang'd script, NOT documented, warns (and no contract: it is not an entry point)",
+     lambda: make_skill(LAB, "x", script='#!/usr/bin/env python3\n' + BAD_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("| `tool.py` | Runs the thing and reports the result. |",
+                                      "| `do-thing` | Runs the thing. |")),
+     {"scripts/undocumented-shebang"},
+     must_not={"scripts/json-contract", "scripts/top-level-guard"})
+
+case("I6 3a ignores _lib.py-named files (rename is the sanctioned fix)",
+     lambda: make_skill(LAB, "x", script=None, extra_files={
+         "scripts/tool_lib.py": "#!/usr/bin/env python3\nprint('helper')\n"}),
+     set(), must_not={"scripts/undocumented-shebang"})
+
+# The one-hop rule: a documented .sh wrapper whose SOLE invoking command delegates to
+# a tracked .py makes that .py an entry point too. Both directions are pinned.
+def _i7():
+    # wrap.sh is the documented command; tool.py (the violating BAD_SCRIPT, written by
+    # the script= arg) reaches entry-point status ONLY via the one hop — its name never
+    # appears in SKILL.md code. If the hop works, the contract fires on it.
+    smd = BASE_SKILLMD.replace("| `tool.py` | Runs the thing and reports the result. |",
+                               "| `wrap.sh` | Runs the thing. |")
+    make_skill(LAB, "x", script=BAD_SCRIPT, skillmd=smd, extra_files={
+        "scripts/wrap.sh":
+            '#!/bin/bash\nPY="python3"\nexec "$PY" "$(dirname "$0")/tool.py" "$@"\n'})
+case("I7 documented thin wrapper grants a hop to its .py", _i7,
+     {"scripts/json-contract", "scripts/top-level-guard"},
+     must_not={"scripts/exit-code"})
+
+case("I8 work-then-pipe is orchestration — NO hop",
+     lambda: make_skill(LAB, "x", script=BAD_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("| `tool.py` | Runs the thing and reports the result. |",
+                                      "| `wrap.sh` | Runs the thing. |"),
+         extra_files={
+             "scripts/wrap.sh":
+                 '#!/bin/bash\ncurl -s https://example.com/data\npython3 "$(dirname "$0")/tool.py"\n'}),
+     set(), must_not={"scripts/json-contract", "scripts/top-level-guard"})
+
+case("I9 fan-out to two scripts is orchestration — NO hop",
+     lambda: make_skill(LAB, "x", script=BAD_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("| `tool.py` | Runs the thing and reports the result. |",
+                                      "| `wrap.sh` | Runs the thing. |"),
+         extra_files={
+             "scripts/wrap.sh":
+                 '#!/bin/bash\npython3 "$(dirname "$0")/tool.py"\npython3 "$(dirname "$0")/tool2.py"\n'}),
+     set(), must_not={"scripts/json-contract", "scripts/top-level-guard"})
+
+# The L84 regression: one stray/unbalanced backtick on an EARLIER line must not throw
+# off span pairing and hide a later declaration. tool.py is declared ONLY on the
+# "Invoke:" line below the stray one: per-line pairing finds it (the gate fires);
+# a whole-doc `re.finditer(r"`[^`]+`")` pairs the stray with the Invoke line's OPENING
+# backtick, so the span text between them (tool.py) is invisible to every pair —
+# the contract would go silent on a documented entry point (verified 2026-08-28 on
+# square-appointments L84, `customer-info.py show`).
+case("I10 stray backtick earlier does not hide a later declaration",
+     lambda: make_skill(LAB, "x", script=BAD_SCRIPT,
+         skillmd=BASE_SKILLMD
+         .replace("| `tool.py` | Runs the thing and reports the result. |",
+                  "| `do-thing` | Runs the thing. |")
+         .replace("When the user asks for the thing.",
+                  "When the user asks for the thing. Use `fast mode for quick runs.\n"
+                  "Invoke: `tool.py` to do the thing.")),
+     {"scripts/json-contract", "scripts/top-level-guard"})
 
 
 # ── gate tests (whole-repo behaviours) ───────────────────────────────────────

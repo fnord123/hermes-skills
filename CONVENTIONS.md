@@ -160,6 +160,13 @@ Local models hallucinate dangerous calls; this is the standard guard.
 - `hermes skills install` over HTTP drops the executable bit, so always document
   invocation as `python3 <path>`, never `./<path>`.
 - Read credentials/config from files the scripts own; keep keys out of the repo.
+- **Entry points are the scripts SKILL.md references in code** (a code span or a
+  fenced block — prose never counts). Only entry points carry the JSON contract:
+  the linter derives this set instead of assuming everything under `scripts/` is
+  runnable, so helpers, probes and service internals are checked for hygiene
+  (silent excepts, destructive subcommands) without being held to a contract the
+  agent can never trigger. A documented `.sh` wrapper whose sole command delegates
+  to a `.py` counts as that `.py`'s declaration (one hop, no further).
 
 
 ## Checking your work

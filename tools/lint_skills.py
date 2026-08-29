@@ -21,6 +21,7 @@ import ast
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -66,6 +67,156 @@ def _is_library(path):
     b = os.path.basename(path)
     return (b.endswith("_lib.py") or b.startswith("lib") or b.endswith("_test.py")
             or b.startswith("test_") or b == "__init__.py" or b == "conftest.py")
+
+
+# ── entry-point derivation (entry-point declaration spec, 2026-08-28) ─────────
+# A script carries the JSON contract only when the AGENT CAN RUN IT: when SKILL.md
+# references it in code. "Referenced in code" = an inline code span or a fenced code
+# block whose text contains a token whose LAST path component equals the file's name.
+# Prose mentions never count (no backticks, no fence): "the dedup lives in
+# news-dedup.py" is a sentence, not a command. Last-component matching is what makes
+# all three documented path forms (bare `name.py`, `${HERMES_SKILL_DIR}/scripts/name.py`,
+# `~/…/scripts/name.py`) work with no standardization.
+#
+# Two hard-won constraints, both hit live:
+#  1. Pair backtick spans PER LINE. One stray/unbalanced backtick on an earlier line
+#     throws off parity in a whole-doc scan and silently drops every later span
+#     (verified 2026-08-28: square-appointments L84's `customer-info.py show` was
+#     invisible, so a documented entry point was misclassified non-entry).
+#  2. The inventory is git-tracked files PLUS the repo's own untracked-but-not-ignored
+#     files — never a disk walk. pallo/square carry ~1,400 untracked .venv files under
+#     scripts/; os.walk invents ~2,800 phantom scripts. The disk-fallback branch
+#     (git ls-files fails: hermetic test lab, fresh clone before .git) is safe because
+#     the .venv directory is excluded explicitly. Untracked-not-ignored files stay in
+#     the inventory on purpose: they will be committed, so the contract applies to them
+#     now, not at the commit where the rule suddenly fires on a "new" file.
+#
+# One bounded hop: a .sh that IS a direct entry point and delegates to exactly one
+# tracked .py as its SOLE substantive (non-comment) command makes that .py an entry
+# point too — a documented wrapper must not hide the code that actually runs. The two
+# qualifiers are what keep it mechanical (the repo's only .sh census, every file read in
+# full, 2026-08-28): fetch-tickers.sh's `exec "$PY" …/fetch-tickers.py` IS delegation;
+# fetch-news.sh curls + jqs for real work and only THEN pipes to news-dedup.py —
+# orchestration, NO hop; morning-briefing.sh fans out to four helpers — fan-out, no
+# hop. (Repo-wide the hop is currently dormant: no skill has a .sh — it is retained for
+# the day one does, with a battery case proving each shape.)
+
+CODE_SPAN = re.compile(r"`([^`]+)`")
+SCRIPT_TOKEN = re.compile(r"([\w.${}~/~-]+\.(?:py|sh))\b")
+# A line delegating to a tracked .py: some python interpreter (literal, or the
+# variable-interpreter form a wrapper uses: `exec "$PY" …/x.py`) + a path whose last
+# component ends in .py, as an argument to THAT line. `python3 <<'PYEOF'` heredocs and
+# embedded python never match (no .py path argument). {0,2} tolerates the wrapper's
+# argument shapes (`exec "$PY" "$(dirname "$0")/x.py" "$@"`).
+DELEGATION = re.compile(
+    r"(?:^|[;&|]\s*)(?:\S+\s+)?\S*python3?\s+(?:\S+\s+){0,2}\S*\.py\b"
+    r"|(?:^|[;&|]\s*)exec\s+(?:\S+\s+){0,2}\S*\.py\b")
+# Shell lines that set up rather than do work: variable assignments (plain, or the
+# conditional `if [ -x … ]; then PY=…` / `else PY=…` interpreter-selection shape),
+# test compounds, and BARE control-flow words. Anything else — including
+# `for t in …; do curl …; done` — is work: a loop body that curls is exactly the
+# fetch-news.sh "work-then-pipe" shape the hop must NOT grant.
+NON_INVOCATION = re.compile(
+    r"^\s*(export\s+)?[A-Za-z_][A-Za-z_0-9]*\s*="
+    r"|^\s*(?:if|elif)\s.*\bthen\s+[A-Za-z_][A-Za-z_0-9]*\s*="
+    r"|^\s*else\s+[A-Za-z_][A-Za-z_0-9]*\s*="
+    r"|^\s*\[[^\]]*\]"
+    r"|^\s*(then|else|fi|do|done|esac)\b\s*$"
+    r"|^\s*(if|elif)\s.*\bthen\s*$")
+
+
+def _skill_inventory(d, skill_name):
+    """Basename set of the skill's scripts (.py/.sh) — git-tracked plus untracked,
+    never a disk walk. Returns None when git is unavailable (test lab / fresh clone),
+    in which case the caller uses the disk fallback (which excludes .venv)."""
+    try:
+        r = subprocess.run(["git", "-C", ROOT, "ls-files", skill_name + "/scripts/"],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    names = {os.path.basename(f) for f in r.stdout.splitlines()
+             if f.endswith((".py", ".sh"))}
+    try:
+        u = subprocess.run(["git", "-C", ROOT, "ls-files", "--others", "--exclude-standard",
+                            skill_name + "/scripts/"],
+                           capture_output=True, text=True, timeout=30)
+        if u.returncode == 0:
+            names |= {os.path.basename(f) for f in u.stdout.splitlines()
+                      if f.endswith((".py", ".sh"))}
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return names
+
+
+def _disk_fallback(sdir):
+    names = set()
+    if not os.path.isdir(sdir):
+        return names
+    for base, dirs, files in os.walk(sdir):
+        dirs[:] = [x for x in dirs if x != ".venv"]
+        names |= {f for f in files if f.endswith((".py", ".sh"))}
+    return names
+
+
+def _code_text(text):
+    """Code-span and fenced-block contents, per line (see the two constraints above)."""
+    parts = []
+    in_fence = False
+    for ln in text.splitlines():
+        if ln.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            parts.append(ln)
+        else:
+            parts.extend(CODE_SPAN.findall(ln))
+    return parts
+
+
+def derive_entrypoints(d, skill_name, text, inv=None):
+    """Return the set of script basenames the agent can invoke: direct references in
+    SKILL.md code plus the one-hop delegation set (spec, 2026-08-28). `inv` is the
+    skill's script inventory (basenames); when omitted it is computed here — the
+    caller normally computes it once and shares it with 3a to avoid a second
+    git round-trip per skill."""
+    sdir = os.path.join(d, "scripts")
+    if inv is None:
+        inv = _skill_inventory(d, skill_name)
+        if inv is None:
+            inv = _disk_fallback(sdir)
+    direct = set()
+    for span in _code_text(text):
+        for m in SCRIPT_TOKEN.finditer(span):
+            comp = m.group(1).rsplit("/", 1)[-1]
+            if comp in inv:
+                direct.add(comp)
+    hop = set()
+    for sh in direct:
+        if not sh.endswith(".sh"):
+            continue
+        try:
+            src = open(os.path.join(sdir, sh), encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        # Sole-substantive-command test: the wrapper's invoking lines (everything
+        # except comments and setup: assignments, [ -x ] tests, fi/done scaffolding)
+        # must be EXACTLY ONE, and it must delegate to exactly one .py. Any other
+        # invoking line (curl in a loop body, a fan-out to siblings) or a second
+        # target = orchestration, not delegation.
+        invoking = [l for l in src.splitlines()
+                    if l.strip() and not l.strip().startswith("#")
+                    and not NON_INVOCATION.match(l)]
+        targets = set()
+        if len(invoking) == 1 and DELEGATION.search(invoking[0]):
+            targets = {m.group(0).rsplit("/", 1)[-1]
+                       for m in re.finditer(r"\S*\.py\b", invoking[0])}
+        if len(targets) == 1:
+            t = next(iter(targets))
+            if t in inv and t.endswith(".py"):
+                hop.add(t)
+    return direct | hop
 
 
 STDLIB = {
@@ -341,6 +492,42 @@ def lint_skill(name, baseline=None):
                 continue
             scripts += [os.path.join(base, f) for f in files if f.endswith(".py")]
 
+    # What the agent can actually invoke (derived from SKILL.md code) vs what it cannot.
+    # Drives the contract gate below and the undocumented-shebang warning.
+    entrypoints = derive_entrypoints(d, name, text)
+    inv = _skill_inventory(d, name)
+    if inv is None:
+        inv = _disk_fallback(sdir)
+    # 3a (entry-point declaration spec, approved 2026-08-28): a shebang says "run me",
+    # but if SKILL.md code never references the file, the agent has no reason to — the
+    # executable bit is a promise the docs don't back. Weak signal by design: minor,
+    # never a gate. The disk walk is READ-ONLY and .venv-excluded; scope still comes
+    # from the git inventory (a file git doesn't know and doesn't list untracked is a
+    # phantom — ignored venv debris — and is skipped).
+    if os.path.isdir(sdir):
+        for base, _, files in os.walk(sdir):
+            if ".venv" in base:
+                continue
+            for f in sorted(files):
+                if not f.endswith((".py", ".sh")):
+                    continue
+                b = f
+                p = os.path.join(base, f)
+                if b not in inv:
+                    continue
+                try:
+                    first = open(p, errors="replace").readline()
+                except OSError:
+                    continue
+                if not first.startswith("#!"):
+                    continue
+                if b in entrypoints or _is_library(b) or b == "skill_json.py":
+                    continue
+                add("minor", "scripts/undocumented-shebang",
+                    "carries a shebang but is not an entry point in SKILL.md code - either "
+                    "document it (code span or fence) or drop the shebang / rename to a "
+                    "library name", os.path.relpath(p, d))
+
     if re.search(r"(?<!python3 )(?<!python )\B\./\S*scripts/\S+\.py", text):
         add("major", "scripts/invocation",
             "documents './script.py'; the executable bit is lost over an HTTP install - "
@@ -360,7 +547,43 @@ def lint_skill(name, baseline=None):
                 imports |= {a.name.split(".")[0] for a in node.names}
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 imports.add(node.module.split(".")[0])
-        if _is_library(f):
+        # File hygiene applies to EVERY script — entry point or not: a silent except in
+        # a helper is a real defect even if the agent never runs it directly, and a
+        # destructive subparser with no brake is a footgun in whatever calls it.
+        for m in re.finditer(r"except\s*(Exception)?\s*:\s*\n\s*pass\b", src):
+            add("minor", "scripts/silent-except",
+                "'except: pass' swallows a real failure silently",
+                "%s:%d" % (rel, src[:m.start()].count("\n") + 1))
+
+        # ── --confirm on destructive subcommands ───────────────────────────
+        # README motivation #2 (local models hallucinate dangerous calls) is answered by
+        # exactly one convention — "destructive ops stay behind --confirm" — and it was the
+        # only convention with zero enforcement. Check the subparser NAMES against the
+        # destructive stems, and require --confirm declared within that subparser's block.
+        # A bare file-level "does --confirm appear" would pass any script that has the flag
+        # once and guard nothing; a name scan of the whole file false-positives on benign
+        # uses. Subparser-name + scoped-block is the precise, false-positive-free form.
+        for m in re.finditer(r'add_parser\(\s*["\']([\w-]+)["\']', src):
+            sub = m.group(1)
+            if not DESTRUCTIVE_STEM.match(sub):
+                continue
+            nxt = re.search(r'add_parser\(\s*["\']', src[m.end():])
+            block = src[m.start():m.end() + (nxt.start() if nxt else 2000)]
+            if not re.search(r'--confirm\b', block):
+                line = src[:m.start()].count("\n") + 1
+                add("critical", "scripts/confirm",
+                    "destructive subcommand %r has no --confirm guard — a hallucinated "
+                    "call runs it with no footgun brake" % sub,
+                    "%s:%d" % (rel, line))
+
+        # The JSON contract is for what the agent INVOKES — the derived entry points.
+        # The old gate was _is_library() alone: a name heuristic that let triplib.py
+        # through (nobody runs it) while the real defect — "any script under scripts/
+        # might be run, so it all carries the contract" — produced 28 premise-false
+        # findings on probes, service files and imported helpers (entry-point
+        # declaration spec, 2026-08-28). Non-entry scripts are still hygiene-checked
+        # above; they just carry no contract.
+        if os.path.basename(f) not in entrypoints or _is_library(f):
             continue
 
         # A script that vendors skill_json.py and uses its helpers satisfies the whole
@@ -411,31 +634,6 @@ def lint_skill(name, baseline=None):
             add("major", "scripts/top-level-guard",
                 "no top-level exception guard: an unexpected error prints a traceback and "
                 "no JSON object at all", rel)
-        for m in re.finditer(r"except\s*(Exception)?\s*:\s*\n\s*pass\b", src):
-            add("minor", "scripts/silent-except",
-                "'except: pass' swallows a real failure silently",
-                "%s:%d" % (rel, src[:m.start()].count("\n") + 1))
-
-        # ── --confirm on destructive subcommands ───────────────────────────
-        # README motivation #2 (local models hallucinate dangerous calls) is answered by
-        # exactly one convention — "destructive ops stay behind --confirm" — and it was the
-        # only convention with zero enforcement. Check the subparser NAMES against the
-        # destructive stems, and require --confirm declared within that subparser's block.
-        # A bare file-level "does --confirm appear" would pass any script that has the flag
-        # once and guard nothing; a name scan of the whole file false-positives on benign
-        # uses. Subparser-name + scoped-block is the precise, false-positive-free form.
-        for m in re.finditer(r'add_parser\(\s*["\']([\w-]+)["\']', src):
-            sub = m.group(1)
-            if not DESTRUCTIVE_STEM.match(sub):
-                continue
-            nxt = re.search(r'add_parser\(\s*["\']', src[m.end():])
-            block = src[m.start():m.end() + (nxt.start() if nxt else 2000)]
-            if not re.search(r'--confirm\b', block):
-                line = src[:m.start()].count("\n") + 1
-                add("critical", "scripts/confirm",
-                    "destructive subcommand %r has no --confirm guard — a hallucinated "
-                    "call runs it with no footgun brake" % sub,
-                    "%s:%d" % (rel, line))
 
     third = {i for i in imports if i not in STDLIB and
              not any(os.path.basename(s)[:-3] == i for s in scripts)}
