@@ -19,8 +19,10 @@ verifiable from the portal read, so the expected slate is returned for
 reference rather than asserted as booked.
 
 Single-trip status: all_set | boarding_present_dates_off | partial_coverage |
-no_boarding | no_trip_found | ambiguous_trip. Sweep status:
-no_trips_in_horizon | kayak_feed_unreachable | ok.
+no_boarding | no_trip_found | ambiguous_trip | stays_unavailable |
+calendar_error. Sweep status: no_trips_in_horizon | kayak_feed_unreachable |
+stays_unavailable | ok. The `status` field carries the outcome; the script
+itself succeeded (ok: true) whenever it could run and report.
 """
 from __future__ import annotations
 
@@ -34,6 +36,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import triplib  # noqa: E402
+from skill_json import ok, fail, guard  # noqa: E402
 
 
 def _fetch_stays() -> list[dict]:
@@ -187,41 +190,39 @@ def _sweep(horizon_days: int) -> dict:
     return {"status": "ok", "horizon_days": horizon_days, "trips": results}
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trip-name", default=None)
     ap.add_argument("--trip-start", default=None, help="ISO date (with --trip-end).")
-    ap.add_argument("--trip-end", default=None, help="ISO date (with --trip-start).")
+    ap.add_argument("--trip-end", default=None, help="ISO date (with --trip-end).")
     ap.add_argument("--horizon-days", type=int, default=180,
                     help="Sweep horizon when no trip identifier is given.")
     args = ap.parse_args()
 
     if args.trip_start or args.trip_end:
         if not (args.trip_start and args.trip_end):
-            print(json.dumps({"status": "error",
-                              "reason": "supply both --trip-start and --trip-end"}, indent=2))
-            return 2
+            fail("supply both --trip-start and --trip-end", status="error")
+            return
         try:
             ts = date.fromisoformat(args.trip_start)
             te = date.fromisoformat(args.trip_end)
         except ValueError:
-            print(json.dumps({"status": "dates_invalid"}, indent=2))
-            return 2
+            fail("invalid ISO date in --trip-start / --trip-end", status="dates_invalid")
+            return
         if te < ts:
-            print(json.dumps({"status": "dates_invalid",
-                              "reason": "trip-end before trip-start"}, indent=2))
-            return 2
-        print(json.dumps(_single(args.trip_name, ts, te), indent=2))
-        return 0
+            fail("trip-end before trip-start", status="dates_invalid")
+            return
+        ok(**_single(args.trip_name, ts, te))
+        return
 
     if args.trip_name:
-        print(json.dumps(_single(args.trip_name, None, None), indent=2))
-        return 0
+        ok(**_single(args.trip_name, None, None))
+        return
 
-    print(json.dumps(_sweep(args.horizon_days), indent=2))
-    return 0
+    ok(**_sweep(args.horizon_days))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

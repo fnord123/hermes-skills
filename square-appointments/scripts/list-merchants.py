@@ -11,6 +11,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from skill_json import ok, fail, guard  # noqa: E402
+
 DEFAULT_MERCHANTS = Path.home() / ".config" / "square-appointments" / "merchants.json"
 
 
@@ -27,16 +30,17 @@ def _load_env_value(key: str) -> str | None:
     return os.environ.get(key)
 
 
-def main() -> int:
+@guard
+def main() -> None:
     path = Path(_load_env_value("MERCHANTS_FILE") or DEFAULT_MERCHANTS)
     if not path.exists():
-        print(json.dumps({"error": "merchants file not found", "path": str(path)}, indent=2))
-        return 1
+        fail("merchants file not found", path=str(path))
+        return
     try:
         merchants = json.loads(path.read_text())
     except json.JSONDecodeError as e:
-        print(json.dumps({"error": "merchants.json is not valid JSON", "detail": str(e), "path": str(path)}, indent=2))
-        return 1
+        fail("merchants.json is not valid JSON", detail=str(e), path=str(path))
+        return
 
     out = []
     for alias, cfg in sorted(merchants.items()):
@@ -46,9 +50,8 @@ def main() -> int:
             "configured_service_id": bool(cfg.get("default_service_id")),
             "configured_booking_url": bool(cfg.get("booking_url")),
         })
-    print(json.dumps({"merchants": out, "count": len(out)}, indent=2))
-    return 0
+    ok(merchants=out, count=len(out))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

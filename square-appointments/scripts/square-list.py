@@ -28,11 +28,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from skill_json import ok, fail, guard  # noqa: E402
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_MERCHANTS = Path.home() / ".config" / "square-appointments" / "merchants.json"
 AGENTMAIL_BASE = "https://api.agentmail.to"
 HTTP_TIMEOUT_SECONDS = 30
 MAX_PAGES = 20
+
+
+class AgentMailError(Exception):
+    """An AgentMail API call failed. Carries the user-facing message."""
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -63,9 +70,9 @@ def http_get_json(url: str, key: str) -> Any:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:500]
-        raise SystemExit(f"AgentMail HTTP {e.code} at {url}\n{body}")
+        raise AgentMailError(f"AgentMail HTTP {e.code} at {url}\n{body}")
     except urllib.error.URLError as e:
-        raise SystemExit(f"AgentMail network error: {e}")
+        raise AgentMailError(f"AgentMail network error: {e}")
 
 
 def _coerce_list(payload: Any, key_hint: str) -> list[dict]:
@@ -85,10 +92,10 @@ def discover_inbox(key: str) -> str:
     data = http_get_json(f"{AGENTMAIL_BASE}/v0/inboxes", key)
     inboxes = _coerce_list(data, "inboxes")
     if not inboxes:
-        raise SystemExit("AgentMail returned no inboxes for this API key.")
+        raise AgentMailError("AgentMail returned no inboxes for this API key.")
     if len(inboxes) > 1:
         ids = ", ".join((i.get("inbox_id") or i.get("id") or i.get("email_address") or "?") for i in inboxes[:5])
-        raise SystemExit(
+        raise AgentMailError(
             f"AgentMail returned {len(inboxes)} inboxes; set AGENTMAIL_INBOX_ID in .env to pick one. Examples: {ids}"
         )
     ix = inboxes[0]
@@ -286,7 +293,8 @@ def _in_window(start_iso: str | None, days_back: int, days_ahead: int) -> bool:
     return (now - timedelta(days=days_back)) <= dt <= (now + timedelta(days=days_ahead))
 
 
-def _run() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--merchant", required=True, help="Merchant alias from merchants.json.")
     ap.add_argument("--days-ahead", "--horizon-days", dest="days_ahead", type=int, default=60,
@@ -303,100 +311,87 @@ def _run() -> int:
     env = load_env(SCRIPT_DIR / ".env")
     key = env_value(env, "AGENTMAIL_API_KEY")
     if not key:
-        print(json.dumps({"error": "AGENTMAIL_API_KEY missing (.env or environment)."}, indent=2))
-        return 2
+        fail("AGENTMAIL_API_KEY missing (.env or environment).")
+        return
 
     merchants_file = Path(env_value(env, "MERCHANTS_FILE") or DEFAULT_MERCHANTS)
     if not merchants_file.exists():
-        print(json.dumps({"error": "merchants file not found", "path": str(merchants_file)}, indent=2))
-        return 2
+        fail("merchants file not found", path=str(merchants_file))
+        return
     merchants = json.loads(merchants_file.read_text())
     cfg = merchants.get(args.merchant)
     if not cfg:
-        print(json.dumps({
-            "error": f"merchant alias '{args.merchant}' not configured",
-            "configured_aliases": sorted(merchants.keys()),
-        }, indent=2))
-        return 2
+        fail(f"merchant alias '{args.merchant}' not configured",
+             configured_aliases=sorted(merchants.keys()))
+        return
 
-    inbox = env_value(env, "AGENTMAIL_INBOX_ID") or discover_inbox(key)
-    threads = list_recent_threads(inbox, key, args.lookback_days)
-    matching = [t for t in threads if matches_merchant(t, cfg)]
-
-    if args.probe:
-        report: dict[str, Any] = {
-            "merchant": args.merchant,
-            "lookback_days": args.lookback_days,
-            "total_threads_scanned": len(threads),
-            "matched_thread_count": len(matching),
-            "sample_matches": [],
-        }
-        for t in matching[:3]:
-            tid = t.get("thread_id") or t.get("id") or ""
-            full = fetch_thread(inbox, tid, key) if tid else {}
-            messages = full.get("messages") or []
-            sample = {
-                "thread_id": tid,
-                "subject": _str_field(t, "subject", "last_subject"),
-                "from": _str_field(t, "from", "sender", "last_sender", "from_address"),
-                "message_count": len(messages),
-                "latest_text_head": "",
-            }
-            if messages:
-                txt = messages[-1].get("extracted_text") or messages[-1].get("text") or ""
-                sample["latest_text_head"] = txt[:2000]
-            report["sample_matches"].append(sample)
-        print(json.dumps(report, indent=2))
-        return 0
-
-    bookings = []
-    skipped = []
-    for t in matching:
-        tid = t.get("thread_id") or t.get("id")
-        if not tid:
-            continue
-        full = fetch_thread(inbox, tid, key)
-        messages = full.get("messages") or []
-        if not messages:
-            continue
-        text = messages[-1].get("extracted_text") or messages[-1].get("text") or ""
-        parsed = parse_confirmation(text)
-        if not parsed["booking_handle"]:
-            skipped.append({"thread_id": tid, "reason": "no manage URL found"})
-            continue
-        if not _in_window(parsed["start_time_iso"], args.days_back, args.days_ahead):
-            continue
-        bookings.append({
-            "merchant_alias": args.merchant,
-            "merchant_name": cfg.get("name"),
-            "start_time_iso": parsed["start_time_iso"],
-            "start_time_raw": parsed["start_time_raw"],
-            "service": parsed["service"],
-            "booking_handle": parsed["booking_handle"],
-            "thread_id": tid,
-        })
-
-    # Sort by start_time_iso when present, else leave order as inbox order
-    bookings.sort(key=lambda b: (b["start_time_iso"] or "9999"))
-    out = {"merchant": args.merchant, "bookings": bookings}
-    if skipped:
-        out["skipped"] = skipped
-    print(json.dumps(out, indent=2))
-    return 0
-
-
-def main() -> int:
-    """Wrap _run so an internal `raise SystemExit("sentence")` still produces
-    one JSON object on stdout instead of a bare line on stderr."""
     try:
-        return _run()
-    except SystemExit as e:
-        code = e.code
-        if code is None or isinstance(code, int):
-            return 0 if code is None else code
-        print(json.dumps({"ok": False, "error": str(code)}, indent=2))
-        return 1
+        inbox = env_value(env, "AGENTMAIL_INBOX_ID") or discover_inbox(key)
+        threads = list_recent_threads(inbox, key, args.lookback_days)
+        matching = [t for t in threads if matches_merchant(t, cfg)]
+
+        if args.probe:
+            report: dict[str, Any] = {
+                "merchant": args.merchant,
+                "lookback_days": args.lookback_days,
+                "total_threads_scanned": len(threads),
+                "matched_thread_count": len(matching),
+                "sample_matches": [],
+            }
+            for t in matching[:3]:
+                tid = t.get("thread_id") or t.get("id") or ""
+                full = fetch_thread(inbox, tid, key) if tid else {}
+                messages = full.get("messages") or []
+                sample = {
+                    "thread_id": tid,
+                    "subject": _str_field(t, "subject", "last_subject"),
+                    "from": _str_field(t, "from", "sender", "last_sender", "from_address"),
+                    "message_count": len(messages),
+                    "latest_text_head": "",
+                }
+                if messages:
+                    txt = messages[-1].get("extracted_text") or messages[-1].get("text") or ""
+                    sample["latest_text_head"] = txt[:2000]
+                report["sample_matches"].append(sample)
+            ok(**report)
+            return
+
+        bookings = []
+        skipped = []
+        for t in matching:
+            tid = t.get("thread_id") or t.get("id")
+            if not tid:
+                continue
+            full = fetch_thread(inbox, tid, key)
+            messages = full.get("messages") or []
+            if not messages:
+                continue
+            text = messages[-1].get("extracted_text") or messages[-1].get("text") or ""
+            parsed = parse_confirmation(text)
+            if not parsed["booking_handle"]:
+                skipped.append({"thread_id": tid, "reason": "no manage URL found"})
+                continue
+            if not _in_window(parsed["start_time_iso"], args.days_back, args.days_ahead):
+                continue
+            bookings.append({
+                "merchant_alias": args.merchant,
+                "merchant_name": cfg.get("name"),
+                "start_time_iso": parsed["start_time_iso"],
+                "start_time_raw": parsed["start_time_raw"],
+                "service": parsed["service"],
+                "booking_handle": parsed["booking_handle"],
+                "thread_id": tid,
+            })
+
+        # Sort by start_time_iso when present, else leave order as inbox order
+        bookings.sort(key=lambda b: (b["start_time_iso"] or "9999"))
+        out: dict[str, Any] = {"merchant": args.merchant, "bookings": bookings}
+        if skipped:
+            out["skipped"] = skipped
+        ok(**out)
+    except AgentMailError as e:
+        fail(str(e))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

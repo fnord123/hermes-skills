@@ -28,6 +28,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import triplib  # noqa: E402
+from skill_json import ok, fail, guard  # noqa: E402
 
 
 def _build_plan(trip_name: str, trip_start: date, trip_end: date,
@@ -74,7 +75,8 @@ def _build_plan(trip_name: str, trip_start: date, trip_end: date,
     return plan
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trip-name", default=None)
@@ -94,29 +96,25 @@ def main() -> int:
         drop_time = triplib.normalize_clock_time(args.drop_time)
         pickup_time = triplib.normalize_clock_time(args.pickup_time)
     except triplib.TimeFormatError as e:
-        print(json.dumps({"status": "dates_invalid", "reason": str(e)}, indent=2))
-        return 2
+        fail(str(e), status="dates_invalid")
 
     # Direct boarding dates — bypass the trip-date buffer entirely.
     explicit_drop = None
     explicit_pickup = None
     if args.drop_date or args.pickup_date:
         if not (args.drop_date and args.pickup_date):
-            print(json.dumps({"status": "error",
-                              "reason": "supply both --drop-date and --pickup-date together"}, indent=2))
-            return 2
+            fail("supply both --drop-date and --pickup-date together",
+                 status="error")
         try:
             explicit_drop = date.fromisoformat(args.drop_date)
             explicit_pickup = date.fromisoformat(args.pickup_date)
         except ValueError:
-            print(json.dumps({"status": "dates_invalid"}, indent=2))
-            return 2
+            fail("invalid ISO date in --drop-date / --pickup-date",
+                 status="dates_invalid")
         # Same rule as pallo-book-trip.py: a stay is at least one night, so
         # pickup == drop is rejected here rather than at booking time.
         if explicit_pickup <= explicit_drop:
-            print(json.dumps({"status": "dates_invalid",
-                              "reason": "pickup must be after drop-off"}, indent=2))
-            return 2
+            fail("pickup must be after drop-off", status="dates_invalid")
 
     trip_name = args.trip_name
     if explicit_drop is not None:
@@ -130,28 +128,28 @@ def main() -> int:
             ts = date.fromisoformat(args.trip_start)
             te = date.fromisoformat(args.trip_end)
         except ValueError:
-            print(json.dumps({"status": "dates_invalid"}, indent=2))
-            return 2
+            fail("invalid ISO date in --trip-start / --trip-end",
+                 status="dates_invalid")
         if te < ts:
-            print(json.dumps({"status": "dates_invalid", "reason": "trip-end before trip-start"}, indent=2))
-            return 2
+            fail("trip-end before trip-start", status="dates_invalid")
         trip_name = trip_name or f"{ts.isoformat()}..{te.isoformat()}"
     elif trip_name:
         try:
             res = triplib.resolve_trip_by_name(trip_name)
         except triplib.CalendarError as e:
-            print(json.dumps({"status": "calendar_error", "reason": str(e)}, indent=2))
-            return 1
+            fail(str(e), status="calendar_error")
         if res["status"] != "ok":
-            print(json.dumps(res, indent=2))
-            return 0
+            # Informational outcomes (ambiguous_trip / no_trip_found), not
+            # a script failure — ok:true with the status carried in the
+            # payload, as before the JSON-contract conversion.
+            ok(**res)
+            return
         ts = date.fromisoformat(res["trip_start"])
         te = date.fromisoformat(res["trip_end"])
         trip_name = res["trip_name"]
     else:
-        print(json.dumps({"status": "error",
-                          "reason": "supply --trip-name or both --trip-start and --trip-end"}, indent=2))
-        return 2
+        fail("supply --trip-name or both --trip-start and --trip-end",
+             status="error")
 
     plan = _build_plan(trip_name, ts, te,
                        drop_off=explicit_drop, pick_up=explicit_pickup,
@@ -163,24 +161,20 @@ def main() -> int:
     plan_pick = date.fromisoformat(plan["pick_up"])
     today = date.today()
     if plan_pick <= plan_drop:
-        print(json.dumps({"status": "dates_invalid",
-                          "reason": "pickup must be after drop-off",
-                          "drop_off": plan["drop_off"], "pick_up": plan["pick_up"]}, indent=2))
-        return 2
+        fail("pickup must be after drop-off", status="dates_invalid",
+             drop_off=plan["drop_off"], pick_up=plan["pick_up"])
     if plan_drop < today:
-        print(json.dumps({"status": "dates_invalid",
-                          "reason": f"drop-off {plan['drop_off']} is in the past "
-                                    f"(today is {today.isoformat()})",
-                          "drop_off": plan["drop_off"], "pick_up": plan["pick_up"]}, indent=2))
-        return 2
+        fail(f"drop-off {plan['drop_off']} is in the past "
+             f"(today is {today.isoformat()})",
+             status="dates_invalid",
+             drop_off=plan["drop_off"], pick_up=plan["pick_up"])
 
     plan["status"] = "ok"
     plan["plan_json"] = json.dumps({k: plan[k] for k in (
         "trip_name", "trip_start", "trip_end", "drop_off", "pick_up",
         "drop_time", "pickup_time", "activity_slate", "gina_messages")})
-    print(json.dumps(plan, indent=2))
-    return 0
+    ok(**plan)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

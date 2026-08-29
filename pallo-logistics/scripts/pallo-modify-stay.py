@@ -14,13 +14,13 @@ the invariant the agent typed is the invariant the portal is driven with.
 
 Usage:
   # preview the date change:
-  python3 pallo-modify-stay.py --stay-id 2026-12-11/2026-12-20 \\
-      --new-drop-date 2026-12-12 --new-pickup-date 2026-12-21 \\
+  python3 pallo-modify-stay.py --stay-id 2026-12-11/2026-12-20 \
+      --new-drop-date 2026-12-12 --new-pickup-date 2026-12-21 \
       --confirm-drop-date 2026-12-12 --confirm-pickup-date 2026-12-21 --dry-run
 
   # do it for real, after the user approves:
-  python3 pallo-modify-stay.py --stay-id 2026-12-11/2026-12-20 \\
-      --new-drop-date 2026-12-12 --new-pickup-date 2026-12-21 \\
+  python3 pallo-modify-stay.py --stay-id 2026-12-11/2026-12-20 \
+      --new-drop-date 2026-12-12 --new-pickup-date 2026-12-21 \
       --confirm-drop-date 2026-12-12 --confirm-pickup-date 2026-12-21 --confirm
 
   # change only the activity slate (keep dates): pass the same dates + --simple-slate
@@ -48,11 +48,8 @@ from datetime import date
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-
-
-def out(d: dict, code: int = 0) -> int:
-    print(json.dumps(d, indent=2))
-    return code
+sys.path.insert(0, str(SCRIPT_DIR))
+from skill_json import ok, fail, guard  # noqa: E402
 
 
 def _run(script: str, args: list[str]) -> dict:
@@ -65,7 +62,8 @@ def _run(script: str, args: list[str]) -> dict:
                 "reason": f"{script} returned non-JSON: {(r.stdout or r.stderr)[:200]}"}
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stay-id", required=True, help='old stay, "<start>/<end>" ISO')
@@ -86,13 +84,11 @@ def main() -> int:
 
     # Footgun guard — refuse BEFORE any side effect (no child script is run).
     if not args.confirm and not args.dry_run:
-        return out({"ok": False, "status": "confirm_required",
-                    "error": "modifying books a real new reservation and cancels the existing "
-                             "one. Re-run with --confirm ONLY after the user has explicitly "
-                             "approved this exact change, or use --dry-run to preview.",
-                    "reason": "modifying books a real new reservation and cancels the existing "
-                              "one. Re-run with --confirm ONLY after the user has explicitly "
-                              "approved this exact change, or use --dry-run to preview."}, 1)
+        fail("modifying books a real new reservation and cancels the existing "
+             "one. Re-run with --confirm ONLY after the user has explicitly "
+             "approved this exact change, or use --dry-run to preview.",
+             status="confirm_required")
+        return
 
     try:
         old_start, old_end = args.stay_id.split("/", 1)
@@ -100,21 +96,21 @@ def main() -> int:
         date.fromisoformat(args.new_drop_date); date.fromisoformat(args.new_pickup_date)
         date.fromisoformat(args.confirm_drop_date); date.fromisoformat(args.confirm_pickup_date)
     except ValueError as e:
-        return out({"status": "error", "reason": f"bad dates: {e}"}, 2)
+        fail(f"bad dates: {e}", status="error")
+        return
 
     # The confirm invariant must come FROM THE CALLER. Synthesising it here from
     # --new-*-date would make the booking script's own guard unfireable.
     if (args.confirm_drop_date != args.new_drop_date
             or args.confirm_pickup_date != args.new_pickup_date):
-        return out({"ok": False, "status": "confirm_mismatch",
-                    "error": "confirm dates do not match the requested new dates; "
-                             "refusing to re-book.",
-                    "reason": "confirm dates do not match the requested new dates; "
-                              "refusing to re-book.",
-                    "new_drop_date": args.new_drop_date,
-                    "new_pickup_date": args.new_pickup_date,
-                    "confirm_drop_date": args.confirm_drop_date,
-                    "confirm_pickup_date": args.confirm_pickup_date}, 1)
+        fail("confirm dates do not match the requested new dates; "
+             "refusing to re-book.",
+             status="confirm_mismatch",
+             new_drop_date=args.new_drop_date,
+             new_pickup_date=args.new_pickup_date,
+             confirm_drop_date=args.confirm_drop_date,
+             confirm_pickup_date=args.confirm_pickup_date)
+        return
 
     book_args = [
         "--drop-date", args.new_drop_date, "--pickup-date", args.new_pickup_date,
@@ -138,33 +134,39 @@ def main() -> int:
     if args.dry_run:
         book = _run("pallo-book-trip.py", book_args + ["--dry-run"])
         cancel = _run("pallo-cancel.py", cancel_args + ["--dry-run"])
-        ok = book.get("status") == "dry_run_ok" and cancel.get("status") == "dry_run_ok"
-        return out({
-            "status": "dry_run_ok" if ok else "error",
-            "plan": "book the new stay, then cancel the old one",
-            "new_stay": {"drop_off": args.new_drop_date, "pick_up": args.new_pickup_date},
-            "old_stay_id": args.stay_id,
-            "book": book, "cancel": cancel,
-        }, 0 if ok else 1)
+        if book.get("status") == "dry_run_ok" and cancel.get("status") == "dry_run_ok":
+            ok(status="dry_run_ok",
+               plan="book the new stay, then cancel the old one",
+               new_stay={"drop_off": args.new_drop_date, "pick_up": args.new_pickup_date},
+               old_stay_id=args.stay_id,
+               book=book, cancel=cancel)
+        else:
+            fail("dry-run preview did not pass; see book/cancel for detail",
+                 status="error",
+               new_stay={"drop_off": args.new_drop_date, "pick_up": args.new_pickup_date},
+               old_stay_id=args.stay_id,
+               book=book, cancel=cancel)
+        return
 
     # REAL: book new first. --confirm is forwarded because this script's own
     # --confirm guard above already required the user's explicit approval.
     book = _run("pallo-book-trip.py", book_args + ["--confirm"])
     if book.get("status") not in ("booked", "booked_with_notification_warnings"):
-        return out({"status": "book_failed",
-                    "reason": "New stay was not booked; the old stay was left untouched.",
-                    "book": book}, 1)
+        fail("New stay was not booked; the old stay was left untouched.",
+             status="book_failed", book=book)
+        return
     # then cancel old
     cancel = _run("pallo-cancel.py", cancel_args + ["--confirm"])
     if cancel.get("status") == "cancelled":
-        return out({"status": "modified",
-                    "new_stay": {"drop_off": args.new_drop_date, "pick_up": args.new_pickup_date},
-                    "old_stay_id": args.stay_id, "book": book, "cancel": cancel})
-    return out({"status": "modified_old_not_cancelled",
-                "reason": "New stay booked, but cancelling the old stay did not confirm. "
-                          "Cancel the old stay manually to avoid a double booking.",
-                "old_stay_id": args.stay_id, "book": book, "cancel": cancel}, 1)
+        ok(status="modified",
+           new_stay={"drop_off": args.new_drop_date, "pick_up": args.new_pickup_date},
+           old_stay_id=args.stay_id, book=book, cancel=cancel)
+        return
+    fail("New stay booked, but cancelling the old stay did not confirm. "
+         "Cancel the old stay manually to avoid a double booking.",
+         status="modified_old_not_cancelled",
+         old_stay_id=args.stay_id, book=book, cancel=cancel)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

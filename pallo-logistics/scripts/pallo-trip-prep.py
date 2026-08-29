@@ -12,7 +12,7 @@ Usage:
   # preview (read-only):
   python3 pallo-trip-prep.py --trip-name London
   # after the user says yes:
-  python3 pallo-trip-prep.py --trip-name London --commit \\
+  python3 pallo-trip-prep.py --trip-name London --commit \
       --confirm-drop-date 2026-07-11 --confirm-pickup-date 2026-07-31
 
 Identify the trip by --trip-name OR explicit --trip-start / --trip-end.
@@ -35,11 +35,8 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-
-
-def out(d: dict, code: int = 0) -> int:
-    print(json.dumps(d, indent=2))
-    return code
+sys.path.insert(0, str(SCRIPT_DIR))
+from skill_json import ok, fail, guard  # noqa: E402
 
 
 def _run(script: str, args: list[str]) -> dict:
@@ -52,7 +49,8 @@ def _run(script: str, args: list[str]) -> dict:
                 "reason": f"{script} returned non-JSON: {(r.stdout or r.stderr)[:200]}"}
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trip-name", default=None)
@@ -72,21 +70,26 @@ def main() -> int:
     elif args.trip_start and args.trip_end:
         trip_args = ["--trip-start", args.trip_start, "--trip-end", args.trip_end]
     else:
-        return out({"status": "error",
-                    "reason": "identify the trip with --trip-name or both --trip-start and --trip-end"}, 2)
+        fail("identify the trip with --trip-name or both --trip-start and --trip-end",
+             status="error")
 
     # 1) already set up?
     status = _run("pallo-trip-status.py", trip_args)
     if status.get("status") == "all_set":
-        return out({"status": "all_set",
-                    "detail": status.get("detail"), "trip_status": status})
+        ok(status="all_set",
+           detail=status.get("detail"), trip_status=status)
 
     # 2) build the plan
     plan = _run("pallo-trip-plan.py", trip_args)
     if plan.get("status") != "ok":
-        # ambiguous_trip / no_trip_found / calendar_error / dates_invalid
-        return out({"status": plan.get("status", "error"), "plan": plan},
-                   0 if plan.get("status") in ("ambiguous_trip", "no_trip_found") else 1)
+        # ambiguous_trip / no_trip_found are informational outcomes the agent
+        # reports to the user — ok:true with the status carried in the payload.
+        # calendar_error / dates_invalid are real failures — ok:false.
+        if plan.get("status") in ("ambiguous_trip", "no_trip_found"):
+            ok(status=plan.get("status"), plan=plan)
+        else:
+            fail("building the plan failed; see plan for detail",
+                 status=plan.get("status", "error"), plan=plan)
 
     drop, pick = plan["drop_off"], plan["pick_up"]
     preview = {
@@ -98,19 +101,22 @@ def main() -> int:
     }
 
     if not args.commit:
-        return out({**preview, "status": "planned",
-                    "plan_json": plan.get("plan_json"),
-                    "note": "Re-run with --commit --confirm-drop-date "
-                            f"{drop} --confirm-pickup-date {pick} to book."})
+        ok(**preview, status="planned",
+           plan_json=plan.get("plan_json"),
+           note="Re-run with --commit --confirm-drop-date "
+                f"{drop} --confirm-pickup-date {pick} to book.")
+        return
 
     # 3) commit -> book
     if not (args.confirm_drop_date and args.confirm_pickup_date):
-        return out({**preview, "status": "error",
-                    "reason": "--commit requires --confirm-drop-date and --confirm-pickup-date"}, 2)
+        fail("--commit requires --confirm-drop-date and --confirm-pickup-date",
+             status="error", **preview)
     if args.confirm_drop_date != drop or args.confirm_pickup_date != pick:
-        return out({**preview, "status": "confirm_mismatch",
-                    "confirm_drop_date": args.confirm_drop_date,
-                    "confirm_pickup_date": args.confirm_pickup_date}, 1)
+        fail("confirm dates do not match the planned dates",
+             status="confirm_mismatch",
+             confirm_drop_date=args.confirm_drop_date,
+             confirm_pickup_date=args.confirm_pickup_date, **preview)
+        return
 
     # --confirm is forwarded because --commit + matching --confirm-* dates already
     # carry the user's explicit approval of this exact booking.
@@ -123,9 +129,12 @@ def main() -> int:
     if args.pickup_time:
         book_args += ["--pickup-time", args.pickup_time]
     book = _run("pallo-book-trip.py", book_args)
-    return out({**preview, "status": book.get("status", "error"), "book": book},
-               0 if book.get("status", "").startswith("booked") else 1)
+    if book.get("status", "").startswith("booked"):
+        ok(**preview, status=book.get("status", "error"), book=book)
+    else:
+        fail("booking did not complete; see book for detail",
+             status=book.get("status", "error"), book=book, **preview)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

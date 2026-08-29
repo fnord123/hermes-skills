@@ -35,6 +35,7 @@ Three rules the helpers enforce that hand-written code keeps getting wrong:
 import functools
 import json
 import sys
+from typing import NoReturn
 
 __all__ = ["ok", "fail", "guard", "note", "ArgumentParser"]
 
@@ -46,7 +47,7 @@ def _emit(payload):
     sys.stdout.flush()
 
 
-def ok(**fields):
+def ok(**fields) -> NoReturn:
     """Print a success object and exit 0. Field names must speak the user's domain."""
     payload = {"ok": True}
     payload.update(fields)
@@ -54,7 +55,7 @@ def ok(**fields):
     sys.exit(0)
 
 
-def fail(error, **fields):
+def fail(error, **fields) -> NoReturn:
     """Print a failure object and exit 1.
 
     `error` is shown to the user via the model, so write it in the user's domain: "the

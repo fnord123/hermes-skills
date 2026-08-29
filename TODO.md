@@ -1,7 +1,8 @@
 # Outstanding conventions work
 
-Snapshot: **80 findings — 0 critical, 26 major, 54 minor** across 16 skills
-(post entry-point Phase 1, 2026-08-28). CI is green; it gates on criticals only —
+Snapshot: **67 findings — 0 critical, 13 major, 54 minor** across 16 skills
+(post Phase 2 script-contract fixes, 2026-08-29; entry-point Phase 1, 2026-08-28).
+CI is green; it gates on criticals only —
 `layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets`,
 `routing/triggers-baseline` (and the seven pre-existing criticals) block a merge,
 the remaining major/minor are conformance work and non-blocking. The three script
@@ -44,30 +45,27 @@ Ordered by what actually costs something, not by count.
 
 ---
 
-## 2. Script contract — 13 findings
+## 2. Script contract — CLOSED (Phase 2, 2026-08-29)
 
-`scripts/top-level-guard` (9), `scripts/json-contract` (4). All 9 files in two skills:
-`pallo-logistics` (gina-pending, gina-where, pallo-modify-stay, pallo-trip-plan/prep/status)
-and `square-appointments` (customer-info, list-merchants, square-list).
+All 9 files converted to the house JSON contract: `tools/skill_json.py` vendored
+into `pallo-logistics` + `square-appointments` (generated copies, `tools/vendor.py`
+governs), `@guard` on `main`, every output path through `ok()` / `fail()`.
+`top-level-guard` 9 → 0, `json-contract` 4 → 0 (repo 80 → 67, the other 54
+findings byte-identical). `ok()` / `fail()` are now `NoReturn`-annotated in the
+source (and all five vendored copies), so fail-then-continue type-checks.
+Live-verified: happy paths (`gina-pending.py`, `list-merchants.py`) emit
+`{"ok": true, ...}` exit 0; bad args now emit `{"ok": false, ...}` exit 1 where
+they previously exited 2 with usage text on stderr and nothing on stdout.
+Behavioral note: informational outcomes the agent reports to the user
+(`ambiguous_trip`, `no_trip_found`, `pallo-trip-status` sweep results) are
+`ok: true` with the outcome in `status`; real failures (`calendar_error`,
+`book_failed`, bad input) are `ok: false` exit 1 — matching pre-conversion
+exit-code semantics.
 
-**28 findings removed, not fixed, by the 2026-08-28 entry-point Phase 1:** the contract
-rules now apply to derived entry points (scripts SKILL.md references in code), so the
-premise-false class — `triplib.py` (imported, never invoked), bambu's probes/logins,
-web-access's service files — no longer carries a contract the agent can never trigger.
-Those files are still hygiene-checked (silent-except, destructive subcommands).
-`scripts/exit-code` hit 0 findings at Phase 1 and is promotion-safe the moment the set
-is final; `json-contract` + `top-level-guard` become promotion-safe after the Phase 2
-fixes below (reserved call, per the gate policy).
-
-The fix is the same everywhere and already written: vendor `tools/skill_json.py` into the
-skill's `scripts/` and use `ok()` / `fail()` / `@guard`.
-
-Why it matters: without `@guard`, an uncaught exception prints a traceback to stderr and
-**nothing to stdout**, so the model cannot tell whether the action happened — and defaults to
-assuming it did. That is how a booking script reports success it never achieved.
-
-- [ ] `pallo-logistics` — 6 files (Phase 2)
-- [ ] `square-appointments` — 3 files (Phase 2)
+Both contract rules are now **promotion-safe** — Phase 4 (promote
+`json-contract` + `top-level-guard` to critical) is David's reserved call, no
+script work remains before it. `scripts/exit-code` has been promotion-safe since
+Phase 1 (0 findings).
 
 ### New: undocumented shebangs — 14 findings (minor)
 

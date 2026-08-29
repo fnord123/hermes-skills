@@ -20,6 +20,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from skill_json import ok, fail, guard  # noqa: E402
+
 CUSTOMER_FILE = Path.home() / ".config" / "square-appointments" / "customer.json"
 VALID_FIELDS = {"phone_country_code", "phone", "first_name", "last_name", "email"}
 
@@ -36,15 +39,13 @@ def _redact_email(e: str) -> str:
     return f"{name[0]}…@{domain}" if name else f"…@{domain}"
 
 
-def cmd_show() -> int:
+def cmd_show() -> None:
     if not CUSTOMER_FILE.exists():
-        print(json.dumps({
-            "configured": False,
-            "path": str(CUSTOMER_FILE),
-            "hint": "Run customer-info.py set --field <name> --value <val> for each of: "
-                    + ", ".join(sorted(VALID_FIELDS)),
-        }, indent=2))
-        return 0
+        ok(configured=False,
+           path=str(CUSTOMER_FILE),
+           hint="Run customer-info.py set --field <name> --value <val> for each of: "
+                + ", ".join(sorted(VALID_FIELDS)))
+        return
     data = json.loads(CUSTOMER_FILE.read_text())
     redacted = {
         "configured": True,
@@ -55,15 +56,13 @@ def cmd_show() -> int:
         "email": _redact_email(data.get("email", "")),
     }
     redacted["complete"] = all(data.get(k) for k in VALID_FIELDS)
-    print(json.dumps(redacted, indent=2))
-    return 0
+    ok(**redacted)
 
 
-def cmd_set(field: str, value: str) -> int:
+def cmd_set(field: str, value: str) -> None:
     if field not in VALID_FIELDS:
-        print(json.dumps({"error": f"unknown field {field!r}",
-                          "valid_fields": sorted(VALID_FIELDS)}, indent=2))
-        return 2
+        fail(f"unknown field {field!r}", valid_fields=sorted(VALID_FIELDS))
+        return
     CUSTOMER_FILE.parent.mkdir(parents=True, exist_ok=True)
     data: dict = {}
     if CUSTOMER_FILE.exists():
@@ -82,11 +81,11 @@ def cmd_set(field: str, value: str) -> int:
     data[field] = value
     CUSTOMER_FILE.write_text(json.dumps(data, indent=2))
     CUSTOMER_FILE.chmod(0o600)
-    print(json.dumps({"updated": field, "saved_to": str(CUSTOMER_FILE)}, indent=2))
-    return 0
+    ok(updated=field, saved_to=str(CUSTOMER_FILE))
 
 
-def main() -> int:
+@guard
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("show")
@@ -95,11 +94,10 @@ def main() -> int:
     p_set.add_argument("--value", required=True)
     args = ap.parse_args()
     if args.cmd == "show":
-        return cmd_show()
-    if args.cmd == "set":
-        return cmd_set(args.field, args.value)
-    return 2
+        cmd_show()
+    elif args.cmd == "set":
+        cmd_set(args.field, args.value)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
