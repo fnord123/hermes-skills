@@ -103,6 +103,19 @@ def _is_library(path):
 
 CODE_SPAN = re.compile(r"`([^`]+)`")
 SCRIPT_TOKEN = re.compile(r"([\w.${}~/~-]+\.(?:py|sh))\b")
+# A line in SKILL.md code that CALLS a tool (tools-table exemption, 2026-08-29): a
+# known shell command followed by MORE than just the word. The bare-word exclusion is
+# load-bearing — an inline span that merely names a tool (agentmail-lite's prohibition
+# sentence carries `curl` in code) is a mention, not a call, and must not make a
+# table-required skill of it. pet-care-tracker's `curl -fsS -H ... | jq ...` recipes
+# DO match — which is right: its real defect is handing the model raw curl + bearer
+# token with no table, so it keeps firing.
+TOOL_TABLE_EXEMPT_CMDS = frozenset((
+    "python3", "python", "bash", "sh", "curl", "jq", "uv", "uvx", "pip",
+    "pip3", "node", "npx", "npm", "git", "docker", "ffmpeg", "sqlite3",
+    "rg", "grep", "sed", "awk", "tar", "ssh", "scp",
+))
+CMD_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\b(.*)")
 # A line delegating to a tracked .py: some python interpreter (literal, or the
 # variable-interpreter form a wrapper uses: `exec "$PY" …/x.py`) + a path whose last
 # component ends in .py, as an argument to THAT line. `python3 <<'PYEOF'` heredocs and
@@ -217,6 +230,35 @@ def derive_entrypoints(d, skill_name, text, inv=None):
             if t in inv and t.endswith(".py"):
                 hop.add(t)
     return direct | hop
+
+
+def tool_table_exempt(text, entrypoints, inv):
+    """True when a missing tools table is EXCUSED: the skill has no scripts and
+    SKILL.md code makes no tool calls (no script references, no command lines).
+
+    The table exists to document the tools a skill invokes. A pure-reasoning skill
+    (the investment analysts: web_search/web_extract in prose, no scripts, no
+    commands) has nothing to tabulate, and an unconditional mandate fires on the
+    absence of a table that cannot exist. A skill that DOES call tools in code
+    keeps the mandate — pet-care-tracker's curl/jq recipes match and it stays
+    flagged (its real defect is handing the model raw curl + bearer token with no
+    table at all).
+    """
+    if inv:
+        return False
+    if entrypoints:
+        return False
+    for frag in _code_text(text):
+        for ln in frag.splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            m = CMD_LINE.match(s)
+            if m and m.group(1).lower() in TOOL_TABLE_EXEMPT_CMDS and m.group(2).strip():
+                return False
+            if SCRIPT_TOKEN.search(s):
+                return False
+    return True
 
 
 STDLIB = {
@@ -379,6 +421,14 @@ def lint_skill(name, baseline=None):
     # (bound before the if/else so the toolset + trigger-baseline checks below see them either way)
     hermes = {}
     triggers = []
+    # What the agent can actually invoke (derived from SKILL.md code) vs what it cannot.
+    # Computed here (not in the scripts section) because the body tools-table exemption
+    # needs it; the scripts section reuses these instead of recomputing.
+    sdir = os.path.join(d, "scripts")
+    inv = _skill_inventory(d, name)
+    if inv is None:
+        inv = _disk_fallback(sdir)
+    entrypoints = derive_entrypoints(d, name, text, inv)
     # ── frontmatter ────────────────────────────────────────────────────────
     # Broken YAML is ONE finding, not a cascade. Before this, a single malformed line
     # made every field unreadable and produced name + prefer + triggers + version +
@@ -428,7 +478,12 @@ def lint_skill(name, baseline=None):
         if not re.search(r"^#+\s*" + h + r"\s*$", body, re.I | re.M):
             add(sev, "body/section-flow", "missing '## %s' section" % h)
     if not re.search(r"^\|.*\bPurpose\b", body, re.I | re.M):
-        add("major", "body/tools-table", "no tools table with a Purpose column")
+        # A skill that invokes no tools — no scripts, no command lines in its code
+        # (tool_table_exempt) — has nothing to tabulate; the mandate is for skills
+        # that DO call things. The investment analysts are the exemption class;
+        # pet-care-tracker keeps firing (its curl recipes are tool calls in code).
+        if not tool_table_exempt(text, entrypoints, inv):
+            add("major", "body/tools-table", "no tools table with a Purpose column")
     else:
         for i, l in enumerate(lines, 1):
             m = re.match(r"^\|[^|]+\|\s*([A-Za-z]+)\b", l)
@@ -484,7 +539,8 @@ def lint_skill(name, baseline=None):
             % len(lines))
 
     # ── scripts ────────────────────────────────────────────────────────────
-    sdir = os.path.join(d, "scripts")
+    # (sdir / entrypoints / inv are computed up top with the frontmatter block,
+    # before the body tools-table exemption; reused here.)
     scripts = []
     if os.path.isdir(sdir):
         for base, _, files in os.walk(sdir):
@@ -492,12 +548,7 @@ def lint_skill(name, baseline=None):
                 continue
             scripts += [os.path.join(base, f) for f in files if f.endswith(".py")]
 
-    # What the agent can actually invoke (derived from SKILL.md code) vs what it cannot.
     # Drives the contract gate below and the undocumented-shebang warning.
-    entrypoints = derive_entrypoints(d, name, text)
-    inv = _skill_inventory(d, name)
-    if inv is None:
-        inv = _disk_fallback(sdir)
     # 3a (entry-point declaration spec, approved 2026-08-28): a shebang says "run me",
     # but if SKILL.md code never references the file, the agent has no reason to — the
     # executable bit is a promise the docs don't back. Weak signal by design: minor,

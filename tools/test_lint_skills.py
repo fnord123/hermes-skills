@@ -261,6 +261,32 @@ case("B8 no tools table", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
                                   "## Tools\n\nRun the tool directly.\n\n")),
      {"body/tools-table"})
 
+# T. tools-table exemption (scope change, 2026-08-29): a skill that invokes NO tools —
+# no scripts, no script references, no command lines in its SKILL.md code — has nothing
+# to tabulate; the mandate fires only for skills that DO call things. Both directions
+# are pinned per house rule. B8 above is the sharp edge the exemption must not swallow:
+# a documented script IS a tool the table exists to document.
+case("T1 no scripts, no tool calls in code — no table required",
+     lambda: make_skill(LAB, "x", script=None,
+         skillmd=BASE_SKILLMD
+         .replace("## Tools\n\n| Tool | Purpose |\n|------|---------|\n| `tool.py` | Runs the thing and reports the result. |\n\n",
+                  "## Tools\n\nNo scripts: reason over `web_search` and `web_extract` results, save to `~/.hermes/reports/`.\n\n")),
+     set(), must_not={"body/tools-table"})
+
+case("T2 a command line in code IS a tool call — table required",
+     lambda: make_skill(LAB, "x", script=None,
+         skillmd=BASE_SKILLMD
+         .replace("## Tools\n\n| Tool | Purpose |\n|------|---------|\n| `tool.py` | Runs the thing and reports the result. |\n\n",
+                  "## Tools\n\n```\ncurl -fsS -H \"Authorization: Bearer $TOKEN\" \"$URL\" | jq .state\n```\n\n")),
+     {"body/tools-table"})
+
+case("T3 an inline span that merely NAMES a tool is not a call",
+     lambda: make_skill(LAB, "x", script=None,
+         skillmd=BASE_SKILLMD
+         .replace("## Tools\n\n| Tool | Purpose |\n|------|---------|\n| `tool.py` | Runs the thing and reports the result. |\n\n",
+                  "## Tools\n\nDo not substitute `curl`, `fetch`, or any other HTTP client — use the MCP tools.\n\n")),
+     set(), must_not={"body/tools-table"})
+
 case("B9 Purpose leads with article", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd=BASE_SKILLMD.replace("| Runs the thing and reports the result. |",
                                   "| The thing, run and reported. |")),

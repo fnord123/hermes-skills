@@ -100,7 +100,11 @@ the domain (below).
 
 `When to use` → `When NOT to use` → a **tools table** (one row per verb) →
 turning the user's words into calls → output shape → common flows (worked
-examples) → error handling → empty results. Match `calendar`'s ordering.
+examples) → error handling → empty results. Match `calendar`'s ordering. The
+table is for the tools a skill invokes: a pure-reasoning skill with no scripts
+and no commands in its code (the investment analysts) has nothing to
+tabulate, and the linter's `body/tools-table` check exempts it — a skill that
+calls tools in code (`curl`, a script, ...) must carry the table.
 
 ## SKILL.md is model context, not documentation
 

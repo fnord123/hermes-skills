@@ -1,8 +1,8 @@
 # Outstanding conventions work
 
-Snapshot: **67 findings — 0 critical, 13 major, 54 minor** across 16 skills
-(post Phase 4 contract promotions + Phase 2 script-contract fixes, 2026-08-29;
-entry-point Phase 1, 2026-08-28). CI is green; it gates on criticals only —
+Snapshot: **63 findings — 0 critical, 9 major, 54 minor** across 16 skills
+(post tools-table scope change + Phase 4 contract promotions + Phase 2
+script-contract fixes, 2026-08-29; entry-point Phase 1, 2026-08-28). CI is green; it gates on criticals only —
 `layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets`,
 `routing/triggers-baseline`, the three script contract rules
 (`scripts/json-contract`, `scripts/top-level-guard`, `scripts/exit-code`),
@@ -133,13 +133,16 @@ Backend vocabulary in model context. The model reasons about the words in front 
 
 ---
 
-## 5. Structure — 15 findings
+## 5. Structure — 11 findings
 
-- [ ] `body/tools-table` (5) — the four investment skills and `pet-care-tracker` have no tools
-      table because they invoke no scripts. Either exempt script-less skills in the linter or
-      give `pet-care-tracker` the `scripts/pet_care.py` it should have had (it currently hands
-      the model raw `curl`, `jq` and a bearer token, which defeats the domain-abstraction rule
-      wholesale).
+- [ ] `body/tools-table` (1) — scope changed 2026-08-29 (`tool_table_exempt`):
+      the mandate now fires only for skills that invoke tools — scripts present,
+      or tool calls in SKILL.md code. The four investment analysts (no scripts,
+      no commands) are exempt by construction — the premise-false class is gone,
+      not allow-listed. `pet-care-tracker` KEEPS firing: its `curl`/`jq` recipes
+      are tool calls in code, and the real fix is still the missing
+      `scripts/pet_care.py` (it currently hands the model raw `curl`, `jq` and a
+      bearer token, which defeats the domain-abstraction rule wholesale).
 - [x] `frontmatter/requires-toolsets` (2) — closed 2026-08-28: `pallo-logistics` declared
       `requires_toolsets: [terminal]`; `agentmail-lite` was a false positive (the scan matched
       `curl` inside the sentence that *forbids* it) — fixed in the linter with a clause-scoped
