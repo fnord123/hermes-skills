@@ -180,9 +180,13 @@ python3 tools/lint_skills.py --severity critical
 `critical` gates the build. It means a broken install (undeclared third-party
 imports, a script that does not parse), broken routing (no PREFER clause, no
 trigger list, or a trigger dropped from the description against the committed
-baseline), or a silent capability gap (a skill that uses a toolset without
+baseline), a silent capability gap (a skill that uses a toolset without
 declaring it, a destructive subcommand with no `--confirm` guard, a directory
-outside the four Hermes ones, a "NEVER read" section, or broken frontmatter).
+outside the four Hermes ones, a "NEVER read" section, or broken frontmatter),
+or a broken script contract (a documented entry point whose output carries no
+`"ok"` field, whose `main` has no top-level exception guard, or which can
+never exit non-zero on failure — all three block, because the model then
+cannot tell success from failure by a stable rule).
 CI runs this on every push and fails the build on any critical finding.
 
 `major` is the conformance layer: domain vocabulary in model context, missing

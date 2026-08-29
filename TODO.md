@@ -1,12 +1,14 @@
 # Outstanding conventions work
 
 Snapshot: **67 findings — 0 critical, 13 major, 54 minor** across 16 skills
-(post Phase 2 script-contract fixes, 2026-08-29; entry-point Phase 1, 2026-08-28).
-CI is green; it gates on criticals only —
+(post Phase 4 contract promotions + Phase 2 script-contract fixes, 2026-08-29;
+entry-point Phase 1, 2026-08-28). CI is green; it gates on criticals only —
 `layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets`,
-`routing/triggers-baseline` (and the seven pre-existing criticals) block a merge,
+`routing/triggers-baseline`, the three script contract rules
+(`scripts/json-contract`, `scripts/top-level-guard`, `scripts/exit-code`),
+and the seven pre-existing criticals block a merge;
 the remaining major/minor are conformance work and non-blocking. The three script
-contract rules now scope to **derived entry points** (SKILL.md code references),
+contract rules scope to **derived entry points** (SKILL.md code references),
 which dropped 28 premise-false findings (probes, service files, imported helpers)
 and added 14 `scripts/undocumented-shebang` warnings — see §2.
 
@@ -62,10 +64,15 @@ Behavioral note: informational outcomes the agent reports to the user
 `book_failed`, bad input) are `ok: false` exit 1 — matching pre-conversion
 exit-code semantics.
 
-Both contract rules are now **promotion-safe** — Phase 4 (promote
-`json-contract` + `top-level-guard` to critical) is David's reserved call, no
-script work remains before it. `scripts/exit-code` has been promotion-safe since
-Phase 1 (0 findings).
+Both contract rules reached **0 findings** at Phase 2 and were **promoted to
+critical** with `scripts/exit-code` on 2026-08-29 (Phase 4 — David's reserved
+call, executed on 2026-08-29): a documented entry point that loses its `ok`
+field, its exception guard, or its non-zero failure exit now blocks a merge.
+Teeth pinned by gate test G6 (severity + gate, both directions verified:
+pre-flip the violating lab exited 0 with three majors, post-flip it exits 1
+with three criticals); the repo run is byte-identical across the flip because
+all three rules sat at 0 findings. CONVENTIONS.md's critical definition
+carries the contract class now.
 
 ### New: undocumented shebangs — 14 findings (minor)
 

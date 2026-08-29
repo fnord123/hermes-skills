@@ -605,13 +605,13 @@ def lint_skill(name, baseline=None):
             if has_emit and has_guard:
                 continue
             if has_emit and not has_guard:
-                add("major", "scripts/top-level-guard",
+                add("critical", "scripts/top-level-guard",
                     "imports skill_json but main() is not decorated with @guard, so an "
                     "unexpected exception still escapes as a traceback with no JSON", rel)
                 continue
 
         if '"ok"' not in src and "'ok'" not in src:
-            add("major", "scripts/json-contract",
+            add("critical", "scripts/json-contract",
                 "prints no 'ok' field; the model cannot tell success from failure by a "
                 "stable rule", rel)
         # A literal `sys.exit(1)` is only ONE shape of "exits non-zero on failure". The
@@ -628,10 +628,10 @@ def lint_skill(name, baseline=None):
                 r"(?:sys\.)?exit\(\s*1\s*\)|SystemExit\(\s*1\s*\)"
                 r"|sys\.exit\(\s*(?:main\(\)|[A-Za-z_]\w*)\s*\)"
                 r"|raise\s+SystemExit\(\s*[A-Za-z_]\w*\s*\)", src):
-            add("major", "scripts/exit-code", "never exits non-zero on failure", rel)
+            add("critical", "scripts/exit-code", "never exits non-zero on failure", rel)
         # An unguarded main() can die with a traceback and NO json on stdout.
         if "def main(" in src and not re.search(r"except Exception", src):
-            add("major", "scripts/top-level-guard",
+            add("critical", "scripts/top-level-guard",
                 "no top-level exception guard: an unexpected error prints a traceback and "
                 "no JSON object at all", rel)
 

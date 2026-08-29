@@ -751,6 +751,31 @@ def gate_tests(lab):
     results.append(("G5 gained trigger (baseline ⊂ description) does not fire",
                     add_ok, detail))
 
+    # G6: the contract rules are CRITICAL (promoted 2026-08-29, Phase 4 of the
+    # entry-point plan). The per-skill cases (I1/I3/I7) only assert rule NAMES, so
+    # a silent demotion back to major would pass them — this pins the severity and
+    # the gate: a documented entry point that lacks the "ok" field, an exception
+    # guard, and a non-zero failure exit must report all three at critical and
+    # flip the exit code to 1. Verified both directions 2026-08-29: pre-flip the
+    # same lab exited 0 with three majors; post-flip it exits 1 with three criticals.
+    lab3 = fresh_lab()
+    make_skill(lab3, "bad", script='import json, sys\n'
+                                   'def main():\n'
+                                   '    print(json.dumps({"result": "x"}))\n'
+                                   '    sys.exit(0)\n'
+                                   'if __name__ == "__main__":\n'
+                                   '    main()\n')
+    f6, e6 = run_lint(lab3)
+    sev6 = {(f["rule"], f["severity"]) for f in f6} if f6 else set()
+    want6 = {("scripts/json-contract", "critical"),
+             ("scripts/top-level-guard", "critical"),
+             ("scripts/exit-code", "critical")}
+    ok6 = f6 is not None and want6 <= sev6
+    results.append(("G6 contract rules report at critical and gate",
+                    ok6, e6 or "got %s" % sorted(sev6) or "clean (the teeth are gone)"))
+
+    shutil.rmtree(lab3, ignore_errors=True)
+
     shutil.rmtree(lab2, ignore_errors=True)
     return results
 
