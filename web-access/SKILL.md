@@ -104,7 +104,7 @@ particular site**, so the session begins there. Raise `--max-steps` for longer f
 One JSON object.
 
 `search` returns `ok`, `query`, `count`, and `results` — each with `title`,
-`url`, `snippet`, `engine`.
+`url`, `snippet`.
 
 `fetch` returns `ok`, `url`, `outcome`, `chars`, `truncated`, and `text`.
 

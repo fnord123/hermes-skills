@@ -215,6 +215,9 @@ try:
     _r2 = _run_search()
     chk("an identical query+scope is served from cache, backend untouched",
         _ncalls["n"] == 1 and _r2["cached"] is True and _r2["results"][0]["url"] == "http://x/y")
+    chk("search results carry only the document pointer (no backend engine name)",
+        all(set(r) == {"title", "url", "snippet"} for r in _r1["results"] + _r2["results"]),
+        "(%r)" % (_r1["results"] + _r2["results"]))
     _run_search(scope="literature")
     chk("a different scope is a different cache entry", _ncalls["n"] == 2,
         "the key is query AND scope")

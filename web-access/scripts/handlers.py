@@ -189,7 +189,12 @@ def run_search(query, scope=DEFAULT_SCOPE, max_results=DEFAULT_MAX, timeout=30,
     cpath = _search_cache_path(query, scope)
     hit = _read_search_cache(cpath)
     if hit is not None:
-        results = (hit.get("results") or [])[:max_results]
+        # Re-project on the way out: an entry written before the black-box change
+        # still carries the backend's `engine` field, and the TTL is 7 days —
+        # stale entries must not widen the contract.
+        results = [{"title": (r.get("title") or ""), "url": r.get("url") or "",
+                    "snippet": (r.get("snippet") or "")}
+                   for r in (hit.get("results") or [])][:max_results]
         _emit_search_event(query, scope, "cache_hit", len(results),
                            int((time.time() - t0) * 1000))
         return {"ok": True, "query": query, "scope": scope,
@@ -205,10 +210,13 @@ def run_search(query, scope=DEFAULT_SCOPE, max_results=DEFAULT_MAX, timeout=30,
         return {"ok": False, "query": query,
                 "error": "search backend unreachable: %s: %s" % (type(exc).__name__, exc)}
 
+    # BLACK BOX: a result carries the document pointer (title, url, snippet) — and
+    # nothing that names the machinery that found it. The backend's `engine` field
+    # says which vendor answered (a keyed API, a scraper, a fallback); that is
+    # container bookkeeping for the audit log, not part of the contract.
     everything = [{"title": (r.get("title") or "").strip(),
                    "url": r.get("url") or "",
-                   "snippet": (r.get("content") or "").strip()[:400],
-                   "engine": r.get("engine") or ""}
+                   "snippet": (r.get("content") or "").strip()[:400]}
                   for r in (data.get("results") or [])]
     # Cache only a non-empty result set: an empty one is either a genuine miss (cheap to
     # re-ask) or a transient backend hiccup, and pinning either for 7 days is the wrong trade.
