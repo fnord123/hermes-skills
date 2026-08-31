@@ -77,8 +77,11 @@ def main() -> int:
     except gingr_lib.SessionExpired:
         print(json.dumps({
             "status": "session_expired",
-            "reason": "Saved Gingr session no longer authenticates. Re-run gingr-login.py.",
+            "reason": "Saved Gingr session no longer authenticates. Refresh via gingr-import-session.py (see skill: session-refresh instructions).",
         }, indent=2))
+        return 1
+    except gingr_lib.BookingsPageAnomaly as e:
+        print(json.dumps({"status": "error", "reason": str(e)}, indent=2))
         return 1
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"status": "error", "reason": f"{type(e).__name__}: {e}"}, indent=2))

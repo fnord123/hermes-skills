@@ -49,18 +49,45 @@ def new_logged_in_context(p, *, viewport_h: int = 1400):
     return browser, ctx
 
 
-def fetch_booking_cards(page, *, timeout_ms: int = 45000) -> list[str]:
+class BookingsPageAnomaly(Exception):
+    """Raised when the bookings page renders but has no recognisable
+    bookings header — the page is not the expected bookings list (layout
+    change or silent auth bounce), so an empty result cannot be trusted.
+    Callers must surface this instead of reporting count 0."""
+
+
+def fetch_booking_cards(page, *, timeout_ms: int = 45000,
+                        in_page_marker: str = "Bookings & Deposits") -> list[str]:
     """Navigate to the bookings list and return one text blob per booking card.
 
     Each blob looks like:
       "Boarding | Dog | (Pallo) | Laurel Acres Kennels - Hillsboro |
        Tue, Jun. 8th - Mon, Jun. 28th  | Confirmed"
-    Raises SessionExpired if the portal bounces us to the public login.
+    Raises SessionExpired if the portal bounces us to the public login —
+    the redirect is a SPA push that lands 1-2s AFTER domcontentloaded, so
+    we wait on the URL itself rather than sampling it once after a fixed
+    delay (a sample can land before the push and miss the redirect).
+    Raises BookingsPageAnomaly if the rendered page lacks the expected
+    in-page header.
     """
     page.goto(BOOKINGS_URL, wait_until="domcontentloaded", timeout=timeout_ms)
-    page.wait_for_timeout(5000)
+    try:
+        page.wait_for_url("**/public/login**", timeout=8000)
+    except Exception:
+        pass  # still on the secure page: session authenticated fine
     if "public/login" in page.url:
         raise SessionExpired("storage_state no longer authenticates")
+    # SPA content settles after the URL lands; give it a moment.
+    page.wait_for_timeout(3000)
+    if "public/login" in page.url:
+        raise SessionExpired("storage_state no longer authenticates (late redirect)")
+    if not page.evaluate(
+            "(m) => (document.body && document.body.innerText || '').includes(m)",
+            in_page_marker):
+        raise BookingsPageAnomaly(
+            "Bookings page loaded but the expected header was not found; "
+            "cannot verify the list is complete. Do NOT treat this as "
+            "'no reservations'.")
     cards = page.evaluate(r"""() => {
         const all = [...document.querySelectorAll('*')];
         const match = el => {

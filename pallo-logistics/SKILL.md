@@ -202,6 +202,15 @@ and relay it.
   authenticates. `gingr-login.py` will NOT fix this (headless login is blocked
   by the portal) and cookies from the user's browser will NOT fix it either
   (the portal authenticates with `localStorage["user.token"]`, not cookies).
+  Detection is reliable since 2026-08-30: the portal's auth bounce is a SPA
+  URL push that lands 1-2s AFTER `domcontentloaded`, so `fetch_booking_cards`
+  waits on the URL itself (`wait_for_url **/public/login**`) and re-checks
+  after a settle delay. Before that fix an expired session could sail through
+  the single 5s sample, render a half-loaded page, and return a bogus
+  `ok` / `count: 0` — NEVER trust a zero count without the portal actually
+  showing bookings; the `BookingsPageAnomaly` guard (missing "Bookings &
+  Deposits" header) now makes an unverifiable page report `error` instead of
+  `ok`.
   Send the user the **session-refresh instructions** below VERBATIM, wait for
   the JSON, save it to a file, run `gingr-import-session.py <file>`, then
   re-run the original call.
