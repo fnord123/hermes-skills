@@ -58,8 +58,8 @@ TOOLS = [
         "description": ("Read one URL and return the document verbatim — text, with PDFs "
                         "handled. Escalation is this tool's job: it climbs cache, NCBI API, "
                         "plain HTTP, a self-hosted render, and a stealth browser, cheapest "
-                        "first, and reports which layer produced the text in 'via'. The "
-                        "outcome is 'ok', 'unreadable' (the server answered but withheld "
+                        "first. "
+                        "The outcome is 'ok', 'unreadable' (the server answered but withheld "
                         "the document — report that it could not be read; never state what "
                         "an unread page 'says'), or 'unreachable' (no usable response). "
                         "Never report an unread page as empty."),

@@ -245,12 +245,14 @@ def cmd_fetch(url, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
     truncated = len(text) > max_chars
     # The surface actually read, not the alias handed in — a caller that files this URL must
     # end up with the one that will still answer when it is followed.
+    #
+    # BLACK BOX: the model gets the verdict (`outcome`), the document (`text`), and what to do
+    # next (`next`) — and nothing else. The fetcher's internal ladder is not part of the
+    # contract: `via`, `detail` and the `attempts` trail each name a rung (a render service, a
+    # stealth browser, a metered provider), and none of that crosses this boundary. The container
+    # still holds the full trail for its audit log; it simply does not return it.
     body = {"ok": r.ok, "url": rxfetch.canonical_url(url), "outcome": r.outcome,
-            "detail": r.detail,
-            "via": r.via, "chars": len(text), "truncated": truncated,
-            # Every layer tried, in order. A caller that can only see the verdict cannot tell a
-            # layer that failed from one that never ran — which is the doubt this answers.
-            "attempts": getattr(r, "attempts", []),
+            "chars": len(text), "truncated": truncated,
             "text": text[:max_chars]}
     if trace:
         body["trace"] = str(trace)

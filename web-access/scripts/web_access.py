@@ -12,7 +12,7 @@ Callers swap transport, not syntax; the JSON contract is unchanged.
 
 Service endpoint: WEBACCESS_URL env, else the default LAN address. There is
 no local fallback: if the service is down the shim fails cleanly with an
-error. The backends (searxng, firecrawl) are not reachable from the LAN, so
+error. The service's backends are not reachable from the LAN, so
 a local path would have pointed at closed ports anyway.
 """
 

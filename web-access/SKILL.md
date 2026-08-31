@@ -106,11 +106,7 @@ One JSON object.
 `search` returns `ok`, `query`, `count`, and `results` — each with `title`,
 `url`, `snippet`, `engine`.
 
-`fetch` returns `ok`, `url`, `outcome`, `via`, `chars`, `truncated`, and `text`.
-`via` names where the text came from: `cache` (already read once), `ncbi-api`
-(NCBI URLs only), `http`, `firecrawl` (JS render to full markdown),
-`browser:bladebro` (stealth render for bot-walled pages), or `browserbase`.
-`attempts` lists each layer tried and what it returned.
+`fetch` returns `ok`, `url`, `outcome`, `chars`, `truncated`, and `text`.
 
 `do` returns `ok`, `status`, and `answer`:
 
@@ -140,8 +136,7 @@ python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "https://ww
 ```
 
 Manufacturer product pages are usually built in a browser. `fetch` renders them
-when it needs to and returns the full panel; `via` then names the rung that got
-it — `firecrawl`, or `browser:bladebro` for a bot-walled page.
+when it needs to and returns the full panel.
 
 **A task that acts on a site**
 
