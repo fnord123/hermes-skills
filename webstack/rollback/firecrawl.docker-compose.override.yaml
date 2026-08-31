@@ -1,0 +1,22 @@
+# Local override: survive host reboots.
+#
+# The upstream firecrawl compose file sets no restart policy, so every service
+# defaults to `no`. The stack stopped 2026-08-22 17:21 PDT, the host rebooted
+# at 23:39, and nothing came back -- which took the web-access skill's tier-4
+# render rung offline until it was noticed the next morning.
+#
+# foundationdb-init is deliberately left alone: it is a one-shot job and
+# upstream pins it to `restart: "no"` on purpose.
+services:
+  api:
+    restart: unless-stopped
+  playwright-service:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
+  rabbitmq:
+    restart: unless-stopped
+  nuq-postgres:
+    restart: unless-stopped
+  foundationdb:
+    restart: unless-stopped

@@ -1,0 +1,29 @@
+# bladebro — agentic stealth browser driver, exposed to Hermes as a Streamable-HTTP MCP server.
+# There is no upstream image; this builds Chromium + Xvfb + bladebro + a stdio->HTTP MCP bridge.
+# Hermes (192.168.1.228) reaches it at http://192.168.1.226:8790/mcp (see mcp_servers.bladebro).
+services:
+  bladebro:
+    build: .
+    image: bladebro-mcp:local
+    container_name: bladebro
+    restart: unless-stopped
+    ports:
+      - "8790:8000"          # LAN-exposed MCP endpoint (matches the unifi-mcp pattern on .226)
+    volumes:
+      - bladebro-profile:/home/blade/profile   # persistent browser profile (learned selectors, storage)
+    environment:
+      - TZ=America/Los_Angeles
+      - BLADE_CONSENT=reject
+    shm_size: "1g"           # Chromium crashes on the 64MB default /dev/shm
+    # Chromium's userns sandbox is kept ON (non-root user + Docker default seccomp).
+    # If Chrome fails to launch in this environment, the minimal escalation is:
+    #   cap_add: [SYS_ADMIN]           # lets the namespace sandbox init
+    # (only add if `docker compose exec bladebro bladebro -doc` reports a Chrome launch failure)
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+volumes:
+  bladebro-profile:

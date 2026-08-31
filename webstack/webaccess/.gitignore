@@ -1,0 +1,7 @@
+# webaccess build context — keep only deploy artifacts out of git
+__pycache__/
+*.pyc
+.env
+scripts/config.env
+fara/
+docker-client

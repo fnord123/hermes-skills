@@ -1,0 +1,49 @@
+# SearXNG settings for Hermes agent use.
+# Two settings are REQUIRED for the Hermes searxng provider, which calls
+# GET /search?format=json :
+#   1. search.formats must include `json` (default is html-only -> 403)
+#   2. server.limiter must be false (the bot limiter blocks non-browser API calls)
+use_default_settings: true
+
+server:
+  secret_key: "REDACTED_SEARXNG_SECRET_KEY"
+  limiter: false            # REQUIRED: limiter blocks Hermes' API calls
+  image_proxy: false
+  method: "GET"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json                  # REQUIRED for Hermes
+
+ui:
+  static_use_hash: true
+
+# Keep the engine set lean and reliable for agent use. SearXNG's defaults
+# include many engines that rate-limit or break; these are the dependable ones.
+engines:
+  - name: google
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: github
+    disabled: false
+  - name: stackoverflow
+    disabled: false
+# --- BEGIN managed api engines (apply-api-engines.sh) ---
+  - name: brave api
+    engine: braveapi
+    shortcut: brapi
+    categories: [general]
+    api_key: "PUT_YOUR_BRAVE_API_KEY_HERE"
+    timeout: 6.0
+    disabled: false
+# --- END managed api engines ---

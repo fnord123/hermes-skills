@@ -1,0 +1,13 @@
+# webstack — single compose for the web-access egress stack.
+name: webstack
+include:
+  - ./webaccess/docker-compose.yml
+  - ./searxng/docker-compose.yml
+services:
+  webaccess:
+    depends_on:
+      searxng:
+        condition: service_started
+volumes:
+  webaccess-state:
+    name: webaccess_webaccess-state

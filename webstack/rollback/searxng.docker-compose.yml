@@ -1,0 +1,24 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./config:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://192.168.1.226:8888/
+      - UWSGI_WORKERS=4
+      - UWSGI_THREADS=4
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"

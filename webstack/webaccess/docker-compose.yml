@@ -1,0 +1,59 @@
+# webaccess — the single service on .226: one handler core, two facades.
+#
+#   docker compose up -d --build      (build context: the web-access repo)
+#
+# State: one named volume (cache, gates, learned policy, logs, search cache).
+# Secrets: env_file .env in this directory — NEVER committed (see .env.example).
+# Network: ports published on the LAN interface only (the host's docker binds
+# them where the LAN reaches, and nothing else binds these ports).
+
+services:
+  webaccess:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: webaccess:local
+    environment:
+      # Internal webnet tier URLs (2026-08-24): searxng:8080 and api:3002 are
+      # container DNS names on the shared bridge network.
+      - SEARXNG_URL=http://searxng:8080
+      - FIRECRAWL_API_URL=http://api:3002
+    container_name: webaccess
+    restart: unless-stopped
+    networks:
+      - webnet
+    env_file:
+      - .env
+    ports:
+      - "192.168.1.226:8910:8910"   # HTTP API (rx-review binding, CLI shim, debug)
+      - "192.168.1.226:8911:8911"   # MCP facade (Hermes profiles)
+      # Loopback binds: on .226, /etc/hosts maps docker.putzolu.com to
+      # 127.0.0.1, so host-local callers need the service on loopback to
+      # reach it by the same name. Flagged to David as the one widening.
+      - "127.0.0.1:8910:8910"
+      - "127.0.0.1:8911:8911"
+    volumes:
+      - webaccess-state:/var/lib/webaccess
+      - /var/run/docker.sock:/var/run/docker.sock   # bladebro one-shot containers, local daemon
+    # Fara needs a display for headful; xvfb-run starts its own Xvfb, so the
+    # container itself needs no DISPLAY. Chromium as root runs --no-sandbox
+    # (patched into the Fara build).
+    # Health: GET /health on the HTTP API.
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8910/health', timeout=10)"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+
+# Project name pinned so the state volume has a stable name (webaccess_webaccess-state)
+# regardless of which directory the compose file is run from.
+name: webaccess
+
+# The volume's EXTERNAL name is pinned to webaccess_webaccess-state (the seeded
+# volume: cache, cookies, learned policy, logs). Works both standalone and when
+# this file is included in the webstack project, so state never re-keys.
+volumes:
+  webaccess-state:
+    name: webaccess_webaccess-state

@@ -1,0 +1,4 @@
+# webstack top-level env (firecrawl vendor vars) — NEVER commit
+.env
+__pycache__/
+*.pyc

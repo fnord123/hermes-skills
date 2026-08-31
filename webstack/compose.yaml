@@ -1,0 +1,42 @@
+# webstack — single compose project for the web-access egress stack on .226.
+#
+#   cd ~/webstack && docker compose up -d      (brings up the whole stack)
+#
+# Members (each kept in its own directory, included explicitly — compose v2.31
+# require file paths, not directories, in `include`):
+#   webaccess/    the fetch service (HTTP :8910 + MCP :8911) — the consumer
+#   searxng/      search tier (webnet-only, no published ports)
+#   firecrawl/    render tier (webnet-only, no published ports; vendor stack:
+#                 api, playwright, redis, rabbitmq, nuq-postgres, foundationdb)
+#   bladebro/     NOT a service — image source for webaccess's tier-5 one-shot
+#                 containers (rebuild: docker build -t bladebro-mcp:local bladebro/)
+#
+# Launch ordering (honest version, compose v2.31):
+#   - The top file cannot re-declare or extend a service that an included file
+#     defines, so there is no cross-file depends_on edge. Ordering is enforced
+#     by: firecrawl's internal edges (api starts after rabbitmq is healthy),
+#     `restart: unless-stopped` everywhere, and webaccess's healthcheck, which
+#     is the real readiness gate — its fetch tiers (searxng, firecrawl) are
+#     fail-safe and degrade until their host ports answer.
+#   - Out-of-project by design: litellm :4000 (shared with the GPU stack),
+#     loki :3100 (shared telemetry) — webaccess degrades gracefully without
+#     either; they are not ordering-critical.
+#
+# State: all named volumes are pinned to their existing external names
+# (webaccess_webaccess-state, firecrawl_fdb-*) in the member files, so joining
+# this project never re-keys state.
+name: webstack
+include:
+  - ./webaccess/docker-compose.yml
+  - ./searxng/docker-compose.yml
+  - ./firecrawl/docker-compose.yaml
+
+# One shared user-defined bridge network for the whole stack. On a
+# user-defined bridge, Docker gives each container DNS entries for both the
+# service name and the container name, so webaccess reaches the fetch tiers
+# as searxng:8080 / api:3002 from inside the stack. Once the internal path is
+# proven, the tiers keep no published ports; the only LAN-visible ports are
+# webaccess :8910/:8911 (the entry point).
+networks:
+  webnet:
+    driver: bridge

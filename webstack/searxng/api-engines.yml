@@ -1,0 +1,45 @@
+# SearXNG engines that need an API key.
+#
+# EDIT THIS FILE: replace the PUT_YOUR_..._HERE placeholder with your real key, then run:
+#     bash ~/searxng/apply-api-engines.sh
+#
+# Any engine whose placeholder is still unreplaced is skipped, so it is fine to fill in
+# only the keys you have and re-run later when you get another.
+#
+# This file is the source of truth. The apply script copies these blocks into settings.yml
+# between managed markers and replaces that section on every run — edit here, never there.
+#
+# ── Why there is no Google engine here ────────────────────────────────────────────────
+# There was one, and it cannot work. Google's own documentation, at
+# https://developers.google.com/custom-search/v1/overview , states:
+#
+#   "The Custom Search JSON API is closed to new customers. Vertex AI Search is a
+#    favorable alternative for searching up to 50 domains. [...] Existing Custom Search
+#    JSON API customers have until January 1, 2027 to transition to an alternative."
+#
+# A new Cloud project can still ENABLE the API in the console, and it will appear in the
+# key's API-restriction list, and requests will be attributed to the project — and every
+# one returns 403 "This project does not have the access to Custom Search JSON API".
+# The entitlement is separate from the enablement, and new projects do not get it. A
+# Programmable Search Engine and its cx remain fine; it is the JSON API that is closed.
+# Do not spend another evening on it.
+
+
+# ── Brave Search API ─────────────────────────────────────────────────────────────────
+#
+# Free tier: 2,000 queries/month, 1 query/second. Sign up at https://api.search.brave.com
+# Card details are requested even for the free plan; the free tier itself is not charged.
+#
+# Sits in `general`, so it serves `--scope products` and `--scope web`. Literature
+# questions go to PubMed, OpenAlex, Crossref and Semantic Scholar and never touch this.
+#
+# Unlike the 64 keyless engines already enabled here, this is a real API: it answers
+# consistently instead of being rate-limited or CAPTCHA-walled under load, which is the
+# whole reason for adding a keyed engine at all.
+  - name: brave api
+    engine: braveapi
+    shortcut: brapi
+    categories: [general]
+    api_key: "PUT_YOUR_BRAVE_API_KEY_HERE"
+    timeout: 6.0
+    disabled: false
