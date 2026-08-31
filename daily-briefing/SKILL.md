@@ -47,7 +47,7 @@ the pipeline reads.
 
 ## Files this skill manages
 
-| Path | Purpose | Schema |
+| Path | Purpose | Shape |
 |---|---|---|
 | `~/daily-briefing/news-source-prefs.json` | Trusted (priority-ordered) and untrusted (blocklist) news sources by domain. | `{ "trusted": ["domain", ...], "untrusted": ["domain", ...] }` |
 | `~/daily-briefing/news-topics.json` | Keywords searched for news each morning. | `{ "topics": ["keyword", ...] }` |

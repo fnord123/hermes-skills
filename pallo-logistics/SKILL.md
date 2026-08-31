@@ -16,7 +16,7 @@ metadata:
     tags:
     - Pets
     - Boarding
-    - Gingr
+    - Kennel
     - Booking
     - Calendar
     - Travel
@@ -42,7 +42,7 @@ small JSON the agent relays to the user. Scope: **Pallo only, Laurel Acres
   Gina's residency (`gina-where.py`), not by the car.
 - General calendar or trip questions with no kennel angle — use the `calendar`
   skill.
-- Reaching Laurel Acres or Gingr any other way. The scripts below are the only
+- Reaching the kennel or its booking portal any other way. The scripts below are the only
   path to that portal; a browser tool, a web search, or a URL will not reach it.
 
 ## The tool surface
@@ -65,7 +65,7 @@ scripts refuse and change nothing.
 | `pallo-trip-prep.py --trip-name <name> [--commit --confirm-drop-date <ISO> --confirm-pickup-date <ISO>]` | Preps a whole trip in one call: readiness → plan → (with `--commit`) book + notify Gina. No `--commit` = read-only preview. | **Yes (with `--commit`)** |
 | `gina-notify.py --topic <t> --body <b> [--handoff-date <ISO>] [--trip-name <n>] --dry-run` *then* the same call with `--confirm` | Posts a Model-X coordination message to the shared Discord channel (mentions Gina + the user). **Requires `--confirm` to post for real.** Normally fired automatically by a booking; direct call is an escape hatch. | **Yes — sends a message** |
 | `gina-pending.py [--resolve <id>]` | Lists outstanding Gina-coordination asks; `--resolve` clears one. | Read / small write |
-| `pallo-calendar-invite.py --plan '<plan_json>' [--events pickup,dropoff] [--to <emails>] --dry-run` *then* the same call with `--confirm` | Emails Google-Calendar invites (iMIP `.ics`) for the drop-off and/or pickup to you + Gina via AgentMail — they land in Google Calendar with RSVP. **Requires `--confirm` to send for real;** `--dry-run` prints the `.ics`. Fired automatically after a booking; call directly to (re)send for an existing stay. | **Yes — sends email invites** |
+| `pallo-calendar-invite.py --plan '<plan_json>' [--events pickup,dropoff] [--to <emails>] --dry-run` *then* the same call with `--confirm` | Emails Google-Calendar invites (iMIP `.ics`) for the drop-off and/or pickup to you + Gina via the agent's email — they land in Google Calendar with RSVP. **Requires `--confirm` to send for real;** `--dry-run` prints the `.ics`. Fired automatically after a booking; call directly to (re)send for an existing stay. | **Yes — sends email invites** |
 | `gingr-login.py [--show-head]` | Captures / refreshes the saved portal session. **Known broken: headless login does not complete on this portal — expect `login_failed`. Use `gingr-import-session.py` instead.** | No (writes session file) |
 | `gingr-import-session.py <localstorage.json> [--no-verify]` | Rebuilds the saved session from a localStorage dump exported from the user's logged-in browser tab. **This is THE way to fix `session_expired`.** The portal authenticates API calls with an `AUTHORIZATION` header from `localStorage["user.token"]` — cookies do NOT authenticate it, so never ask the user for cookies. Ask them to open the logged-in portal tab, press F12 → Console, run `copy(JSON.stringify(Object.fromEntries(Object.entries(localStorage))))`, and paste the result; save it to a file and pass it to this script. It verifies the session afterwards. | No (writes session file) |
 
@@ -106,7 +106,7 @@ Every booking gets, per §5: drop-off day = 1 Play Yard; each full day = 2 Play
 Yard + 1 Nature Walk; pickup day = 1 Nature Walk. `pallo-book-trip.py` applies
 this automatically via three frequency rules — the second daily Play Yard is
 just the Play Yard activity added again at a DIFFERENT time (07:30 AM + 03:30 PM),
-which is how Gingr allows two same-day sessions. `--simple-slate` drops the
+which is how the kennel allows two same-day sessions. `--simple-slate` drops the
 second daily Play Yard (1 Play Yard/day; faster, reasonable for long stays).
 
 The result reports:
@@ -133,7 +133,7 @@ after you've acted on her answer, call `gina-pending.py --resolve <id>`.
 ## Calendar invites (drop-off + pickup)
 
 After a real booking, `pallo-book-trip.py` automatically emails Google-Calendar
-invites for BOTH handoffs (drop-off and pickup) to you and Gina via AgentMail —
+invites for BOTH handoffs (drop-off and pickup) to you and Gina via the agent's email —
 they arrive as normal calendar invites and land on both Google Calendars with
 RSVP + reminders (1 day and 2 hours before). The booking result includes a
 `calendar_invites` field (`ok` / `partial` / an error status); a send failure
@@ -144,7 +144,7 @@ To (re)send for an EXISTING stay, or send just one handoff, call
 user asks for it). Re-sending uses a
 stable per-stay UID, so it UPDATES the same calendar event rather than
 duplicating it. Attendee emails come from `USER_EMAIL` / `GINA_EMAIL` in
-secrets.env (override with `--to`); the AgentMail key/inbox are reused from
+secrets.env (override with `--to`); the agent-email key/inbox are reused from
 Hermes' config. If a stay's time changes, bump `--sequence` so the update
 supersedes the prior invite.
 

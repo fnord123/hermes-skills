@@ -15,7 +15,7 @@ version: 0.1.0
 license: MIT
 metadata:
   hermes:
-    tags: [Shopping, Filament, 3DPrinting]
+    tags: [Shopping, Filament, 3D Printing]
     requires_toolsets: [terminal]
 ---
 

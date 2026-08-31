@@ -15,9 +15,11 @@ as "must fire": this linter's own history is a catalogue of false positives — 
 rule firing on the house sys.exit(main()) pattern in 39 of the repo's scripts, CRLF line
 endings producing a wall of false criticals, a UTF-8 BOM voiding the whole frontmatter.
 
-GATE TESTS. Three whole-repo behaviours a per-skill case cannot express (the exit code is
-the gate, not the finding list): --severity must not bypass a critical, and one unreadable
-SKILL.md must not mask the rest of the repo.
+GATE TESTS. Whole-repo behaviours a per-skill case cannot express (the exit code is
+the gate, not the finding list): --severity must not bypass a critical, one unreadable
+SKILL.md must not mask the rest of the repo, the trigger baseline round-trips and
+stays quiet on gained triggers, and each promoted rule reports at CRITICAL and flips
+the exit code (G6 for the contract rules, G7 for the body/invocation promotions).
 
 HERMETIC. The suite copies the linter into a tempdir and builds fixtures next to it — the
 linter resolves its repo ROOT from its own file location, so a copied linter lints a
@@ -222,6 +224,19 @@ case("A9 lowercase tag", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd=BASE_SKILLMD.replace("tags: [Thing, Demo]", "tags: [thing, Demo]")),
      {"frontmatter/tags"})
 
+# A digit-leading tag (3D Printing) is Capitalized when its first LETTER is.
+# The old t[:1].isupper() check rejected "3D Printing" outright, which sent
+# the author toward "3d printing" — this pins both sides of the refinement.
+case("A9a digit-leading tag with capitalized letter is clean",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("tags: [Thing, Demo]", "tags: [3D Printing, Demo]")),
+     set(), must_not={"frontmatter/tags"})
+
+case("A9b digit-leading tag with lowercase letter is not",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("tags: [Thing, Demo]", "tags: [3d printing, Demo]")),
+     {"frontmatter/tags"})
+
 case("A10 no metadata at all", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      skillmd=BASE_SKILLMD.replace("metadata:\n  hermes:\n    tags: [Thing, Demo]", "")),
      {"frontmatter/tags"})
@@ -298,6 +313,17 @@ case("B10 Purpose 'Returns'", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
      {"body/explicit-verb"})
 
 case("B11 Purpose valid verb", lambda: make_skill(LAB, "x", script=BASE_SCRIPT),
+     set(), must_not={"body/explicit-verb"})
+
+# The check is for PURPOSE tables. The old scan looked at the second cell of ANY
+# table, so square-appointments' status tables (header "Status | What it means",
+# no Purpose column) fired six premise-false findings. This is the negative
+# control for that scope fix: a status table whose rows LEAD with articles must
+# stay silent, and the skill's genuine purpose table must still be checked.
+case("B11a status table (no Purpose column) stays silent",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("## Output",
+             "## Status\n\n| Status | What it means |\n|---|---|\n| booked | The booking landed. |\n| uncertain | The result was not verified. |\n\n## Output")),
      set(), must_not={"body/explicit-verb"})
 
 case("B12 rationale heading", lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
@@ -701,7 +727,8 @@ case("I10 stray backtick earlier does not hide a later declaration",
 
 # ── gate tests (whole-repo behaviours) ───────────────────────────────────────
 def gate_tests(lab):
-    """The exit code IS the gate. Three behaviours a per-skill case cannot express.
+    """The exit code IS the gate. Whole-repo behaviours a per-skill case cannot
+    express (G2–G5) plus severity pins for the promoted rules (G6, G7).
 
     Each builds its own throwaway lab (copied linter + a couple of skills) so the other
     cases' fixtures cannot leak in. Returns a list of (name, ok, detail).
@@ -801,6 +828,42 @@ def gate_tests(lab):
                     ok6, e6 or "got %s" % sorted(sev6) or "clean (the teeth are gone)"))
 
     shutil.rmtree(lab3, ignore_errors=True)
+
+    # G7: the four body/invocation rules promoted to critical on 2026-08-31
+    # (scripts/invocation, readability, body/error-sentence, body/section-flow).
+    # The per-skill cases (D13, B3/B4, B5/B6) only assert rule NAMES, so a silent
+    # demotion back to major would pass them — this pins the severity and the gate.
+    # Two skills, one violation class each: a corrupted SKILL.md exercises
+    # readability (the linter early-returns after it, so that skill yields ONLY
+    # that finding), and an intact-but-degraded one carries invocation +
+    # error-sentence + section-flow simultaneously.
+    lab4 = fresh_lab()
+    make_skill(lab4, "corrupt", script=CLEAN_SCRIPT)
+    with open(os.path.join(lab4, "corrupt", "SKILL.md"), "wb") as f:
+        f.write(b"---\nname: corrupt\n---\n\xff\xfe not utf-8\n")
+    make_skill(lab4, "degraded", script=CLEAN_SCRIPT,
+               skillmd=BASE_SKILLMD
+               .replace("Runs the thing and reports the result.",
+                        "Run ./scripts/tool.py to do the thing.")
+               .replace("Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.",
+                        "Handle errors carefully.")
+               .replace("## When to use\n\nWhen the user asks for the thing.\n\n", ""))
+    f7, e7 = run_lint(lab4)
+    sev7 = {(f["rule"], f["severity"]) for f in f7} if f7 else set()
+    want7 = {("readability", "critical"),
+             ("scripts/invocation", "critical"),
+             ("body/error-sentence", "critical"),
+             ("body/section-flow", "critical")}
+    ok7 = f7 is not None and want7 <= sev7
+    # the exit code must flip too: every finding in the lab is critical, so it
+    # must gate even when linted --severity major (G2's invariant, per-rule here)
+    r7 = subprocess.run([sys.executable, os.path.join(lab4, "tools", "lint_skills.py"),
+                         "--severity", "major"], capture_output=True, text=True, timeout=60)
+    ok7 = ok7 and r7.returncode == 1
+    results.append(("G7 promoted body/invocation rules report at critical and gate",
+                    ok7, e7 or "got %s" % sorted(sev7) or "clean (the teeth are gone)"))
+
+    shutil.rmtree(lab4, ignore_errors=True)
 
     shutil.rmtree(lab2, ignore_errors=True)
     return results

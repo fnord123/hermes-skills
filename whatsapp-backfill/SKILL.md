@@ -4,9 +4,9 @@ description: >
   Import a WhatsApp chat export into the agent's long-term memory so you can ask
   about those conversations later ("what did Dan say about the regatta?"). Takes
   the WhatsApp "Export chat" .zip (or the _chat.txt inside it), groups the
-  messages into conversation windows, and stores them in a Hindsight memory bank
-  the agent recalls
-  from. PREFER THIS SKILL whenever the user wants to load, import, ingest, or
+  messages into conversation windows, and stores them in the agent's long-term
+  memory, which it
+  recalls from. PREFER THIS SKILL whenever the user wants to load, import, ingest, or
   remember a WhatsApp conversation/history/export. It handles existing history
   only (WhatsApp has no live-history API — the user exports the chat from the
   app). Activate on any of: "import my WhatsApp", "WhatsApp export", "load this
@@ -16,17 +16,17 @@ version: 0.1.0
 license: MIT
 metadata:
   hermes:
-    tags: [WhatsApp, Memory, Hindsight, Import, Backfill, Productivity]
+    tags: [WhatsApp, Memory, Import, Backfill, Productivity]
 ---
 
 # whatsapp-backfill — import a WhatsApp export into memory
 
-Load an exported WhatsApp chat into the agent's Hindsight memory so its contents
+Load an exported WhatsApp chat into the agent's long-term memory so its contents
 become recallable later. The user exports a chat from WhatsApp (**Chat → Export
 chat → Without media**), which produces a `.zip`; pass that `.zip` straight to
 `--file` (the skill extracts the `_chat.txt` inside — no unzip step) or pass a
 `.txt` directly. The skill parses it, groups messages into conversation windows,
-and retains them into a Hindsight bank. Afterward the user can just ask the agent
+and retains them into the memory bank. Afterward the user can just ask the agent
 about the conversation.
 
 ## When to use
@@ -50,13 +50,13 @@ invoked as `python3 <path> <command> [args]`. Each call prints ONE JSON object
 | Command | Purpose |
 |---|---|
 | `preview --file <export.zip>` | Parse the export (`.zip` or `.txt`) and report stats (messages, blocks, date range, what was skipped) plus a sample block. No memory is written. |
-| `import --file <export.zip> [--bank <id>]` | Parse and store the conversation into Hindsight memory. Returns how many blocks were submitted and the operation ids. |
+| `import --file <export.zip> [--bank <id>]` | Parse and store the conversation into long-term memory. Returns how many blocks were submitted and the operation ids. |
 | `status --bank <id> [--operation-id <id> …] [--wait]` | Report how many documents/facts are in the bank, and the status of specific import operations. Use this to monitor an import — no external tooling needed. |
 | `clear --bank <id> [--confirm]` | Delete a bank and everything in it. **Dry-run without `--confirm`** (just reports the document/fact counts); `--bank` is required so nothing is wiped by accident. |
 
 Grouping (both preview and import):
 - `--block-days N` — **preferred.** Put one document per N-day window (e.g. 7)
-  and let Hindsight chunk and date-stamp it itself. Disables the caps below.
+  and let the memory layer chunk and date-stamp it itself. Disables the caps below.
 - `--block-messages N` (default 10) / `--block-gap-hours H` (default 6) —
   legacy small-block mode; ignored when `--block-days` is set.
 
@@ -110,7 +110,7 @@ monitor with `status`.
 - `"no chat .txt inside the zip…"` / `"not a readable zip"` → the `.zip` isn't a
   WhatsApp export. Ask the user for the export `.zip` (or the `_chat.txt`).
 - `"Hindsight config not found…"` / `"no api_url…"` → the memory provider isn't
-  set up. Tell the user to run `hermes memory setup` and pick Hindsight.
+  set up. Tell the user to run `hermes memory setup` and pick their memory backend.
 - `"retain failed…"` → the memory server rejected or timed out on the request.
   Report it; do not retry in a loop.
 

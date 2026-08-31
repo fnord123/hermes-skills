@@ -60,6 +60,10 @@ BACKEND_TERMS = [
 # AND an ordinary English word. Judgement, not pattern-matching - so it stays reviewable.
 LEAK_ALLOW = {
     "bambu-store": {"myshopify"},          # named in setup docs the human follows
+    # The product name IS the domain here: the skill's own name is AgentMail, its
+    # trigger phrases mention agentmail.to, and the model must be able to say the
+    # product by name.
+    "agentmail-lite": {"agentmail"},
 }
 
 # Files under scripts/ that are not entry points and so carry no JSON contract.
@@ -405,7 +409,7 @@ def lint_skill(name, baseline=None):
         # One unreadable file must not mask the rest of the repo: the old behaviour was a
         # UnicodeDecodeError crash with empty output, which in CI fails the build and
         # reports nothing. Record a finding and continue instead.
-        add("major", "readability",
+        add("critical", "readability",
             "SKILL.md could not be read (%s); its rules were not checked - repair the "
             "file before this skill can be trusted" % e.__class__.__name__, "SKILL.md")
         return out
@@ -463,7 +467,15 @@ def lint_skill(name, baseline=None):
         if not tags:
             add("major", "frontmatter/tags", "no metadata.hermes.tags")
         for t in tags:
-            if str(t) != str(t).strip() or not str(t)[:1].isupper():
+            t = str(t)
+            if t != t.strip():
+                add("minor", "frontmatter/tags", "tag %r is not Capitalized" % t)
+            # Capitalized = starts with a letter at upper case. A tag that starts
+            # with a digit (3D Printing) keeps the first LETTER capitalized instead:
+            # the old t[:1].isupper() check rejected "3D Printing" outright, which
+            # sent the author to "3d printing" or to fight the rule.
+            first_alpha = next((c for c in t if c.isalpha()), None)
+            if first_alpha and not first_alpha.isupper():
                 add("minor", "frontmatter/tags", "tag %r is not Capitalized" % t)
 
     # ── forbidden / required body content ──────────────────────────────────
@@ -472,11 +484,11 @@ def lint_skill(name, baseline=None):
             "has a 'Files this skill must NEVER read' section - CONVENTIONS.md forbids it: "
             "it primes the behaviour it warns against", lineno(r"NEVER read"))
     if ERROR_SENTENCE not in text:
-        add("major", "body/error-sentence",
+        add("critical", "body/error-sentence",
             "error section does not end with the mandatory sentence verbatim")
-    for h, sev in (("When to use", "major"), ("When NOT to use", "major")):
+    for h in ("When to use", "When NOT to use"):
         if not re.search(r"^#+\s*" + h + r"\s*$", body, re.I | re.M):
-            add(sev, "body/section-flow", "missing '## %s' section" % h)
+            add("critical", "body/section-flow", "missing '## %s' section" % h)
     if not re.search(r"^\|.*\bPurpose\b", body, re.I | re.M):
         # A skill that invokes no tools — no scripts, no command lines in its code
         # (tool_table_exempt) — has nothing to tabulate; the mandate is for skills
@@ -485,12 +497,27 @@ def lint_skill(name, baseline=None):
         if not tool_table_exempt(text, entrypoints, inv):
             add("major", "body/tools-table", "no tools table with a Purpose column")
     else:
+        # The check is for Purpose tables only (its message says so). The old scan
+        # looked at the SECOND cell of ANY table, so square-appointments' status
+        # tables (headers "Status | What it means | …") fired six premise-false
+        # findings on rows whose second cell is a status name, not a purpose.
+        # Track the header of the current table; a table that carries no Purpose
+        # column is not a purpose table, and its rows are out of scope.
+        in_table = False
+        tbl_has_purpose = False
         for i, l in enumerate(lines, 1):
+            if not l.lstrip().startswith("|"):
+                in_table = False
+                tbl_has_purpose = False
+                continue
+            if not in_table:
+                in_table = True
+                tbl_has_purpose = bool(re.search(r"\bPurpose\b", l, re.I))
             m = re.match(r"^\|[^|]+\|\s*([A-Za-z]+)\b", l)
             if m and m.group(1) not in ("Purpose", "Tool", "Verb", "Script", "Command"):
                 w = m.group(1)
                 # a Purpose must LEAD with a verb; "The running total" does not.
-                if w in ("The", "A", "An", "This", "It", "Returns"):
+                if tbl_has_purpose and w in ("The", "A", "An", "This", "It", "Returns"):
                     add("minor", "body/explicit-verb",
                         "tool Purpose does not lead with a verb", "SKILL.md:%d" % i)
 
@@ -580,7 +607,7 @@ def lint_skill(name, baseline=None):
                     "library name", os.path.relpath(p, d))
 
     if re.search(r"(?<!python3 )(?<!python )\B\./\S*scripts/\S+\.py", text):
-        add("major", "scripts/invocation",
+        add("critical", "scripts/invocation",
             "documents './script.py'; the executable bit is lost over an HTTP install - "
             "always document 'python3 <path>'")
 

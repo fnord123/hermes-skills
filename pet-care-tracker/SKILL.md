@@ -20,7 +20,7 @@ metadata:
 
 # Dog Care Tracker
 
-Record and query a dog's walks and feedings tracked in Home Assistant. Useful when automated detection (cameras, occupancy sensors) misses an event and the dashboard needs a manual override, and for quick status checks during the day.
+Record and query a dog's walks and feedings. Useful when automated detection (cameras, occupancy sensors) misses an event and the tracker needs a manual override, and for quick status checks during the day.
 
 ## When to Use
 

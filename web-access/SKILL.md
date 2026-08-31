@@ -55,8 +55,8 @@ python3 ~/hermes-skills/web-access/scripts/web_access.py do     --task "TASK" [-
 ```
 
 The shim needs the `terminal` tool; MCP tools do not. If the service is down,
-the shim fails cleanly — there is no local fallback, because the backends
-(searxng, firecrawl) are not reachable from the LAN.
+the shim fails cleanly — there is no local fallback, because the service's
+backends are not reachable from the LAN.
 
 | Verb | Purpose |
 |---|---|

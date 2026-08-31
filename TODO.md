@@ -1,12 +1,15 @@
 # Outstanding conventions work
 
-Snapshot: **63 findings — 0 critical, 9 major, 54 minor** across 16 skills
-(post tools-table scope change + Phase 4 contract promotions + Phase 2
-script-contract fixes, 2026-08-29; entry-point Phase 1, 2026-08-28). CI is green; it gates on criticals only —
+Snapshot: **46 findings — 0 critical, 1 major, 45 minor** across 16 skills
+(body/invocation promotions, 2026-08-31; domain-leak + explicit-verb + tags
+drained, 2026-08-31). The 64th/65th were `pallo-logistics/scripts/gingr_lib.py:76`
+(81f7bf3) and the promotion batch. CI is green; it gates on criticals only —
 `layout/dirs`, `scripts/confirm`, `frontmatter/requires-toolsets`,
 `routing/triggers-baseline`, the three script contract rules
 (`scripts/json-contract`, `scripts/top-level-guard`, `scripts/exit-code`),
-and the seven pre-existing criticals block a merge;
+the four body/invocation rules promoted 2026-08-31
+(`scripts/invocation`, `readability`, `body/error-sentence`,
+`body/section-flow`), and the seven pre-existing criticals block a merge;
 the remaining major/minor are conformance work and non-blocking. The three script
 contract rules scope to **derived entry points** (SKILL.md code references),
 which dropped 28 premise-false findings (probes, service files, imported helpers)
@@ -74,6 +77,23 @@ with three criticals); the repo run is byte-identical across the flip because
 all three rules sat at 0 findings. CONVENTIONS.md's critical definition
 carries the contract class now.
 
+**Body/invocation promotions (2026-08-31, David's reserved call):**
+`scripts/invocation`, `readability`, `body/error-sentence` and
+`body/section-flow` moved major → critical. All four sat at 0 findings at
+promotion, so the repo run is byte-identical across the flip; each is now
+merge-blocking (a `./script.py` in docs — dead on an HTTP install —, an
+unreadable SKILL.md — its rules silently unchecked —, a missing verbatim
+ask-the-user sentence, or a missing When to use / When NOT to use section).
+Severity + gate pinned by gate test G7 (both skills in one lab: a corrupted
+SKILL.md for readability — the early-return means that skill yields only its
+own finding — and a degraded-but-readable one carrying the other three).
+`body/model-context` was REJECTED for promotion on the same pass: its two
+documented false-positive shapes (a `# heading` inside a code fence; a
+legitimate `## Background processing` operational heading) were re-verified
+live and still fire, and the battery's own KNOWN LIMITATIONS block forbids
+promotion without a fence-stripping fix plus negative controls for both
+shapes.
+
 ### New: undocumented shebangs — 14 findings (minor)
 
 `scripts/undocumented-shebang` (3a, entry-point spec): a shebang says "run me", but
@@ -103,7 +123,7 @@ ordinary English.
 
 ---
 
-## 3. Silent excepts — 30 findings
+## 3. Silent excepts — 31 findings
 
 `except Exception: pass` swallowing a real failure. Audited individually; most are legitimate
 Playwright selector fallbacks with a second strategy immediately after, or best-effort
@@ -115,25 +135,52 @@ screenshots. The ones that hide a real failure:
       silence, so the wrong browser mode is used with zero signal
 - [ ] `web-access/scripts/browse_task.py:229-230` — unlocked read-modify-write on a shared JSON file; two
       concurrent runs lose an entry, and a permanently unwritable path re-probes every run
+- [ ] `pallo-logistics/scripts/gingr_lib.py:76` (new, 81f7bf3) — `wait_for_url("…/public/login…")`
+      raising is the "session is fine" signal; the follow-up URL check + header
+      requirement is the real detector, so the swallow is defensible, but the
+      comment should say so (audit note, not a suspected bug)
 
 ---
 
-## 4. Domain leaks — 8 findings
+## 4. Domain leaks — CLOSED (2026-08-31)
 
-Backend vocabulary in model context. The model reasons about the words in front of it.
+All 8 findings cleared; the model-context vocabulary is now domain words only.
+Two of the fixes were linter accuracy (the prose was right, the rule was wrong),
+two skills got prose rewords across every occurrence:
 
-- [ ] `pallo-logistics` — "agentmail", "gingr"; `Gingr` is also a tag. Say "the kennel's booking system".
-- [ ] `square-appointments` — "agentmail", "playwright", "selector"; `Square` is a tag.
-- [ ] `whatsapp-backfill` — "hindsight"; `Hindsight` is a tag. Say "the agent's memory".
-- [ ] `agentmail-lite` — "agentmail", "schema" (the product name is the domain here; consider an allow-list entry like `bambu-store`'s `myshopify`).
-- [ ] `calendar` — "oauth" (it drives a Google calendar; "sign-in" is the domain word).
-- [ ] `pet-care-tracker` — "home assistant".
-- [ ] `web-access` — "firecrawl" (a backend; the domain word is "the web").
-- [ ] `daily-briefing` — "schema" (its four JSON config files are data, not backend vocabulary).
+- [x] `agentmail-lite` — `agentmail` moved to a `LEAK_ALLOW` entry: the product
+      name IS the domain (the skill's own name, the trigger phrases mention
+      agentmail.to). `schema` → "request formatting" in prose (2 spots).
+- [x] `web-access` — "searxng, firecrawl" → "the service's backends" (1 prose
+      spot). The `via` allow-list entry drafted on the same pass was
+      retracted before commit: the drain turned out to be a black-box
+      change (the `via`/`attempts`/`detail` fields stopped being returned
+      altogether), so nothing emits a value the docs must name.
+- [x] `pallo-logistics` — "Gingr" → "the kennel" (3 prose spots), "AgentMail"
+      → "the agent's email" (3 prose spots); tag `Gingr` → `Kennel` (the
+      product name was model-visible; the domain word is "kennel").
+- [x] `whatsapp-backfill` — "Hindsight" → "long-term memory" / "the memory
+      bank" (4 prose spots); tag `Hindsight` dropped (Memory stays). The
+      error-message line keeps the literal `"Hindsight config not found…"` —
+      it is the actual script output, and it sits in an inline code span,
+      which the prose-only leak scan strips (a command the model copies
+      verbatim is not a vocabulary leak).
+- [x] `calendar` — "OAuth" → "sign-in" (2 spots); tag `iCal` → `ICal`.
+- [x] `pet-care-tracker` — "tracked in Home Assistant" dropped from the intro
+      (the tracker is the domain; HA is the backend); "dashboard" → "tracker".
+- [x] `square-appointments` — "AgentMail" → dropped (the source is just
+      "confirmation emails"), "Playwright" → "a real browser" (2 spots),
+      "selector state" → "browser state".
+- [x] `daily-briefing` — table header "Schema" → "Shape" (data, not backend).
+
+The `frontmatter/tags` Capitalized check was also refined the same day: a
+digit-leading tag (3D Printing) is judged on its first LETTER, not its first
+CHARACTER (the old `t[:1].isupper()` rejected "3D Printing" outright). Battery
+cases A9a/A9b pin both sides.
 
 ---
 
-## 5. Structure — 11 findings
+## 5. Structure — 1 open
 
 - [ ] `body/tools-table` (1) — scope changed 2026-08-29 (`tool_table_exempt`):
       the mandate now fires only for skills that invoke tools — scripts present,
@@ -154,9 +201,16 @@ Backend vocabulary in model context. The model reasons about the words in front 
 - [x] `body/error-sentence` (1), `body/section-flow` (1) — closed with A1 (`9f82ad5`):
       both findings were the daily-briefing mirror's; the mirror deletion removed the
       offending SKILL.md (0 findings post-A1, verified in the census chain).
-- [ ] `body/explicit-verb` (8: rx-review 2, square-appointments 6), `frontmatter/tags` (2:
-      bambu-store, calendar). (`frontmatter/version` (1) closed 2026-08-28: `daily-briefing`
-      was the lone `1.0.0` outlier; now `0.2.0`.)
+- [x] `body/explicit-verb` (8) — closed 2026-08-31. Two directions: rx-review's
+      two genuine Purpose-cell findings reworded to lead with a verb
+      ("The FIB-4 score" → "Computes the FIB-4 score", "The ONE verb for a
+      reply" → "Routes a regimen-review reply"); the other six (square-
+      appointments' STATUS tables, which have no Purpose column) were
+      premise-false — the check now scans only tables whose header carries a
+      Purpose column (linter fix, battery case B11a pins the negative).
+- [x] `frontmatter/tags` (2) — closed 2026-08-31: `bambu-store` `3DPrinting` →
+      `3D Printing`, `calendar` `iCal` → `ICal` (the Capitalized-check
+      refinement above made digit-leading tags expressible).
 
 ---
 

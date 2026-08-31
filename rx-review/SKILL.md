@@ -61,10 +61,10 @@ One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
 | `start` | Begins the review. Run **once**, after `uploads-done` and after you have resolved the regimen. It refuses until both are done. |
 | `staged` | What is waiting to be transcribed, across upload rounds. |
 | `trends` | Markers moving consistently in one direction over their last three or more draws. |
-| `fib4` | The FIB-4 liver-fibrosis risk score, from the newest draw that reports AST, ALT and a platelet count together. Runs on demand; it is also surfaced in the labs-confirmation message under "Derived scores". |
+| `fib4` | Computes the FIB-4 liver-fibrosis risk score from the newest draw that reports AST, ALT and a platelet count together. Runs on demand; it is also surfaced in the labs-confirmation message under "Derived scores". |
 | `status` | Reports where the pipeline is — finished, running, waiting. Use this whenever the user asks how it is going. |
 | `doctor` | Explains why a regimen item is still held: the answers on record, whether each item's answer matched, which manufacturer file resolved, and the gate card's state. Run this when the user says an answer "didn't work" or an item keeps re-asking. |
-| `correct-item-slug-request "<reply>"` | The ONE verb for a regimen-review reply. `approved` (or a synonym) completes the barrier; `<n> <correction>` / `<n> drop` route by the number the user wrote. Then do exactly what it prints. |
+| `correct-item-slug-request "<reply>"` | Routes a regimen-review reply. `approved` (or a synonym) completes the barrier; `<n> <correction>` / `<n> drop` route by the number the user wrote. Then do exactly what it prints. |
 | `regimen-accept` | Accepts the regimen and completes the Stage 3 barrier — what an `approved` reply triggers. |
 | `labs-confirm` | Records that the user confirmed the labs and closes the gate card. `--ignore "A, B"` leaves markers unresearched, and adds to anything already excluded; `--drop` starts that list over. |
 | `regimen-reject` | **Halts the review.** For an inventory that is wrong in a way answering cannot fix. Needs `--reason`. |

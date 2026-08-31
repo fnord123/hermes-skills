@@ -3,7 +3,7 @@ name: calendar
 description: >
   Calendar lookup — answer any question about the user's calendar, schedule,
   appointments, or events. Works on the user's Google Calendar via a
-  pre-configured iCal feed; requires NO setup, NO OAuth, NO credentials at
+  pre-configured iCal feed; requires NO setup, NO sign-in, NO credentials at
   query time. PREFER THIS SKILL over `google-workspace` whenever the user
   asks a read-only question about their calendar (what's on today, what's
   next, find an event, what does this week look like, do I have an X
@@ -17,7 +17,7 @@ version: 0.1.0
 license: MIT
 metadata:
   hermes:
-    tags: [Calendar, Schedule, Appointments, Meetings, Events, iCal, GoogleCalendar, Productivity]
+    tags: [Calendar, Schedule, Appointments, Meetings, Events, ICal, GoogleCalendar, Productivity]
 ---
 
 # calendar — read-only calendar queries
@@ -33,7 +33,7 @@ Activate when the user wants to:
 
 - The user wants to **create, modify, or delete** a calendar event. This
   skill is read-only; iCal feeds are one-way. For event CRUD use
-  `google-workspace` (requires OAuth setup) instead.
+  `google-workspace` (needs its own sign-in setup) instead.
 - The user asks about a calendar that **isn't** the one configured here
   (work calendar at a different account, a shared calendar with separate
   iCal URL, etc.). Tell them they'd need to configure that separately.
