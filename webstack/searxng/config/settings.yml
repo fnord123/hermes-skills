@@ -6,7 +6,9 @@
 use_default_settings: true
 
 server:
-  secret_key: "REDACTED_SEARXNG_SECRET_KEY"
+  # secret_key: NOT in this file. It comes from SEARXNG_SECRET (root webstack/.env,
+  # passed via the member compose environment:) — the running image's settings
+  # loader lets the env var override the file. No secret bytes live in tracked config.
   limiter: false            # REQUIRED: limiter blocks Hermes' API calls
   image_proxy: false
   method: "GET"

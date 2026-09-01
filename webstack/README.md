@@ -47,6 +47,19 @@ official static build (see `webaccess/Dockerfile`).
 
 ## Secrets
 
-`webaccess/.env` (LiteLLM/BrowserBase keys) and the top-level `firecrawl`
-env (`BULL_AUTH_KEY`, postgres creds) live in `.env` files that are
-gitignored. `.env.example` files show the variable names only.
+All runtime secrets live in `.env` files (gitignored, `chmod 0600` on the
+host); tracked config carries **no** secret bytes — not even redacted stubs.
+
+- `webaccess/.env` — LiteLLM/BrowserBase keys for the agent rung.
+- top-level `.env` — firecrawl vendor env **plus `SEARXNG_SECRET`** (the
+  SearXNG session-signing secret; the member compose passes it into the
+  container, where the image's settings loader lets it override the file —
+  which is why `searxng/config/settings.yml` has no `secret_key` line).
+- `searxng/.env` — engine API keys (currently `SEARXNG_BRAVE_API_KEY`).
+  Read host-side by `apply-api-engines.sh`, which expands `${VAR}` refs in
+  `api-engines.yml` before merging into the live settings; an empty/missing
+  var skips that engine instead of installing a broken one.
+
+`.env.example` files show the variable names only. `deploy.sh` hard-fails if
+`SEARXNG_SECRET` or `SEARXNG_BRAVE_API_KEY` is absent/empty at deploy time —
+a deploy must never silently run searxng unsigned or keyless.

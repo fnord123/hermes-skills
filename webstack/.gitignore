@@ -1,4 +1,6 @@
-# webstack top-level env (firecrawl vendor vars) — NEVER commit
+# webstack top-level env (firecrawl vendor vars + SEARXNG_SECRET) — NEVER commit
 .env
 __pycache__/
 *.pyc
+# searxng apply-script backups carry the brave key — never track them
+searxng/settings.yml.*.bak

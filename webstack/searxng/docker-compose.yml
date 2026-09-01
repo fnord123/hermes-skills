@@ -10,6 +10,7 @@ services:
       - ./config:/etc/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://searxng:8080/  # internal webnet DNS (2026-08-24)
+      - SEARXNG_SECRET=${SEARXNG_SECRET}       # from root .env — overrides the (absent) secret_key in settings.yml
       - UWSGI_WORKERS=4
       - UWSGI_THREADS=4
     cap_drop:

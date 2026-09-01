@@ -1,41 +1,76 @@
 #!/usr/bin/env bash
-# Merge ~/searxng/api-engines.yml into SearXNG's settings.yml, restart, and VERIFY.
+# Merge ./api-engines.yml into SearXNG's settings.yml, restart, and VERIFY.
 #
-#   bash ~/searxng/apply-api-engines.sh
+#   bash apply-api-engines.sh
 #
 # Re-runnable: the managed section is replaced, never appended twice. api-engines.yml is
 # the source of truth — edit that, then run this again.
 #
-# settings.yml is owned by uid 977 and the container drops DAC_OVERRIDE, so root inside the
-# container cannot write it either. Every write goes through `docker exec -u searxng`.
+# Secrets live in the sibling .env (host-owned, gitignored) — NEVER in api-engines.yml.
+# Engine blocks reference them as ${VAR}; this script expands them from .env before
+# merging and skips any engine whose variables are missing or empty.
+#
+# settings.yml is owned by uid 977 and the container drops DAC_OVERRIDE, so root inside
+# the container cannot write it either. Every write goes through `docker exec -u searxng`.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$DIR/api-engines.yml"
+ENV_FILE="$DIR/.env"
 LIVE="/etc/searxng/settings.yml"
 PYBIN=/usr/local/searxng/.venv/bin/python     # the only python here with PyYAML
 BEGIN="# --- BEGIN managed api engines (apply-api-engines.sh) ---"
 END="# --- END managed api engines ---"
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1
 
 [ -f "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }
 
-# 1. Keep only engine blocks whose placeholders have been filled in.
-KEPT="$(python3 - "$SRC" <<'PY'
-import re, sys
+# 1. Load secrets from .env (KEY=value pairs, quoted values; no $-expansion of values).
+declare -A KEYV=()
+if [ -f "$ENV_FILE" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|\#*) continue ;; esac
+    key="${line%%=*}"; val="${line#*=}"
+    # strip one pair of surrounding quotes, if present
+    case "$val" in
+      \"*\") val="${val:1:${#val}-2}" ;;
+      \'*\') val="${val:1:${#val}-2}" ;;
+    esac
+    KEYV["$key"]="$val"
+  done < "$ENV_FILE"
+else
+  echo "WARN: $ENV_FILE missing — no engine keys available; keyed engines will be skipped" >&2
+fi
+
+# 2. Keep only engine blocks whose ${VARS} are defined in .env and non-empty.
+KEYV_JSON="$( { for k in "${!KEYV[@]}"; do printf '%s\t%s\n' "$k" "${KEYV[$k]}"; done; } | \
+  python3 -c 'import json,sys; print(json.dumps(dict(l.rstrip("\n").split("\t",1) for l in sys.stdin if l.strip())))' 2>/dev/null || echo '{}')"
+
+KEPT="$(KEYV_JSON="$KEYV_JSON" python3 - "$SRC" <<'PY'
+import os, re, sys
 text = open(sys.argv[1], encoding="utf-8").read()
+keys = __import__("json").loads(os.environ.get("KEYV_JSON", "{}"))
 starts = [m.start() for m in re.finditer(r"^  - name:", text, re.M)]
 blocks = [text[a:b] for a, b in zip(starts, starts[1:] + [len(text)])]
 kept, skipped = [], []
 for b in blocks:
     name = re.search(r"^  - name:\s*(.+)$", b, re.M).group(1).strip()
     if "PUT_YOUR_" in b:
-        skipped.append(name); continue
+        skipped.append(f"{name} (placeholder not filled in)")
+        continue
+    unresolved = [v for v in re.findall(r"\$\{([A-Z0-9_]+)\}", b) if not keys.get(v)]
+    if unresolved:
+        skipped.append("%s (missing/empty in .env: %s)" % (name, ", ".join(sorted(set(unresolved)))))
+        continue
+    def sub(m): return '"%s"' % keys[m.group(1)]
+    b = re.sub(r'"?\$\{([A-Z0-9_]+)\}"?', sub, b)
     # Trailing comments belong to the NEXT engine, not this one.
     lines = b.rstrip().splitlines()
     while lines and (not lines[-1].strip() or lines[-1].lstrip().startswith("#")):
         lines.pop()
     kept.append("\n".join(lines) + "\n")
-for n in skipped: print("SKIP %s (placeholder not filled in)" % n, file=sys.stderr)
+for n in skipped: print("SKIP %s" % n, file=sys.stderr)
 for b in kept:
     print("ADD  %s" % re.search(r"^  - name:\s*(.+)$", b, re.M).group(1).strip(), file=sys.stderr)
 print("".join(kept) if kept else "NOTHING", end="")
@@ -44,8 +79,14 @@ PY
 
 if [ "$KEPT" = "NOTHING" ]; then
     echo >&2
-    echo "No engine had its placeholders filled in. Edit $SRC first." >&2
-    exit 1
+    echo "No engine will be installed: key variables are missing/empty in $ENV_FILE (or placeholders unfilled in $SRC)." >&2
+    [ "$DRY" = 1 ] || exit 1
+fi
+
+if [ "$DRY" = 1 ]; then
+    echo ">> DRY RUN: merged managed section would be:"
+    printf '%s\n' "$KEPT"
+    exit 0
 fi
 
 # 2. Back up (the copy carries a key, so lock it down).

@@ -60,6 +60,16 @@ ssh "$HOST" "set -euo pipefail
   webaccess/sync-from-skill.sh
   [ -f webaccess/.env ] || { echo 'ERROR: webaccess/.env missing on host — restore from the backup before deploying' >&2; exit 1; }
   [ -f .env ]           || echo 'WARN: top-level .env (firecrawl vars) missing — firecrawl tiers will use compose defaults'
+  # --- secret guards: a deploy must not silently run searxng keyless or unsigned ---
+  # (awk field compare, not a KEY=value regex — keeps the check out of the redactor's
+  #  pattern space and exact: the line must be KEY=<non-empty>)
+  env_has() { awk -F= -v k="$1" '$1==k && length($2)>0 { found=1 } END { exit found?0:1 }' "$2"; }
+  env_has SEARXNG_SECRET .env || { echo 'ERROR: SEARXNG_SECRET missing/empty in root .env — searxng would fall back to the secret baked in settings.yml (or auto-gen on a fresh host): sessions and signed URLs break' >&2; exit 1; }
+  if [ -f searxng/.env ]; then
+    env_has SEARXNG_BRAVE_API_KEY searxng/.env || { echo 'ERROR: SEARXNG_BRAVE_API_KEY missing/empty in searxng/.env — the brave api engine will be skipped at next apply' >&2; exit 1; }
+  else
+    echo 'WARN: searxng/.env missing — keyed engines will be skipped (keyless engines unaffected)'
+  fi
 "
 
 if [ "$BUILD" = 1 ]; then

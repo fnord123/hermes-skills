@@ -25,7 +25,7 @@
 # Do not spend another evening on it.
 
 
-# ── Brave Search API ─────────────────────────────────────────────────────────────────
+# ── Brave Search API ─────────────────────────────────────────────────────────────
 #
 # Free tier: 2,000 queries/month, 1 query/second. Sign up at https://api.search.brave.com
 # Card details are requested even for the free plan; the free tier itself is not charged.
@@ -36,10 +36,15 @@
 # Unlike the 64 keyless engines already enabled here, this is a real API: it answers
 # consistently instead of being rate-limited or CAPTCHA-walled under load, which is the
 # whole reason for adding a keyed engine at all.
+#
+# The KEY does not live in this file. It lives in the sibling `.env`
+# (host-owned, gitignored) under the SEARXNG_BRAVE_API_KEY variable.
+# The apply script expands ${...} from .env before merging; a missing/empty
+# var skips the engine.
   - name: brave api
     engine: braveapi
     shortcut: brapi
     categories: [general]
-    api_key: "PUT_YOUR_BRAVE_API_KEY_HERE"
+    api_key: "${SEARXNG_BRAVE_API_KEY}"
     timeout: 6.0
     disabled: false
