@@ -32,6 +32,7 @@ tar -cf "$tmp/ws.tar" \
     --exclude='.git' \
     --exclude='*.env' \
     --exclude='config.env' \
+    --exclude='webstack/searxng/config' \
     --exclude='fara' \
     --exclude='docker-client' \
     --exclude='__pycache__' \

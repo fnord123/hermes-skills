@@ -54,6 +54,9 @@ name: webaccess
 # The volume's EXTERNAL name is pinned to webaccess_webaccess-state (the seeded
 # volume: cache, cookies, learned policy, logs). Works both standalone and when
 # this file is included in the webstack project, so state never re-keys.
+# external: true — the volume predates the single repo; without it compose
+# warns "already exists but was not created by Docker Compose" on every up.
 volumes:
   webaccess-state:
     name: webaccess_webaccess-state
+    external: true
