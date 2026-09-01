@@ -70,6 +70,11 @@ ssh "$HOST" "set -euo pipefail
   else
     echo 'WARN: searxng/.env missing — keyed engines will be skipped (keyless engines unaffected)'
   fi
+  # --- keep searxng's managed engine block in sync with the (clean) repo tree ---
+  # The tarball ships api-engines.yml with placeholder keys; without this, the
+  # host's live managed block would go stale against repo changes. The apply
+  # script expands real keys from searxng/.env and re-verifies the engine answers.
+  searxng/apply-api-engines.sh
 "
 
 if [ "$BUILD" = 1 ]; then

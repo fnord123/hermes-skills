@@ -122,10 +122,17 @@ printf '%s\n' "$NEW" | docker exec -u searxng -i searxng sh -c "cat > $LIVE"
 echo "settings.yml updated"
 
 # 5. Restart, then wait for it to answer rather than assuming it came back.
-( cd "$DIR" && docker compose restart searxng >/dev/null )
+#    Plain `docker restart` — NOT `docker compose restart`: from this member
+#    directory compose can't resolve the project ("service searxng refers to
+#    undefined network webnet"), so the compose form fails here. The container
+#    label is project=webstack; a plain restart is project-agnostic.
+#    searxng is webnet-only (no published ports since 2026-08-24), so the probe
+#    runs in-container against 127.0.0.1:8080 — a host-side curl of any LAN port
+#    would be testing the wrong thing.
+docker restart searxng >/dev/null
 printf 'waiting for searxng '
 for _ in $(seq 1 30); do
-    curl -sf -m 3 'http://127.0.0.1:8888/config' >/dev/null 2>&1 && break
+    docker exec searxng python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/config', timeout=3)" >/dev/null 2>&1 && break
     printf '.'; sleep 1
 done
 echo
@@ -134,16 +141,16 @@ echo
 #    An earlier version printed a note here and still exited 0, so an evening of 403s read
 #    as "it worked". This exits non-zero and says where to look.
 EXPECTED="$(printf '%s' "$KEPT" | sed -n 's/^  - name: *//p' | paste -sd, -)"
-EXPECTED="$EXPECTED" python3 - <<'PY'
+EXPECTED="$EXPECTED" docker exec -i -e EXPECTED="$EXPECTED" searxng python3 - <<'PY'
 import json, os, urllib.request
 from collections import Counter
 expected = [e for e in os.environ.get("EXPECTED", "").split(",") if e]
-cfg = json.load(urllib.request.urlopen("http://127.0.0.1:8888/config", timeout=10))
+cfg = json.load(urllib.request.urlopen("http://127.0.0.1:8080/config", timeout=10))
 live = {e["name"]: (not e.get("disabled", False)) for e in cfg.get("engines", [])}
 for n in expected:
     print("  registered: %-12s enabled=%s" % (n, live.get(n, "MISSING")))
 
-url = ("http://127.0.0.1:8888/search?q=thorne+advanced+iron+complex"
+url = ("http://127.0.0.1:8080/search?q=thorne+advanced+iron+complex"
        "&format=json&categories=general")
 
 # A SUSPENDED engine looks exactly like a broken one: registered, enabled, answering
