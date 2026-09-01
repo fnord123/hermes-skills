@@ -42,7 +42,21 @@ for f in "${files[@]}"; do
   if [ ! -f "$src" ]; then
     echo "MISSING in skill: $f" >&2; drift=1; continue
   fi
-  if [ -f "$dst" ] && ! cmp -s "$src" "$dst"; then
+  if [ ! -f "$dst" ]; then
+    # A file absent from the context is drift too — the Dockerfile COPY will
+    # fail on it, so --check must say so (previously this branch was silent,
+    # which made --check a false "in sync" on a fresh checkout).
+    if [ "$mode" = check ]; then
+      echo "MISSING in context: $f"
+      drift=1
+    else
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst"
+      echo "synced: $f"
+    fi
+    continue
+  fi
+  if ! cmp -s "$src" "$dst"; then
     if [ "$mode" = check ]; then
       echo "DRIFT: $f"
       drift=1
