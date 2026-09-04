@@ -74,8 +74,9 @@ rules)
    subdirectory under /tmp/kanban-archived/ (MOVE, never bulk
    delete); verify: the scratch path no longer exists, git status
    --short is empty.
-10. SUCCESSOR (before you complete): create the Fleet-Update-Check
-   card.
+10. SUCCESSOR: complete FIRST, then create the Propagation-Check card
+   (the VERDICT + HANDOFF COMMITTED branch below is the binding order -
+   the successor must not exist anywhere until you are done).
 
 VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
 - COMMITTED:
@@ -84,10 +85,10 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
   until you are done; because your task is "done" at create time it is
   born "ready", not "todo". Your turn is NOT over after completing -
   do not stop until the show-check (step 3) is done.
-  0. RE-QUEUE GUARD (defensive): a Fleet-Update-Check card may already
+  0. RE-QUEUE GUARD (defensive): a Propagation-Check card may already
      exist from a re-queued run. Check the board for a card whose
      parents list contains your task id and whose title starts
-     "Fleet-Update-Check:". If one exists (any status), create NOTHING
+     "Propagation-Check:". If one exists (any status), create NOTHING
      in step 2 - verify its payload and go straight to the show-check
      (step 3), citing the EXISTING successor id.
   1. kanban_complete YOUR card (the successor does not exist yet):
@@ -97,14 +98,14 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
      {"verdict":"COMMITTED","skill":<skill>,"round":"N/2",
      "commit":<sha>}. Do NOT pass created_cards - there is no
      successor id yet (it is created in step 2).
-  2. THEN kanban_create the Fleet-Update-Check card:
-     title "Fleet-Update-Check: <skill> <mode> (round N/2)"
+  2. THEN kanban_create the Propagation-Check card:
+     title "Propagation-Check: <skill> <mode> (round N/2)"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
      "{{REPO_DIR}}", skills ["{{HOUSE_SKILL}}"],
      max_runtime_seconds 1800, parents [your task id]
-     body: the Fleet-Update-Check canonical body VERBATIM (it sits at
-     {{CARDS_DIR}}/fleet-check-canonical.md - read it with your file
-     tools) with its PIPELINE INPUT section filled from your own
+     body: the Propagation-Check canonical body VERBATIM (it sits at
+     {{CARDS_DIR}}/propagation-check-canonical.md - read it with your
+     file tools) with its PIPELINE INPUT section filled from your own
      input (skill, mode, round) plus the pushed commit sha; the drift
      work must stay REPORT-ONLY per the standing decision (no update,
      no --force, no reconcile). Then verify the body is complete (no

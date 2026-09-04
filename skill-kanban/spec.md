@@ -373,10 +373,10 @@ the worker sees; see `known-pitfalls.md`).
 9. **ARCHIVE THE SCRATCH:** move the scratch skill dir to a timestamped
    subdirectory under the /tmp archive dir (MOVE, never bulk delete);
    verify the scratch path is gone and git status is empty.
-10. **SUCCESSOR:** complete FIRST, then create the Fleet-Update-Check card.
+10. **SUCCESSOR:** complete FIRST, then create the Propagation-Check card.
 
 **Verdict.**
-- **COMMITTED** (push verified `0 0`) → the Fleet-Update-Check card is the
+- **COMMITTED** (push verified `0 0`) → the Propagation-Check card is the
   successor (body = that canonical VERBATIM, filled, report-only drift).
   For a CREATE the census is the baseline: record which profiles inherit
   via external_dirs and confirm no tap copies exist yet.

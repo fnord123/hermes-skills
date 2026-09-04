@@ -13,7 +13,9 @@ multi-card pipeline in which **no card is trusted on its own self-report**:
 - **Author** drafts, **Audit** lints and fact-checks, **STE100** audits the
   writing standard, **Scripter** writes the scripts, **Verifier** runs them
   (reading code is not a test), **Commit** is the only card allowed to
-  touch git, **Fleet-Update-Check** verifies the fleet sees the change.
+  touch git, **Propagation-Check** verifies the changed skill reached
+  the fleet (per run, bounded to the commit; the fleet-wide periodic
+  census is a separate job, also named Fleet-Update-Check).
 - Every handoff re-verifies the seams (R6): the child re-shas every file the
   parent's payload names before acting on it. A broken seam is a FAIL, not
   a "probably fine."
@@ -64,7 +66,7 @@ multi-card pipeline in which **no card is trusted on its own self-report**:
       | pass
       v
 +----------------------------+
-| 6. Fleet-Update-Check      |
+| 6. Propagation-Check   |
 +----------------------------+
       | done
 ```
@@ -260,20 +262,27 @@ writing-standard skill).
   **verify the push** (`git status -sb` no ahead/behind +
   `rev-list --count origin/main..HEAD` = 0 — a push is not verified by the
   absence of an error); archive the scratch (move to /tmp, verify).
-- **Verdict/handoff:** COMMITTED → creates **Fleet-Update-Check** (body =
+- **Verdict/handoff:** COMMITTED → creates **Propagation-Check** (body =
   that canonical VERBATIM, filled, report-only drift). PARK (any failure)
   → UNDO the footprint first (worktree back to pre-run state, verified),
   comment the findings table, `kanban_block kind="needs_input"` (short
   reason), NO successor.
 - **Params:** 40m (2400s), profile default. Body: `cards/commit-canonical.md`.
 
-### 3.7 Fleet-Update-Check — the deployment census
-- **Job:** verify the fleet sees the pushed change correctly and report
+### 3.7 Propagation-Check — the per-run propagation census
+- **Name is deliberate (2026-09-04, owner decision):** this card is
+  PER-RUN and bounded to the pushed commit. The separate periodic,
+  fleet-wide census job is named **Fleet-Update-Check** (a scheduled
+  watchdog, by design not part of this pipeline) — do not conflate the
+  two names.
+- **Job:** verify the changed skill(s) — exactly the skills the
+  commit touched — are seen correctly by the fleet, and report
   drift. **Report-only is the standing decision** — no `hermes skills
   update`, no `--force`, no reconcile, no edits to any profile's skill
   dir, config, or env, and no edits to any skill file at all — including
-  the house skill this card loads (a fleet-check worker once spent its run
-  self-editing its own skill; the card body's ROLE prohibition is the only
+  the house skill this card loads (a propagation-check worker once
+  spent its run self-editing its own skill; the card body's ROLE
+  prohibition is the only
   control).
 - **Work (summary):** repo state (HEAD == origin/main, the input commit
   exists on origin main); the commit's name-status bounds the census
@@ -293,7 +302,7 @@ writing-standard skill).
   successor.
 - **Census trap:** the headline count and the table must agree; when they
   disagree, the table + an independent re-parse win.
-- **Params:** 30m (1800s), profile default. Body: `cards/fleet-check-canonical.md`.
+- **Params:** 30m (1800s), profile default. Body: `cards/propagation-check-canonical.md`.
 
 ## 4. Loops and caps
 
@@ -449,8 +458,8 @@ specifics (who, when, which fleet) stay in the fleet's local ledger.
 - **Script-less skills route around the Scripter** — but the routing
   decision has ONE owner (the STE100 card), so the graph never has two
   cards deciding the same edge.
-- **Report-only fleet checks.** The census card observes and reports
-  drift; it never updates, forces, or reconciles. Reconciliation would
+- **Report-only checks.** The propagation-census card observes and
+  reports drift; it never updates, forces, or reconciles. Reconciliation would
   rmtree a bot's local edits — that is the failure mode the tap
   protection exists to prevent.
 - **PARK is a first-class state.** Cap exhausted = blocked + findings

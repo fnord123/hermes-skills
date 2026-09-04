@@ -1,7 +1,7 @@
 # skill-kanban — the skill-maintenance pipeline (host-neutral doctrine)
 
 A kanban pipeline that creates, audits, writes, verifies, commits, and
-fleet-checks skills in a house skill repo, one card per stage, so that no
+propagation-checks skills in a house skill repo, one card per stage, so that no
 draft is trusted on self-report and no failure vanishes silently.
 
 This directory is **host-neutral**: it carries the *doctrine* (the board
@@ -44,7 +44,7 @@ is documented in `PROFILE.example`.
    | `{{HOUSE_SKILL}}` | the house-repo skill name force-loaded on most cards | Author, Audit, Scripter, Verifier, Commit, Fleet |
    | `{{STD_SKILL}}` | the writing-standard (ASD-STE100) skill name force-loaded on the STE100 card | Audit, STE100 |
 
-   Judgment cards (Audit, Verifier, Commit, Fleet-Update-Check) carry **no**
+   Judgment cards (Audit, Verifier, Commit, Propagation-Check) carry **no**
    `--model` — they run on the profile's default (your high tier). Only the
    grunt-work cards are pinned to `{{MID_MODEL}}`.
 

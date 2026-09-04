@@ -46,7 +46,7 @@ by the creating card, not here).
   retry Scripter card carry an explicit `--model` pin; the STE100 retry
   Author does too). This is the *lower* tier — drafting and mechanical
   script-writing. The judgment cards (Audit, Verifier, Commit,
-  Fleet-Update-Check, and the STE100 card itself) carry **no** `--model`,
+  Propagation-Check, and the STE100 card itself) carry **no** `--model`,
   so they run on the operator's default (the *higher* tier). Pick a model
   id that your LLM proxy actually serves under that name. (Role-isolated
   install: a role that should run mid is given a profile whose default is

@@ -96,7 +96,7 @@ fix — do not re-derive it.
 ## The census and the self-report
 
 - **A worker WILL edit its own loaded skill mid-run.** A report-only
-  fleet-check card once spent part of its run self-editing the very house
+  propagation-check card once spent part of its run self-editing the very house
   skill it had loaded. The edits were accurate but not owner-directed.
   The card body carries an explicit "do not edit any skill file at all —
   including the skill you load to do this job"; if a worker learns
