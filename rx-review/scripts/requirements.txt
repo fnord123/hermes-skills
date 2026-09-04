@@ -1,0 +1,4 @@
+# Third-party imports used by this skill's scripts (declared for tools/lint_skills.py).
+# Only fitz/PyMuPDF is a real dependency: it is imported lazily (inside functions) for PDF
+# text/OCR work, so the core pipeline runs on the stdlib alone.
+PyMuPDF

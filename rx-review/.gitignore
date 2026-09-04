@@ -1,0 +1,10 @@
+# rx-review: track pipeline code and docs, never medical data or run state.
+# (Same policy as the Hermes repo's rx-review block: allowlist the drivers only.)
+*
+!.gitignore
+!*.md
+!scripts/
+/scripts/*
+!/scripts/*.py
+!/scripts/*.sh
+!/scripts/requirements.txt
