@@ -23,7 +23,7 @@ its original run. The key carries a format version: changing what a transcriptio
 must invalidate every entry rather than mix two shapes in one corpus.
 
 Layout (under ~/.hermes/cache/rx-review/, with the other rx-review caches; kept out of
-~/.hermes/rx-review/ so a plain `rx.py reset` does not take it — only `--clear-cache` does):
+~/hermes-skills/rx-review/scripts/ so a plain `rx.py reset` does not take it — only `--clear-cache` does):
 
     ~/.hermes/cache/rx-review/transcriptions/
         labs/<sha256>.md         the transcription

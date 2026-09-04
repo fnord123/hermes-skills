@@ -131,7 +131,8 @@ if printf '%s' "$cmd" | grep -qE "^[[:space:]]*python3?[[:space:]]+($PIPELINE|$W
 fi
 
 block "terminal on the rx-review board runs this pipeline's own scripts only. Permitted:
-    python3 ~/.hermes/rx-review/{rx,rxsplit,fanout,lenses,verify}.py ...
+    python3 ~/hermes-skills/rx-review/scripts/{rx,rxsplit,fanout,lenses,verify}.py ...
+    (alias while the local symlink exists: python3 ~/.hermes/rx-review/{...}.py)
     python3 ~/hermes-skills/web-access/scripts/web_access.py search --query \"...\"
     python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url \"...\" [--browser]
     python3 ~/hermes-skills/browse-task/scripts/browse_task.py --task \"...\" [--start-url ...]

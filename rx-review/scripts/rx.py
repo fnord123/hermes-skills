@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """rx — run the medication/supplement review end to end.
 
-    python3 ~/.hermes/rx-review/rx.py stage           # start a review: stage 1 of 8
-    python3 ~/.hermes/rx-review/rx.py status          # where everything stands
-    python3 ~/.hermes/rx-review/rx.py analyze-research # build the research substages (6a-6d)
+    python3 ~/hermes-skills/rx-review/scripts/rx.py stage           # start a review: stage 1 of 8
+    python3 ~/hermes-skills/rx-review/scripts/rx.py status          # where everything stands
+    python3 ~/hermes-skills/rx-review/scripts/rx.py analyze-research # build the research substages (6a-6d)
 
 A review runs as eight stages. Stage 1 (`stage` + `start`) creates the WHOLE Begin/Barrier chain
 for stages 2-8 up front; each later stage is a Stage Begin card - intake-regimen (2),
@@ -76,7 +76,7 @@ XCRIBE = os.path.join(INPUTS, ".xcribe")
 REPORTS_ROOT = os.path.expanduser(os.environ.get("RX_REPORTS_ROOT", "~/.hermes/reports/rx-review"))
 CURRENT_LINK = os.path.join(REPORTS_ROOT, "current")
 REPORTS = CURRENT_LINK
-TILDE = "~/.hermes/rx-review/inputs"
+TILDE = "~/hermes-skills/rx-review/scripts/inputs"
 
 
 def start_run():
@@ -441,7 +441,7 @@ def _halt(args, record, reason, derived, fingerprint=None, forget_pdfs=()):
         print("No open cards to archive.")
 
     print("\nThe review is halted and does not resume. Fix the input this names, then:")
-    print("   python3 ~/.hermes/rx-review/rx.py reset --confirm")
+    print("   python3 ~/hermes-skills/rx-review/scripts/rx.py reset --confirm")
     print("   ...re-upload / re-resolve, then `rx.py stage` and `rx.py start`.")
     return 0
 
@@ -787,7 +787,7 @@ and add NO row that is not printed below:
 Keep the lab's flag on the value (e.g. `186 H`). Write UNREADABLE for any value that is not printed
 below. Set specimen to the panel heading above the row. When the table is written, run:
 
-    python3 ~/.hermes/rx-review/rx.py check-transcription {token}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py check-transcription {token}
 
 Then do exactly what it prints. Do nothing else.
 
@@ -808,7 +808,7 @@ LINE_OVERLAP = 12
 
 LAB_PLAN_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py plan-lab {token}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py plan-lab {token}
 """
 
 
@@ -892,8 +892,8 @@ def cmd_intake_regimen(args):
         print("NO REGIMEN — there is nothing describing what the user takes.")
         print("   looked for: regimen.txt in %s" % INPUTS.replace(os.path.expanduser("~"), "~"))
         print("\nResolve it and run this again, whichever the user offered:")
-        print("   python3 ~/.hermes/rx-review/rx.py regimen --from-gdoc <doc-id>")
-        print("   python3 ~/.hermes/rx-review/rx.py regimen --from <path>")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py regimen --from-gdoc <doc-id>")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py regimen --from <path>")
         print("\nA review of no substances is not a shorter review: the brief exists to relate")
         print("substances to lab markers.")
         return 1
@@ -1033,7 +1033,7 @@ def cmd_intake_labs(args):
             print("   %s" % os.path.basename(_f))
         if len(_unstaged) > 10:
             print("   ... and %d more" % (len(_unstaged) - 10))
-        print("\nStage them first:  python3 ~/.hermes/rx-review/rx.py stage")
+        print("\nStage them first:  python3 ~/hermes-skills/rx-review/scripts/rx.py stage")
         print("Starting now would review a partial set and say nothing about it.")
         return 1
 
@@ -1046,7 +1046,7 @@ def cmd_intake_labs(args):
     if not unique_pdfs(RAW)[0]:
         print("NO LAB PDFs — nothing staged to transcribe.")
         print("   looked in: %s" % RAW.replace(os.path.expanduser("~"), "~"))
-        print("\nRun `python3 ~/.hermes/rx-review/rx.py stage` first. A review with no labs is")
+        print("\nRun `python3 ~/hermes-skills/rx-review/scripts/rx.py stage` first. A review with no labs is")
         print("not a supplements-only brief; it is an upload that did not arrive.")
         return 1
 
@@ -1122,14 +1122,14 @@ def _resolve_plan_lab_document(args):
     token = (getattr(args, "token", None) or "").strip()
     if not token:
         print("This command needs the token from this card's body:")
-        print("\n    python3 ~/.hermes/rx-review/rx.py plan-lab <token>\n")
+        print("\n    python3 ~/hermes-skills/rx-review/scripts/rx.py plan-lab <token>\n")
         print("Re-read the card body, copy the token exactly, and run it again.")
         return None
     rec = _xcribe_get(token)
     if not rec or not rec.get("pdf"):
         print("No record for token %s." % token)
         print("\nRe-read this card's body, copy the token exactly, and run it again:")
-        print("\n    python3 ~/.hermes/rx-review/rx.py plan-lab <token>")
+        print("\n    python3 ~/hermes-skills/rx-review/scripts/rx.py plan-lab <token>")
         return None
     return rec["pdf"]
 
@@ -2315,11 +2315,11 @@ def cmd_staged(args):
             print("      %s" % os.path.basename(_f))
         if len(_missing) > 8:
             print("      ... and %d more" % (len(_missing) - 8))
-        print("      Stage them:  python3 ~/.hermes/rx-review/rx.py stage")
+        print("      Stage them:  python3 ~/hermes-skills/rx-review/scripts/rx.py stage")
     print("\nASK THE USER whether more labs are coming, and WAIT for their answer. Nothing runs")
     print("until they say the set is complete; when they do, record it and start:")
-    print("   python3 ~/.hermes/rx-review/rx.py uploads-done")
-    print("   python3 ~/.hermes/rx-review/rx.py start")
+    print("   python3 ~/hermes-skills/rx-review/scripts/rx.py uploads-done")
+    print("   python3 ~/hermes-skills/rx-review/scripts/rx.py start")
     return 0
 
 
@@ -2339,11 +2339,11 @@ _ANSWERS = {
     "Stage 3: Finalize Regimen": (
         "'approved' accepts it; '<n> <correction>' fixes one line; '<n> drop' removes one",
         ["When they answer, pass their reply verbatim as the argument:",
-         "    python3 ~/.hermes/rx-review/rx.py correct-item-slug-request \"<their reply>\""]),
+         "    python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request \"<their reply>\""]),
     "Stage 5: Labs Complete": (
         "'looks good' keeps every marker; '2,5 ignore' skips those two",
         # NAME THE TOOL. "Write their reply to inputs/marker-reply.txt" left the method open and
-        # a worker chose `echo "looks good" > ~/.hermes/rx-review/inputs/marker-reply.txt`, which
+        # a worker chose `echo "looks good" > ~/hermes-skills/rx-review/scripts/inputs/marker-reply.txt`, which
         # the security scan flagged HIGH — everything under ~/.hermes is a dotfile path, so any
         # shell redirect there reads as overwriting shell configuration. The user then had to
         # approve a HIGH warning to say "looks good", which is how approving warnings becomes a
@@ -2351,7 +2351,7 @@ _ANSWERS = {
         # for the metacharacters a correction legitimately contains.
         ["When they answer, write their reply verbatim to inputs/marker-reply.txt using the",
          "write_file tool, then run:",
-         "    python3 ~/.hermes/rx-review/rx.py marker-review --batch"]),
+         "    python3 ~/hermes-skills/rx-review/scripts/rx.py marker-review --batch"]),
 }
 
 
@@ -2385,13 +2385,13 @@ def pipeline_state():
         return "halted", "HALTED — %s" % (h[1] or os.path.basename(h[0])), [
             "The review ended here and does not resume.",
             "Tell the user what was rejected and why. To start again, they fix the input, then:",
-            "    python3 ~/.hermes/rx-review/rx.py reset --confirm"]
+            "    python3 ~/hermes-skills/rx-review/scripts/rx.py reset --confirm"]
 
     cards = board_cards()
     if not cards:
         return "unknown", "NO BOARD — nothing has been started, or the CLI is unreachable.", [
             "If the user is starting a review, stage their labs first:",
-            "    python3 ~/.hermes/rx-review/rx.py stage"]
+            "    python3 ~/hermes-skills/rx-review/scripts/rx.py stage"]
 
     by_status = {}
     for c in cards:
@@ -2417,7 +2417,7 @@ def pipeline_state():
                 lines.append("Reason: %s" % reason)
             lines += ["Tell the user that, and that it needs fixing rather than answering.",
                       "For the detail behind it, run:",
-                      "    python3 ~/.hermes/rx-review/rx.py doctor"]
+                      "    python3 ~/hermes-skills/rx-review/scripts/rx.py doctor"]
         if len(blocked) > 1:
             lines.append("%d other card(s) are also held." % (len(blocked) - 1))
         return "held", "HOLDING FOR THE USER — %s" % title, lines
@@ -2434,7 +2434,7 @@ def pipeline_state():
                 "    %s" % briefs[-1]]
         return "idle", "IDLE — no cards left to run and no brief written.", [
             "Report this to the user; it is not a state the pipeline reaches on its own. Run:",
-            "    python3 ~/.hermes/rx-review/rx.py doctor"]
+            "    python3 ~/hermes-skills/rx-review/scripts/rx.py doctor"]
 
     return "running", "RUNNING — %d card(s) working, %d queued, %d done." % (
         len(running), len(ready) + len(todo), len(done)), [
@@ -2669,7 +2669,7 @@ def cmd_regimen(args):
     facts = _write_patient_facts(text)
     if facts:
         print("Patient facts: %s -> inputs/patient.md" % facts)
-    print("Now run:  python3 ~/.hermes/rx-review/rx.py stage")
+    print("Now run:  python3 ~/hermes-skills/rx-review/scripts/rx.py stage")
     return 0
 
 
@@ -2963,7 +2963,7 @@ def cmd_reset(args):
                  else "kept; use --clear-web-cache to remove them"))
     if not args.confirm:
         print("\nNothing was deleted. Re-run with --confirm to confirm:")
-        print("   python3 ~/.hermes/rx-review/rx.py reset --confirm")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py reset --confirm")
         return 1
 
     # Tasks are deleted; the board and its kanban.db are left in place. See clear_board().
@@ -4281,7 +4281,7 @@ def cmd_prune_unsourced(args):
         print("   %-52s %s" % (m[:52], src[:44]))
     if not args.confirm:
         print("\nNothing changed. Re-run with --confirm to delete them:")
-        print("   python3 ~/.hermes/rx-review/rx.py prune-unsourced --confirm")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py prune-unsourced --confirm")
         return 1
     names = {_flat(m) for m, _ in bad}
     removed = 0
@@ -4790,7 +4790,7 @@ def cmd_stage(args):
 
     print("\n%d document(s) staged in total." % len(glob.glob(os.path.join(RAW, "*"))))
     print("Run this again after every upload; when the user says the set is complete, start the")
-    print("review with:  python3 ~/.hermes/rx-review/rx.py start")
+    print("review with:  python3 ~/hermes-skills/rx-review/scripts/rx.py start")
     return 0
 
 
@@ -4798,24 +4798,24 @@ def cmd_stage(args):
 # kanban_complete — the model just runs it and reports what it said.
 STAGE_BEGIN_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py {verb}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py {verb}
 """
 
 STAGE_BARRIER_CHECK_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py check-output --stage {n}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py check-output --stage {n}
 """
 
 STAGE_BARRIER_CMD_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py {verb}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py {verb}
 """
 
 
 STAGE_BARRIER_LOOP_BODY = """Run this, then do exactly what it prints — running each command it
 names as the user replies:
 
-    python3 ~/.hermes/rx-review/rx.py {verb}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py {verb}
 
 Do nothing else.
 """
@@ -4960,11 +4960,11 @@ def cmd_uploads_done(args):
     staged = _staged_fingerprints()
     if not staged:
         print("NOTHING STAGED — no lab PDFs to confirm.")
-        print("   Upload the labs, run `python3 ~/.hermes/rx-review/rx.py stage`, then confirm.")
+        print("   Upload the labs, run `python3 ~/hermes-skills/rx-review/scripts/rx.py stage`, then confirm.")
         return 1
     if unstaged_documents():
         print("HELD — documents Hermes received are not staged yet, so this would confirm an")
-        print("incomplete set. Run `python3 ~/.hermes/rx-review/rx.py stage` first.")
+        print("incomplete set. Run `python3 ~/hermes-skills/rx-review/scripts/rx.py stage` first.")
         return 1
     if args.dry_run:
         print("would record the user's confirmation of %d staged lab document(s)" % len(staged))
@@ -4972,7 +4972,7 @@ def cmd_uploads_done(args):
     with open(UPLOADS_DONE, "w", encoding="utf-8") as fh:
         json.dump({"at": int(time.time()), "files": staged}, fh)
     print("Recorded: the user confirmed all %d lab document(s) have been sent." % len(staged))
-    print("\nNow start the review:  python3 ~/.hermes/rx-review/rx.py start")
+    print("\nNow start the review:  python3 ~/hermes-skills/rx-review/scripts/rx.py start")
     return 0
 
 
@@ -4992,7 +4992,7 @@ def cmd_start(args):
     """
     if unstaged_documents():
         print("HELD — documents Hermes received are not staged yet.")
-        print("Run `python3 ~/.hermes/rx-review/rx.py stage` first; starting now would review")
+        print("Run `python3 ~/hermes-skills/rx-review/scripts/rx.py stage` first; starting now would review")
         print("a partial set and say nothing about it.")
         return 1
 
@@ -5010,8 +5010,8 @@ def cmd_start(args):
             regimen_path(), encoding="utf-8", errors="replace").read().strip():
         print("NO REGIMEN — the labs are staged, but nothing says what the user takes.")
         print("\nResolve it first, whichever they offered:")
-        print("   python3 ~/.hermes/rx-review/rx.py regimen --from-gdoc <doc-id>")
-        print("   python3 ~/.hermes/rx-review/rx.py regimen --from <path>")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py regimen --from-gdoc <doc-id>")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py regimen --from <path>")
         print("\nThen start again. The brief exists to relate substances to lab markers, so a")
         print("review with only one of the two halves is not a shorter review.")
         return 1
@@ -5032,7 +5032,7 @@ def cmd_start(args):
         print("early reviews a fraction of the labs and says nothing about it; more history is")
         print("strictly better, since three readings of a marker are what make a trend visible.")
         print("\nWhen they say that is all of them:")
-        print("   python3 ~/.hermes/rx-review/rx.py uploads-done")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py uploads-done")
         return 1
     if arrived_since:
         print("MORE LABS ARRIVED since the user confirmed the set was complete:")
@@ -5041,7 +5041,7 @@ def cmd_start(args):
         if len(arrived_since) > 8:
             print("   ... and %d more" % (len(arrived_since) - 8))
         print("\nASK THE USER whether that is now everything, then re-confirm:")
-        print("   python3 ~/.hermes/rx-review/rx.py uploads-done")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py uploads-done")
         return 1
 
     if args.dry_run:
@@ -5306,7 +5306,7 @@ def _append_coverage_drop(name):
 
 _AWAIT_REPLY = (
     "When the user replies, pass their reply VERBATIM to this, then do exactly what it prints:\n"
-    "    python3 ~/.hermes/rx-review/rx.py correct-item-slug-request \"<their reply>\"\n"
+    "    python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request \"<their reply>\"\n"
     "Do nothing else.")
 
 
@@ -5479,7 +5479,7 @@ def cmd_correct_item_slug_request(args):
     with open(os.path.join(INPUTS, ".correction-pending"), "w", encoding="utf-8") as fh:
         fh.write("%d\n" % num)
     print("Merge the correction into this line, then run:\n"
-          "    python3 ~/.hermes/rx-review/rx.py correct-item-slug-response \"<merged line>\"\n"
+          "    python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-response \"<merged line>\"\n"
           "LINE:       | %s | %s | %s | %s | %s | %s |\nCORRECTION: %s\nDo nothing else."
           % (target[1:] + (rest,)))
     return 0
@@ -5625,8 +5625,8 @@ def cmd_labs_brief(args):
         print("WHEN THE USER REPLIES: write their reply VERBATIM to inputs/marker-reply.txt using "
               "the write_file tool (do not interpret or renumber it), then run — in order — and "
               "report what each prints:")
-        print("    python3 ~/.hermes/rx-review/rx.py marker-review --batch")
-        print("    python3 ~/.hermes/rx-review/rx.py labs-accept")
+        print("    python3 ~/hermes-skills/rx-review/scripts/rx.py marker-review --batch")
+        print("    python3 ~/hermes-skills/rx-review/scripts/rx.py labs-accept")
         print("The script routes each decision by the number the user wrote. If marker-review "
               "--batch reports lines it could not read, ask the user to restate just those, update "
               "the reply file, and run it again before labs-accept.")

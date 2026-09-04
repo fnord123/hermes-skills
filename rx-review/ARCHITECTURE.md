@@ -415,7 +415,7 @@ is the only card that reads its three fragments; it writes the subject's report
 report-producing card carries the endnote contract.
 
 **The Efficacy card (6a only, dated substances only).** After `shard()` returns a substance's synthesis id, the family loop creates — only when that substance's `Started` field in `regimen-final.md` is non-blank — one `Efficacy: <substance>` Worker, profile `rx-research`, runtime 30m, parented on that substance's synthesis, and spliced in front of the `Stage 6a: Substances Researched` Barrier like a synthesis (its id is appended to the same list the Barrier is spliced from). It answers one question: is this medication moving the markers its research says it moves? It reads `PART-research-<slug>-2.md` — the part-2 fragment, which holds the answer to question 4 (which lab markers the substance is known to move, in which direction) — takes that answer as the ONLY marker list (no re-research), runs, per marker,
-`python3 ~/.hermes/rx-review/rx.py before-after --marker <marker> --since <started>`,
+`python3 ~/hermes-skills/rx-review/scripts/rx.py before-after --marker <marker> --since <started>`,
 and writes `efficacy-<slug>.md` to `reports/`: for each marker the expected direction, the observed pre→post values, the delta, and the post-start draw count; the part-2 citation carried into the endnotes; observed values labelled "from the user's labs". `before-after` is pure arithmetic — it splits the confirmed dated series at the start date and prints pre values, post values, delta, and the post-start draw count — so the drug↔marker knowledge stays in the research (the LLM's question-4 answer) and the script never learns what a statin is. "Too early to tell" is a first-class result, reported with the post-start draw count (even 0 or 1); a single early post draw is not evidence of effect. It recommends nothing. Blank `Started` ⇒ no Efficacy card ⇒ the supplement's graph is byte-identical to today.
 
 For **6a and 6b** this is the whole story; **6c** defers it. A trend first gets a single **triage**
@@ -1121,7 +1121,7 @@ otherwise.
 `~/.hermes/hooks/terminal-pipeline-only.sh` holds this board's `terminal` to an allowlist:
 
 ```
-python3 ~/.hermes/rx-review/{rx,rxsplit,fanout,lenses,verify}.py ...
+python3 ~/hermes-skills/rx-review/scripts/{rx,rxsplit,fanout,lenses,verify}.py ...
 python3 ~/hermes-skills/web-access/scripts/web_access.py search|fetch ...
 python3 ~/hermes-skills/browse-task/scripts/browse_task.py ...
 ```

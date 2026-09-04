@@ -9,7 +9,7 @@
 # Hooks are not carried by `git clone`, which is why this is a script you run rather than a
 # file that just appears:
 #
-#     bash ~/.hermes/rx-review/install-git-hooks.sh
+#     bash ~/hermes-skills/rx-review/scripts/install-git-hooks.sh
 #
 # Bypass a single commit with `git commit --no-verify` when you genuinely mean to.
 set -euo pipefail

@@ -35,16 +35,16 @@ Two repos, both pushed, both green.
 `~/.hermes/profiles/*` is gitignored; `provision-profiles.py` is the only durable record of the
 nine `rx-*` profiles.
 
-**Checks — all five must pass; the pre-commit hook runs the first three.**
+**Checks — all five must pass; the hermes-skills repo CI runs the first four.**
 
 ```
-cd ~/.hermes/rx-review
+cd ~/hermes-skills/rx-review/scripts
 python3 rx_test.py                          # 434 checks
 python3 card_command_test.py                # 32 card commands vs the terminal allowlist
 python3 cardmap.py --check                  # ARCHITECTURE.md's generated card map is current
-bash ~/.hermes/hooks/test-terminal-pipeline-only.sh
-python3 ~/.hermes/provision_profiles_test.py
+bash test-terminal-pipeline-only.sh         # the allowlist's own block/allow battery
 ```
+(Plus, in the Hermes repo: `python3 provision_profiles_test.py`.)
 
 **23 verbs**: `stage start intake-regimen intake-supplements intake-labs analyze merge-labs
 labs-brief verify-labs labs-report labs-confirm labs-reject regimen regimen-confirm

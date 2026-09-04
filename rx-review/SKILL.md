@@ -51,7 +51,7 @@ review already running.
 
 ## The tool
 
-One script, invoked as `python3 ~/.hermes/rx-review/rx.py <verb> [args]`.
+One script, invoked as `python3 ~/hermes-skills/rx-review/scripts/rx.py <verb> [args]`.
 
 | Verb | Purpose |
 |---|---|
@@ -79,7 +79,7 @@ them itself, on its own schedule.
 
 Ask for the lab PDFs. After every message that carries attachments, run:
 
-    python3 ~/.hermes/rx-review/rx.py stage
+    python3 ~/hermes-skills/rx-review/scripts/rx.py stage
 
 It copies every PDF Hermes has received into the intake folder and names each one it staged.
 Run it again whenever more arrive; already-staged files are skipped, so running it twice costs
@@ -88,7 +88,7 @@ nothing.
 **Chat platforms cap attachments per message — Discord allows 10 — so a full lab history
 usually arrives in several rounds.** After each round, run:
 
-    python3 ~/.hermes/rx-review/rx.py staged
+    python3 ~/hermes-skills/rx-review/scripts/rx.py staged
 
 Report what it says: how many are waiting, and any it recognised as duplicates. If it warns
 that PDFs were received but not staged, run `stage` again and re-check.
@@ -99,7 +99,7 @@ content, so a duplicate is ignored rather than transcribed twice.
 
 When the user says that is all of them, record it:
 
-    python3 ~/.hermes/rx-review/rx.py uploads-done
+    python3 ~/hermes-skills/rx-review/scripts/rx.py uploads-done
 
 `start` refuses until this has been run, and refuses again if a document arrives afterwards —
 re-run it when the user confirms the later ones too.
@@ -109,7 +109,7 @@ panel — an endoscopy or imaging report, a clinical note, or a scan with no tex
 file, say what it looks like, and ask whether it was meant to be included. A narrative report
 has no marker table, so the transcriber has nothing to read and a card is spent for nothing.
 This is a warning, not a refusal: if the user says it is a lab, include it. If it was a
-mistake, delete just that file from `~/.hermes/rx-review/inputs/raw/` and run `staged` again.
+mistake, delete just that file from `~/hermes-skills/rx-review/scripts/inputs/raw/` and run `staged` again.
 
 `stage` only copies — it does not begin the review, so running it after every round is free
 and cannot start anything early. `start` is what begins it, and that comes later.
@@ -131,11 +131,11 @@ Take whichever the user offers:
 For a Google Doc: find the doc id (the google-docs skill's `docs.py find "<title>"` does this),
 then record it with ONE command — it reads the doc itself:
 
-    python3 ~/.hermes/rx-review/rx.py regimen --from-gdoc <doc-id>
+    python3 ~/hermes-skills/rx-review/scripts/rx.py regimen --from-gdoc <doc-id>
 
 For a local file:
 
-    python3 ~/.hermes/rx-review/rx.py regimen --from ~/notes/meds.md
+    python3 ~/hermes-skills/rx-review/scripts/rx.py regimen --from ~/notes/meds.md
 
 If either command reports an error, show the error to the user and ask how to proceed.
 
@@ -153,8 +153,8 @@ looks products up and asks about the rest.
 Wait for the user to say they are done uploading. Confirm the count back to them first
 (`rx.py staged`), then:
 
-    python3 ~/.hermes/rx-review/rx.py stage
-    python3 ~/.hermes/rx-review/rx.py start
+    python3 ~/hermes-skills/rx-review/scripts/rx.py stage
+    python3 ~/hermes-skills/rx-review/scripts/rx.py start
 
 That is the only time you push. `start` is stage 1 of 5, and it refuses if anything Hermes
 received is still unstaged, if no lab PDFs are staged at all, or if you have not resolved the
@@ -170,20 +170,20 @@ Supplement Facts, and posts its own checkpoints. **Nothing below is something yo
 The pipeline posts blocked cards when it needs a human. Each one notifies Discord, but the
 notification is only a one-line signal — **read the card for the detail**:
 
-    python3 ~/.hermes/rx-review/rx.py status
+    python3 ~/hermes-skills/rx-review/scripts/rx.py status
     hermes kanban --board rx-review show <card-id>
 
 ### "CONFIRM YOUR LABS" / "Labs review"
 
 The card reports how many out-of-range markers were found. Show those to the user so they can confirm. Then ask whether that matches their results.
 
-The same confirmation carries a **Derived scores** section, which includes the FIB-4 liver-fibrosis risk score. FIB-4 is the first pipeline need for the user's age, which the pipeline does not otherwise carry. The age travels in the patient document itself: if it carries a `Name:` / `Age:` / `DOB:` line, `rx.py regimen` already materialised it to `~/.hermes/rx-review/inputs/patient.md` at ingest. If FIB-4 reports the age unrecorded, add a `DOB:` line to the document (prefer `DOB:` over `Age:` — the code recomputes the age at read time, so the score stays correct on the next birthday without anyone bumping a number) and re-run the same `regimen` verb; the file refreshes itself. As a fallback you may write `Age: <n>` (or `DOB: <date>`) to `~/.hermes/rx-review/inputs/patient.md` directly, then run `rx.py fib4` to confirm it resolves. Until an age is recorded, the report says FIB-4 is not computable, which is the correct refusal.
+The same confirmation carries a **Derived scores** section, which includes the FIB-4 liver-fibrosis risk score. FIB-4 is the first pipeline need for the user's age, which the pipeline does not otherwise carry. The age travels in the patient document itself: if it carries a `Name:` / `Age:` / `DOB:` line, `rx.py regimen` already materialised it to `~/hermes-skills/rx-review/scripts/inputs/patient.md` at ingest. If FIB-4 reports the age unrecorded, add a `DOB:` line to the document (prefer `DOB:` over `Age:` — the code recomputes the age at read time, so the score stays correct on the next birthday without anyone bumping a number) and re-run the same `regimen` verb; the file refreshes itself. As a fallback you may write `Age: <n>` (or `DOB: <date>`) to `~/hermes-skills/rx-review/scripts/inputs/patient.md` directly, then run `rx.py fib4` to confirm it resolves. Until an age is recorded, the report says FIB-4 is not computable, which is the correct refusal.
 
 **The document is the surface; `inputs/patient.md` is what the pipeline reads from** — the same split the regimen itself has (`regimen.txt`). The materialiser never deletes, so a document that drops its fact lines keeps the last recorded age in place. Note also that `fib4` exists only once the FIB-4 branch of the pipeline code is merged to main; until then the verb is absent from the running pipeline even if the age file is in place.
 
 If they confirm, run:
 
-    python3 ~/.hermes/rx-review/rx.py labs-accept
+    python3 ~/hermes-skills/rx-review/scripts/rx.py labs-accept
 
 That records the answer and closes the card. Do NOT unblock this card instead - unblocking
 re-runs it, the card asks for confirmation again, and Hermes treats the second block as a
@@ -193,16 +193,16 @@ forever.
 **If they confirm but do not want some markers researched** — "these are right, but don't
 bother with vitamin D" — use `--ignore` on the same command; an exclusion is part of a confirmation:
 
-    python3 ~/.hermes/rx-review/rx.py labs-accept --ignore "VITAMIN D, FERRITIN"
+    python3 ~/hermes-skills/rx-review/scripts/rx.py labs-accept --ignore "VITAMIN D, FERRITIN"
 
 **If they say the transcription is WRONG** — a value misread, a marker that is not theirs — that
 is a rejection, and it ends the review:
 
-    python3 ~/.hermes/rx-review/rx.py labs-reject --reason "THEIR EXACT WORDS"
+    python3 ~/hermes-skills/rx-review/scripts/rx.py labs-reject --reason "THEIR EXACT WORDS"
 
 **If the transcription is wrong** — a value misread, a marker that is not theirs — that is a rejection:
 
-    python3 ~/.hermes/rx-review/rx.py labs-reject --reason "THEIR EXACT WORDS"
+    python3 ~/hermes-skills/rx-review/scripts/rx.py labs-reject --reason "THEIR EXACT WORDS"
 
 Do not offer to re-transcribe. They saw one bad row, not the set of bad rows, and re-running the
 same cards over the same PDFs asks the model that misread the document to check its own reading.
@@ -215,7 +215,7 @@ stay in the report and in `labs.md`; only their research cards are skipped.
 **If they say the transcription is WRONG** — a value misread, a marker that is not theirs — that
 is a rejection, not an exclusion, and it ends the review:
 
-    python3 ~/.hermes/rx-review/rx.py labs-reject --reason "THEIR EXACT WORDS"
+    python3 ~/hermes-skills/rx-review/scripts/rx.py labs-reject --reason "THEIR EXACT WORDS"
 
 Do not offer to re-transcribe. They saw one bad row, not the set of bad rows, and re-running the
 same cards over the same PDFs asks the model that misread the document to check its own reading.
@@ -236,7 +236,7 @@ Stage 3 posts the WHOLE regimen as one numbered list to chat and blocks, waiting
 
 When the user replies, pass their reply VERBATIM to ONE verb and do exactly what it prints:
 
-    python3 ~/.hermes/rx-review/rx.py correct-item-slug-request "<their reply verbatim>"
+    python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "<their reply verbatim>"
 
 That single command handles every case:
 
@@ -259,7 +259,7 @@ If the regimen itself is wrong in a way answering cannot fix — the reading cap
 products, half the regimen is missing — that is a rejection, and it ends the review the same way
 `labs-reject` does:
 
-    python3 ~/.hermes/rx-review/rx.py regimen-reject --reason "THEIR EXACT WORDS"
+    python3 ~/hermes-skills/rx-review/scripts/rx.py regimen-reject --reason "THEIR EXACT WORDS"
 
 ### "Start the research stage" is blocked
 
@@ -288,7 +288,7 @@ never repeated, and a re-sent file is recognised by content and ignored.
 ## If something fails
 
 Report the exact error and ask how they want to proceed. Do not edit files under
-`~/.hermes/rx-review/` other than `regimen.txt`, `CONFIRMED.txt`, and `inputs/patient.md`
+`~/hermes-skills/rx-review/scripts/` other than `regimen.txt`, `CONFIRMED.txt`, and `inputs/patient.md`
 (the user's age, for FIB-4), and never create, edit or
 complete a kanban card by hand — unblocking a card the pipeline blocked is the one exception.
 
@@ -297,7 +297,7 @@ complete a kanban card by hand — unblocking a card the pipeline blocked is the
 - The user's confirmation says a lab value is wrong → ask which marker, then re-run that
   lab's card.
 - The user does not know a value the pipeline is asking about → add that product name on its
-  own line to `~/.hermes/rx-review/inputs/CONFIRMED.txt` and tell them it will be researched
+  own line to `~/hermes-skills/rx-review/scripts/inputs/CONFIRMED.txt` and tell them it will be researched
   with the gap noted.
 
 Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.

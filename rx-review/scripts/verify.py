@@ -769,7 +769,7 @@ def cmd_fanout(args):
 
 MERGE_BODY = """Run this, then kanban_complete with the totals it prints:
 
-    python3 ~/.hermes/rx-review/verify.py merge
+    python3 ~/hermes-skills/rx-review/scripts/verify.py merge
 
 Do nothing else.
 """
@@ -955,7 +955,7 @@ MAX_SWEEP_ROUNDS = 4
 
 SWEEP_BODY = """Run this, then act on its FIRST line:
 
-    python3 ~/.hermes/rx-review/verify.py sweep --round {n}
+    python3 ~/hermes-skills/rx-review/scripts/verify.py sweep --round {n}
 
 - `SWEEP: CLEAN` — kanban_complete with the metadata printed.
 - `SWEEP: SCHEDULED` — kanban_complete, declaring the ids it printed in created_cards=[...], with

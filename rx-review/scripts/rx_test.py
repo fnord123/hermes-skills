@@ -3277,7 +3277,7 @@ def main():
         rx.sh = lambda cmd, **k: (_calls.append(cmd),
                                   type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())[1]
         # This card WAS told to run the verb under test (fail-open default; body read returns it).
-        rx._card_body = lambda cid: "run: python3 ~/.hermes/rx-review/rx.py %s x" % _VERB[0]
+        rx._card_body = lambda cid: "run: python3 ~/hermes-skills/rx-review/scripts/rx.py %s x" % _VERB[0]
         _VERB = ["merge-labs"]
         rx._CARD_ACTED = False
         rx._autosettle("merge-labs", 0)
@@ -3305,12 +3305,12 @@ def main():
         # returned 1 (bad path) and blocked the Transcribe card, whose job was check-transcription.
         _calls.clear(); rx._CARD_ACTED = False
         rx._card_body = lambda cid: ("The lab results printed below ... run:\n"
-                                     "    python3 ~/.hermes/rx-review/rx.py check-transcription abc")
+                                     "    python3 ~/hermes-skills/rx-review/scripts/rx.py check-transcription abc")
         rx._autosettle("plan-lab", 1)
         check("an auto-settle verb NOT named in the card body leaves the card alone", _calls, [],
               "a worker's exploratory plan-lab must not block a card whose job is check-transcription")
         _calls.clear(); rx._CARD_ACTED = False
-        rx._card_body = lambda cid: "run: python3 ~/.hermes/rx-review/rx.py plan-lab abc123def456"
+        rx._card_body = lambda cid: "run: python3 ~/hermes-skills/rx-review/scripts/rx.py plan-lab abc123def456"
         rx._autosettle("plan-lab", 1)
         check("even the card's OWN assigned verb is not blocked on a bare non-zero", _calls, [],
               "the assigned verb is the one whose retry can fix it — blocking is what stranded "
@@ -3580,7 +3580,7 @@ def main():
         for _c in (l.strip() for l in _body.splitlines()
                    if l.strip().startswith("python3") and "rx-review/rx.py" in l):
             check("%s uses the literal rx.py path" % _name,
-                  "~/.hermes/rx-review/rx.py" in _c and "{tilde}" not in _c, True,
+                  "~/hermes-skills/rx-review/scripts/rx.py" in _c and "{tilde}" not in _c, True,
                   "{tilde} in a command line is refused by the terminal hook at run time")
     # A Stage Begin or Barrier card runs exactly ONE command — two would leave the worker choosing.
     for _name in ("STAGE_BEGIN_BODY", "STAGE_BARRIER_CMD_BODY"):
@@ -3646,7 +3646,7 @@ def main():
         rx.marker_series = _saved_ms
 
     check("EFFICACY_BODY runs the before-after verb by its literal path",
-          "python3 ~/.hermes/rx-review/rx.py before-after --marker" in fan.EFFICACY_BODY, True,
+          "python3 ~/hermes-skills/rx-review/scripts/rx.py before-after --marker" in fan.EFFICACY_BODY, True,
           "a {tilde} command would be refused by the terminal hook at run time")
     check("EFFICACY_BODY names the part-2 fragment as the only marker list",
           "PART-research-{slug}-2.md" in fan.EFFICACY_BODY, True,

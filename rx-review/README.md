@@ -2,7 +2,7 @@
 
 Reviews the user's medications and supplements against their blood tests and
 produces a discussion brief for their prescriber. The work is done by a kanban
-pipeline at `~/.hermes/rx-review/`; the skill is the human interface to it.
+pipeline at `~/hermes-skills/rx-review/scripts/`; the skill is the human interface to it.
 
 ## Verb scope
 

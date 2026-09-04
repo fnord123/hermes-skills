@@ -305,7 +305,7 @@ The user's recorded start date for this substance is: {started}
    move, and in which direction. That answer is the ONLY marker list you use; do not re-research
    the literature on this card.
 2. For EACH lab marker named there, run:
-       python3 ~/.hermes/rx-review/rx.py before-after --marker <marker> --since {started}
+       python3 ~/hermes-skills/rx-review/scripts/rx.py before-after --marker <marker> --since {started}
    The verb splits the user's confirmed dated lab series at the start date and prints the pre
    values, the post values, the delta, and the number of post-start draws. It is pure
    arithmetic — use its numbers as-is; do not recompute or adjust them.

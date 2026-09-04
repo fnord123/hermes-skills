@@ -36,21 +36,26 @@ t "web_access search"                      ALLOW "$DB" 'python3 ~/hermes-skills/
 t "web_access fetch --browser"             ALLOW "$DB" 'python3 /home/dputzolu/hermes-skills/web-access/scripts/web_access.py fetch --url "https://x.com" --browser'
 t "web_access from the other skills dir"   ALLOW "$DB" 'python3 ~/.hermes/skills/web-access/scripts/web_access.py fetch --url "https://x.com"'
 t "browse_task"                            ALLOW "$DB" 'python3 ~/hermes-skills/browse-task/scripts/browse_task.py --task "read it"'
-t "rx.py"                                  ALLOW "$DB" 'python3 ~/.hermes/rx-review/rx.py labs-report'
-t "rxsplit.py"                             ALLOW "$DB" 'python3 ~/.hermes/rx-review/rxsplit.py extract --pdf a.pdf'
+t "rx.py"                                  ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py labs-report'
+t "rxsplit.py"                             ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rxsplit.py extract --pdf a.pdf'
+# Transition cases (the old path stays permitted until the ~/.hermes/rx-review symlink is
+# removed): a worker on an in-flight card still carries the old path, and a planted copy at the
+# old path's shape must still be refused.
+t "old-path symlink form, allowed"         ALLOW "$DB" 'python3 ~/.hermes/rx-review/rx.py labs-report'
+t "planted old-path shape, refused"        BLOCK "$DB" 'python3 /tmp/evil/.hermes/rx-review/rx.py x'
 
 echo
 echo "a wrapped command is one command"
-t "backslash continuation, permitted"      ALLOW "$DB" 'python3 ~/.hermes/rx-review/rxsplit.py extract \
+t "backslash continuation, permitted"      ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rxsplit.py extract \
     --pdf a.pdf --pages 1-4 --out /tmp/a.txt'
-t "continuation cannot smuggle a second"   BLOCK "$DB" 'python3 ~/.hermes/rx-review/rx.py x \
+t "continuation cannot smuggle a second"   BLOCK "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py x \
     ; cat ~/.hermes/.env'
 
 echo
 echo "the restricted board — command chaining (only ; && and newlines) is blocked"
-t "chained after a permitted script (;)"   BLOCK "$DB" 'python3 ~/.hermes/rx-review/rx.py x; cat ~/.hermes/.env'
-t "chained with &&"                        BLOCK "$DB" 'python3 ~/.hermes/rx-review/rx.py x && cat ~/.hermes/.env'
-t "newline smuggling"                      BLOCK "$DB" 'python3 ~/.hermes/rx-review/rx.py
+t "chained after a permitted script (;)"   BLOCK "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py x; cat ~/.hermes/.env'
+t "chained with &&"                        BLOCK "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py x && cat ~/.hermes/.env'
+t "newline smuggling"                      BLOCK "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py
 cat ~/.hermes/.env'
 
 echo
@@ -58,14 +63,14 @@ echo "the restricted board — commands not on the allowlist"
 t "a general shell command"                BLOCK "$DB" 'cat ~/.hermes/.env'
 t "planted dir of the right name"          BLOCK "$DB" 'python3 /tmp/evil/rx-review/rx.py'
 t "planted skills dir"                     BLOCK "$DB" 'python3 /tmp/hermes-skills/web-access/scripts/web_access.py search --query x'
-t "a pipeline script not on the list"      BLOCK "$DB" 'python3 ~/.hermes/rx-review/rxcache.py'
+t "a pipeline script not on the list"      BLOCK "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rxcache.py'
 
 echo
 echo "operators the owner deliberately allows in an argument (relaxed 2026-08-06)"
-t "single & in a reply argument"           ALLOW "$DB" 'python3 ~/.hermes/rx-review/rx.py correct-item-slug-request "2 food & water"'
-t "pipe in a reply argument"               ALLOW "$DB" 'python3 ~/.hermes/rx-review/rx.py correct-item-slug-request "2 morning | evening"'
-t "redirect chars in a reply argument"     ALLOW "$DB" 'python3 ~/.hermes/rx-review/rx.py correct-item-slug-request "2 dose <100mg >50"'
-t "dollar-paren in a reply argument"       ALLOW "$DB" 'python3 ~/.hermes/rx-review/rx.py correct-item-slug-request "2 $(pill)"'
+t "single & in a reply argument"           ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 food & water"'
+t "pipe in a reply argument"               ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 morning | evening"'
+t "redirect chars in a reply argument"     ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 dose <100mg >50"'
+t "dollar-paren in a reply argument"       ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 $(pill)"'
 
 echo
 echo "$pass passed, $fail failed"

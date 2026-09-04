@@ -46,11 +46,11 @@ PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 # with a message about shell operators that says nothing about the real mistake.)
 ANGLE = re.compile(r"<[a-z][a-z0-9 _-]*>", re.I)
 FILLERS = {
-    "pdf": "/home/dputzolu/.hermes/rx-review/inputs/labs/report.pdf",
+    "pdf": "/home/dputzolu/hermes-skills/rx-review/scripts/inputs/labs/report.pdf",
     "pages": "8", "first": "1", "last": "4", "slug": "report", "tag": "p1-4",
-    "inputs": "/home/dputzolu/.hermes/rx-review/inputs",
-    "reports": "/home/dputzolu/.hermes/rx-review/reports",
-    "tilde": "~/.hermes/rx-review/inputs",
+    "inputs": "/home/dputzolu/hermes-skills/rx-review/scripts/inputs",
+    "reports": "/home/dputzolu/.hermes/reports/rx-review/current",
+    "tilde": "~/hermes-skills/rx-review/scripts/inputs",
 }
 
 

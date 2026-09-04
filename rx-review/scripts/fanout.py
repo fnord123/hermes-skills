@@ -22,8 +22,8 @@ Card bodies are templates — substance and marker names are substituted in, so 
 row to the regimen file is the only thing needed to get it researched.
 
 Usage:
-    python3 ~/.hermes/rx-review/fanout.py --phase research --dry-run   # preview the shells
-    python3 ~/.hermes/rx-review/fanout.py --phase research --family substances
+    python3 ~/hermes-skills/rx-review/scripts/fanout.py --phase research --dry-run   # preview the shells
+    python3 ~/hermes-skills/rx-review/scripts/fanout.py --phase research --family substances
 
 Re-running is safe: every card carries an idempotency key derived from its title.
 """
@@ -582,7 +582,7 @@ Then kanban_complete with a <=120 word summary and metadata:
 # self-completes it. Parented on the triage, so the verdict it reads is already written.
 TREND_DISPATCH_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py trend-dispatch --slug {slug} --triage {triage}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py trend-dispatch --slug {slug} --triage {triage}
 """
 
 # Substance questions group by theme rather than one-per-card: eight questions would make eight
@@ -615,7 +615,7 @@ The user's recorded start date for this substance is: {started}
    move, and in which direction. That answer is the ONLY marker list you use; do not re-research
    the literature on this card.
 2. For EACH lab marker named there, run:
-       python3 ~/.hermes/rx-review/rx.py before-after --marker <marker> --since {started}
+       python3 ~/hermes-skills/rx-review/scripts/rx.py before-after --marker <marker> --since {started}
    The verb splits the user's confirmed dated lab series at the start date and prints the pre
    values, the post values, the delta, and the number of post-start draws. It is pure
    arithmetic — use its numbers as-is; do not recompute or adjust them. If a marker name is
@@ -770,14 +770,14 @@ def create(args, title, assignee, body, parents=(), runtime="45m", priority=0):
 # The family builder (this verb) self-completes the substage Begin; the body just runs it.
 SUBSTAGE_BEGIN_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py analyze-research --family {family}
+    python3 ~/hermes-skills/rx-review/scripts/rx.py analyze-research --family {family}
 """
 
 # A pure sync barrier: its worker cards are its kanban parents, so by the time it runs they are
 # done. `settle` completes it. No read_file check, no kanban_complete for the model to do.
 SUBSTAGE_BARRIER_BODY = """Run this and report what it printed. Do nothing else:
 
-    python3 ~/.hermes/rx-review/rx.py settle
+    python3 ~/hermes-skills/rx-review/scripts/rx.py settle
 """
 
 SUBSTAGES = [

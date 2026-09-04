@@ -161,7 +161,7 @@ When done, kanban_complete with metadata: {{"chunk": "{chunk}", "findings": N}}
 
 MERGE_BODY = """Run this, then kanban_complete with the totals it prints:
 
-    python3 ~/.hermes/rx-review/lenses.py merge --lens {lens}
+    python3 ~/hermes-skills/rx-review/scripts/lenses.py merge --lens {lens}
 
 Do nothing else.
 """
