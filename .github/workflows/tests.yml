@@ -38,3 +38,12 @@ jobs:
       # pipeline code moved into this skill.)
       - name: rx-review architecture card map is current
         run: python3 rx-review/scripts/cardmap.py --check
+
+      # The terminal allowlist is a security boundary and has had two real bypasses: a path
+      # matched anywhere in the string admitted /tmp/evil/rx-review/rx.py, and an ERE `\n`
+      # (which matches the letter n) blocked every command containing "python3". Both looked
+      # like a working guard. Nothing ran these until 2026-07-31. The test lives beside the
+      # real allowlist now (moved from the Hermes repo, 2026-09-04), so it exercises the actual
+      # file, not a shim.
+      - name: rx-review terminal allowlist
+        run: bash rx-review/scripts/test-terminal-pipeline-only.sh

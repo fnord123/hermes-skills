@@ -119,7 +119,9 @@ fi
 # defeated the whole allowlist. The path must begin at the home directory.
 HOME_RE='(~|/home/[A-Za-z0-9._-]+)'
 SKILLS_RE="$HOME_RE/(hermes-skills|\.hermes/skills)"
-PIPELINE="$HOME_RE/\.hermes/rx-review/(rx|rxsplit|fanout|lenses|verify)\.py"
+# The pipeline lives in the hermes-skills repo (moved 2026-09-04); ~/.hermes/rx-review is a local
+# symlink to it that will be removed after one clean run, so BOTH paths are permitted until then.
+PIPELINE="$HOME_RE/((\.hermes/rx-review)|(hermes-skills/rx-review/scripts))/(rx|rxsplit|fanout|lenses|verify)\.py"
 # The board's only route to the network, now that the `web` toolset is gone from these
 # profiles. It wraps search and fetch, so removing the built-in tools costs the board nothing.
 WEBACCESS="$SKILLS_RE/web-access/scripts/web_access\.py"
