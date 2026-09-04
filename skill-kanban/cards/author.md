@@ -94,7 +94,7 @@ HANDOFF (use your kanban_* tools; your own task id is the default)
    title "Audit: <skill> <mode>"
    assignee {{ASSIGNEE}}
    workspace_kind "dir", workspace_path "{{REPO_DIR}}"
-   skills ["{{HOUSE_SKILL}}", "{{STD_SKILL}}"], max_runtime_seconds 1800
+   skills ["{{HOUSE_SKILL}}"], max_runtime_seconds 1800
    parents [your task id]
    body: the handoff payload (mode, skill, draft path, draft sha256,
    live anchor for updates, the trigger diff, the script-contract
