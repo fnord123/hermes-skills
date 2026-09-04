@@ -67,7 +67,7 @@ Read on demand from Phase 14 of `SKILL.md`. Use this skeleton verbatim.
 |---|---|
 | Current price | |
 | Years to maturity | |
-| De minimis threshold (par − 0.25% × YTM) | |
+| De minimis threshold (par − 0.25% × years_to_maturity) | |
 | Below threshold? | yes / no |
 | After-tax yield treating discount as ordinary income (if below) | |
 

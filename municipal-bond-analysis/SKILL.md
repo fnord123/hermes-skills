@@ -68,11 +68,11 @@ Output: a structured markdown report saved to `~/.hermes/reports/muni/{CUSIP}.md
 
 1. **Never fabricate data.** Every yield, rating, coupon, call date, DSCR, tax-base figure, or material event must come from a tool call against EMMA, the official statement, a ratings agency, or independent reporting. If a figure cannot be verified, write `DATA UNAVAILABLE` and explain what was tried.
 2. **Always cite via clickable footnotes.** Use GitHub-flavored markdown footnote syntax `[^N]` after every non-obvious factual claim. Definitions take the form `[^N]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>` — the source title is the link text. **All URLs (body and footnotes) must use markdown link syntax `[descriptive text](url)`.** Bare URLs are forbidden even though GitHub auto-links them. Reuse a footnote number when citing the same source again; do not duplicate definitions.
-3. **Date-stamp everything.** Yield curves move daily, ratings change, material events post weekly, DSCR reports are annual. State the as-of date for every figure. Flag any price or yield older than the most recent trading day, and any credit metric older than the most recent continuing-disclosure filing.
+3. **Date-stamp everything.** Yield curves move daily, ratings change, material events post weekly, DSCR reports are annual. State the as-of date for every figure. Flag any price or yield older than the most recent trading day. For a credit metric, use the most recent continuing-disclosure filing that reports that metric. If it is more than 18 months old, state the gap and treat the metric as data-impaired (see `references/credit-benchmarks.md`).
 4. **Use the user's actual tax bracket.** Compute both federal-only TEY and federal+state TEY explicitly using the configured rates. Never assume the top bracket without checking. If the bond is in-state for the user's `state_code`, the federal+state TEY is the relevant comparison; if out-of-state, federal-only is correct. Call out the difference.
 5. **Anchor on yield-to-worst.** Compute yield-to-maturity AND yield-to-call at every call date in the schedule, then report yield-to-worst (the minimum across these) as the primary yield figure. A callable muni's "yield" without YTW is misleading. For a non-callable bond, YTW = YTM; state that explicitly.
 6. **Steel-man both sides.** Build the buy case and the pass case with equal effort. If the buy case is three paragraphs and the pass case is two sentences, search again for disconfirming evidence.
-7. **Force adversarial search.** At least 3 of the 10–15 baseline external searches must actively seek pass-case evidence: declining DSCR trends, missed continuing-disclosure filings, recent downgrades or negative outlook actions, deteriorating tax base or population trend, pension/OPEB-funded-ratio declines, draws on debt-service reserves, or comparable issuers that have defaulted or restructured.
+7. **Force adversarial search.** At least 3 of your baseline external searches must actively seek pass-case evidence: declining DSCR trends, missed continuing-disclosure filings, recent downgrades or negative outlook actions, deteriorating tax base or population trend, pension/OPEB-funded-ratio declines, draws on debt-service reserves, or comparable issuers that have defaulted or restructured.
 8. **Flag your uncertainty.** End with the top three things you do not know that would most change the verdict, each with a concrete way to resolve.
 
 ## Procedure
@@ -86,7 +86,7 @@ Identify the bond:
 
 Use the four tax-bracket values from your injected context: the federal marginal rate, the state marginal rate, the two-letter state code, and the AMT exposure flag. If any value is at a placeholder default or clearly inconsistent with the user's prompt, ask once for a correction before proceeding.
 
-Determine in-state vs out-of-state: compare `state_code` to the issuer's state. In-state munis get the combined federal+state exemption; out-of-state get federal only (plus any reciprocal-state arrangements — rare but exist).
+Determine in-state vs out-of-state: compare `state_code` to the issuer's state. In-state munis get the combined federal+state exemption; out-of-state get federal only (plus any reciprocal-state arrangement — if one exists for the user's state, state it and apply it).
 
 Then plan the external research: list the 10–15 baseline tool calls you intend to make (EMMA security page pull, OS download, ratings lookup, recent trade history, peer-bond search, sector context, continuing-disclosure scan, taxable-alternative quotes for the comparison grid, plus the 3+ adversarial searches). Execute them. Add more searches if the credit analysis surfaces ambiguity — verifying claims is non-negotiable, the 10–15 is a floor.
 
@@ -132,7 +132,7 @@ If the bond is **taxable** (BAB or other), TEY is undefined — compare YTW dire
 
 ### Phase 4 — Tax considerations
 
-**AMT screen.** Check the EMMA "Tax Status" field and the OS for AMT subjectivity. Private activity bonds (airports, multifamily housing, certain student loan revenue bonds, certain hospital bonds depending on use of proceeds) often have AMT-subject interest. If `amt_exposed = true` and the bond is AMT-subject, the effective TEY for the user is materially lower — compute the AMT-adjusted TEY using the user's AMT rate (typically 28%) and surface it as the relevant yield.
+**AMT screen.** Check the EMMA "Tax Status" field and the OS for AMT subjectivity. Private activity bonds (airports, multifamily housing, certain student loan revenue bonds, certain hospital bonds depending on use of proceeds) often have AMT-subject interest. If `amt_exposed = true` and the bond is AMT-subject, the effective TEY for the user is materially lower — compute the AMT-adjusted TEY using the user's AMT rate and surface it as the relevant yield. The AMT rate is not in the tax config, so ask the user once. The statutory maximum AMT rate (currently 28%) is a sensible default if the user has no preference.
 
 **De minimis check.** For any bond trading at a discount, compute the de minimis threshold:
 
@@ -144,7 +144,7 @@ If the current purchase price is below the threshold, the accreted discount is t
 
 For a premium bond (price > 100), note that the premium amortizes against the coupon over time, so the YTW is the relevant economic yield, not the coupon rate.
 
-**State-specific.** Read the "State tax treatment" section of `references/credit-benchmarks.md`, then verify the specific state's rule against that state's tax-authority guidance.
+**State-specific.** Read the "State tax treatment" section of `references/credit-benchmarks.md`, then verify the specific state's rule against that state's tax-authority guidance. If the state's rule cannot be verified, write `DATA UNAVAILABLE` for the state treatment. State its impact on TEY in the report, naming whether state-exempt is assumed or not.
 
 ### Phase 5 — Defeasance / pre-refunding check
 
@@ -174,13 +174,13 @@ If uninsured, the issuer's published rating is the operative one.
 
 Branch on bond type: **GO bond** or **revenue bond**. Read `references/credit-benchmarks.md` and work the metric list for the branch that applies — it holds the metrics to pull, the sector-specific DSCR benchmark table, and the healthy/concern thresholds to compare each figure against.
 
-For a revenue bond, the Debt Service Coverage Ratio over the last 5 years is the load-bearing figure, and it is only meaningful against its own sector's benchmark. For a GO bond, the pension and OPEB load is.
+For a revenue bond, the Debt Service Coverage Ratio over the last 5 years is the load-bearing figure, and it is only meaningful against its own sector's benchmark. For a GO bond, the pension and OPEB load is. If a required metric for the applicable branch is absent from the OS or the continuing disclosures, write `DATA UNAVAILABLE` for that metric. Name what is needed to obtain it. A branch whose load-bearing metric is unavailable cannot be benchmarked. State that explicitly in the credit analysis.
 
 ### Phase 8 — Continuing disclosure and material events review
 
 Pull the continuing disclosure filings list from EMMA. Check:
 
-- **Filing timeliness** — annual financial information must be filed within the issuer's stated continuing-disclosure agreement deadline (typically 180–270 days after fiscal year end). Late filings are a yellow flag; chronic lateness is a red flag.
+- **Filing timeliness** — annual financial information must be filed within the issuer's stated continuing-disclosure agreement deadline (typically 180–270 days after fiscal year end). Late filings are a yellow flag. Chronic lateness is a red flag. If the most recent annual filing is more than 18 months old, treat the bond as data-impaired. Write `DATA UNAVAILABLE` for the missing year.
 - **Audit completeness** — has the issuer received any audit qualifications or going-concern language?
 - **Material event notices** filed against this security — under SEC Rule 15c2-12, issuers must disclose 14 categories of material events including rating changes, defeasances, calls, draws on debt service reserve, payment delinquencies, bankruptcy proceedings, and certain tax-status events.
 - **Recent rating actions** — outlook changes (Stable → Negative is meaningful), downgrades, withdrawals.
@@ -213,7 +213,7 @@ For most retail investors, a muni with fewer than 5 trades in the last 6 months 
 
 The relevant comparison is **after-tax yield**, computed at the user's configured bracket. Treasuries are federal-taxable but state-exempt; CDs and corporates are fully taxable. This grid is the load-bearing piece of the relative-value verdict.
 
-**Muni / Treasury ratio** — compute YTW (muni) / YTW (Treasury same maturity). Historical AAA muni / 10Y Treasury averages ~80%; above 85% suggests munis are cheap, below 70% suggests rich. Adjust for the bond's actual rating (BBB munis trade at higher ratios; AAA insured trade at lower).
+**Muni / Treasury ratio** — compute YTW (muni) / YTW (Treasury same maturity). Historical AAA muni / 10Y Treasury averages ~80%; above 85% suggests munis are cheap, below 70% suggests rich. Adjust for the bond's actual rating (BBB munis trade at higher ratios; AAA insured trade at lower). If a Treasury at the same maturity is not available (for example, a maturity beyond the 30-year benchmark), use the closest available Treasury. State the duration mismatch.
 
 ### Phase 11 — Buy case, pass case, base case, verdict
 
