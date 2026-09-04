@@ -25,12 +25,16 @@ Aligning them is the main open task — see §5.
 
 ## 2. Where the code lives
 
-Two repos, both pushed, both green.
+The pipeline is a single skill: `~/hermes-skills/rx-review/` (code in `scripts/`, docs at the
+root), in the `fnord123/hermes-skills` repo. `~/.hermes` (`fnord123/Hermes`) keeps the nine
+`rx-*` profiles, `provision-profiles.py`, and `hooks/terminal-pipeline-only.sh` (now a shim to
+the skill's copy). `~/.hermes/rx-review` is a local symlink to `~/hermes-skills/rx-review/scripts/`
+— transitional; it is removed after one clean run.
 
-| Repo | Path | Head at handoff | Contents |
-|---|---|---|---|
-| `fnord123/Hermes` | `~/.hermes` | `b6ac935` | `rx-review/` — the pipeline |
-| `fnord123/hermes-skills` | `~/hermes-skills` | `81685a6` | `rx-review/SKILL.md`, `ANALYSIS-PIPELINE-BKM.md` |
+| Repo | Path | Contents |
+|---|---|---|
+| `fnord123/hermes-skills` | `~/hermes-skills/rx-review/` | the pipeline — `scripts/` (code, tests, allowlist, card map) + docs |
+| `fnord123/Hermes` | `~/.hermes` | the `rx-*` profiles, `provision-profiles.py`, the allowlist shim in `hooks/` |
 
 `~/.hermes/profiles/*` is gitignored; `provision-profiles.py` is the only durable record of the
 nine `rx-*` profiles.
