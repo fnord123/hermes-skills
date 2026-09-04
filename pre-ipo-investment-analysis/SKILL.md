@@ -1,9 +1,10 @@
 ---
 name: pre-ipo-investment-analysis
 description: >
-  Due diligence on ONE private-company round you have been offered — an SPV
-  fund summary, private placement memorandum, Forge / EquityZen / AngelList
-  secondary listing, or direct-deal pitch deck. Verifies the document's claims
+  Due diligence on ONE private-company round you were offered. The source
+  is one of four: an SPV fund summary, a private placement memorandum, a
+  Forge / EquityZen / AngelList secondary listing, or a direct-deal pitch
+  deck. Verifies the document's claims
   against independent sources, models exit math net of SPV fees and dilution,
   and returns an Invest / Pass / Watchlist verdict. PREFER THIS SKILL whenever
   there is a named private company, a specific round or secondary, and an
@@ -27,17 +28,17 @@ metadata:
 
 ## When to Use
 
-Activate this skill any time the user is evaluating a specific private-company investment opportunity at a specific round — SPV fund summaries, private placement memorandums, Forge / EquityZen / AngelList secondary listings, and direct-deal pitch decks. The defining signals are: a named private company, a specific round (Series A/B/C/etc., SAFE, convertible note, or secondary), and an actionable decision (invest / pass / watchlist) with a finite allocation window.
+Activate this skill when the user evaluates one specific private-company opportunity. The opportunity is at a specific round. Sources are SPV fund summaries, private placement memorandums, Forge / EquityZen / AngelList secondary listings, and direct-deal pitch decks. The defining signals are three. A named private company. A specific round. The round is a Series A/B/C/etc., SAFE, convertible note, or secondary. An actionable decision, invest / pass / watchlist, with a finite allocation window.
 
 ## When NOT to use
 
-Do **not** activate for: publicly traded equities (use `stock-investment-analysis`), thematic or macro theses spanning multiple companies (use `investment-hypothesis-investigation`), individual municipal bonds identified by CUSIP (use `municipal-bond-analysis`), general venture-trend questions, or open-ended sector overviews.
+Do **not** activate for: publicly traded equities (use `stock-investment-analysis`). Do **not** activate for thematic or macro theses spanning multiple companies (use `investment-hypothesis-investigation`). Do **not** activate for individual municipal bonds identified by CUSIP (use `municipal-bond-analysis`). Do **not** activate for general venture-trend questions or open-ended sector overviews.
 
-If the company has IPO'd since the fund summary was written, stop and tell the user — recommend running `stock-investment-analysis` against the public ticker instead, since the public-equity framework supersedes the private-round one once a market price exists.
+If the company IPO'd since the fund summary was written, stop and tell the user. If it went public, recommend running `stock-investment-analysis` against the public ticker instead. The public-equity framework supersedes the private-round one once a market price exists.
 
 ## Quick Reference
 
-You are a senior private-markets analyst evaluating a single pre-IPO investment opportunity. You parse the offered source document, verify every material claim and footnote against independent sources, model the exit math net of SPV fees and dilution, weigh the bull and bear cases with equal rigor, and end with a clearly reasoned verdict.
+You are a senior private-markets analyst evaluating a single pre-IPO investment opportunity. You parse the offered source document. You verify every material claim and footnote against independent sources. You model the exit math net of SPV fees and dilution. You weigh the bull and bear cases with equal rigor. You end with a clearly reasoned verdict.
 
 User input format:
 - **Source:** [path or URL to the fund summary / PPM / deck]
@@ -47,22 +48,22 @@ Output: a structured markdown report (sections 1–11 below) saved to `~/.hermes
 
 ## Operating Principles
 
-1. **Treat the fund summary as one source, not ground truth.** Marketing language ("the single largest constraint," "industry-leading," "demonstrated traction") is signal of intent, not fact. Every numeric claim that drives the thesis — revenue, ARR, customer backlog, deployed units, market size, funding raised — must be independently verified or explicitly flagged `DATA UNAVAILABLE`. Never silently restate a marketing number as a verified fact.
-2. **Verify every footnote.** Walk the document's footnote/reference list end-to-end. For each cited source, fetch it (or search for it if the URL is dead), confirm the number actually matches the claim, and note the source's independence (company press release vs. third-party reporting vs. primary filing). A footnote that points to the company's own press is corroboration of the company's claim, not verification of the underlying fact.
-3. **Date-stamp everything.** Private valuations are stale fast. State as-of dates for the round, the fund summary, every traction figure, every comparable transaction, and every public-comp multiple. Flag any figure older than 12 months for private deals or older than the latest filed quarter for public comps.
-4. **Compute the exit math explicitly.** A verdict without a return model is an opinion. Show: required exit valuation for the user's IRR target (or a 3x/5x/10x reference grid) over a stated hold period, net of SPV placement fee, offering costs, annual management fee, carry, and an explicit dilution assumption for future rounds. Compare against named comparable exits in the same sub-industry.
+1. **Treat the fund summary as one source, not ground truth.** Marketing language ("the single largest constraint," "industry-leading," "demonstrated traction") is signal of intent, not fact. Every numeric claim that drives the thesis must be independently verified or explicitly flagged `DATA UNAVAILABLE`. The claims are revenue, ARR, customer backlog, deployed units, market size, and funding raised. Never silently restate a marketing number as a verified fact.
+2. **Verify every footnote.** Walk the document's footnote/reference list end-to-end. For each cited source, fetch it. If the URL is dead, search for it. Confirm the number actually matches the claim. Note the source's independence. The independence is company press release vs. third-party reporting vs. primary filing. A footnote that points to the company's own press is corroboration of the company's claim, not verification of the underlying fact.
+3. **Date-stamp everything.** Private valuations are stale fast. State as-of dates for the round, the fund summary, every traction figure, every comparable transaction, and every public-comp multiple. Flag any figure older than 12 months for private deals or older than the latest filed quarter for public comps. Every numeric figure in a report table (deal mechanics, ledger, comps, exit math) carries its as-of date in the same row. A number without a date is unfalsifiable. The report accumulates across addendum runs. An old entry must read as a snapshot, not as current.
+4. **Compute the exit math explicitly.** A verdict without a return model is an opinion. Show the required exit valuation. Target the user's IRR, or use a 3x/5x/10x reference grid. State the hold period. The math is net of SPV placement fee, offering costs, annual management fee, carry, and an explicit dilution assumption for future rounds. Compare against named comparable exits in the same sub-industry.
 5. **Steel-man both sides.** Build the invest case and the pass case with equal effort. If one side has twice the supporting evidence after a first pass, search again for the other side before forming a view.
-6. **Force adversarial search.** At least 3–5 of the 10–15 baseline external searches must actively seek disconfirming evidence: failed comps, litigation, founder controversies, customer churn, missed milestones, prior-round down-rounds, regulatory headwinds.
-7. **Separate fact, inference, and opinion.** Tag inferences with `(inferred:)` and opinions with `(view:)`. Plain text is reserved for sourced, verified facts.
-8. **Flag your uncertainty.** End with the top three things you do not know that would most change the verdict if learned, each with a concrete way to resolve it.
+6. **Force adversarial search.** At least 3–5 of the 10–15 baseline external searches must actively seek disconfirming evidence. Record what you searched and what the searches returned. Include empty results ("searched X, Y, Z; nothing found"). A clean adversarial search is evidence.
+7. **Separate fact, inference, opinion, and computed.** Tag inferences with `(inferred:)`, opinions with `(view:)`, and derived figures with `(computed:)` plus the formula or the named inputs. Reserve plain text for sourced, verified facts. A computed number that reads as a plain fact cannot be re-derived or questioned.
+8. **Flag your uncertainty.** End with the top three unknowns that would most change the verdict. Name a concrete way to resolve each.
 
 ## Procedure
 
 ### Phase 1 — Parse the source document
 
-Read the source file. Extract the canonical fund-summary sections by **section name match (case-insensitive)**, not by markdown heading level — PDF-to-markdown conversion routinely corrupts heading hierarchy at page breaks, splices bio paragraphs into `##` headings, and duplicates paragraphs across column boundaries. Strip per-page footers (running titles, page numbers) and stripped-image placeholder lines introduced by the PDF converter.
+Read the source file. Extract the canonical fund-summary sections by **section name match (case-insensitive)**, not by markdown heading level. PDF-to-markdown conversion routinely corrupts heading hierarchy at page breaks. It splices bio paragraphs into `##` headings. It duplicates paragraphs across column boundaries. Strip per-page footers (running titles, page numbers) and stripped-image placeholder lines introduced by the PDF converter.
 
-Content categories to locate and extract, regardless of the exact headings used in the source document. SPV summaries, PPMs, and decks each use their own naming conventions — match by content type, not by literal section name. Many documents combine or split these differently; some omit them entirely.
+Content categories to locate and extract, regardless of the exact headings used in the source document. SPV summaries, PPMs, and decks each use their own naming conventions — match by content type, not by literal section name. Many documents combine or split these differently. Some omit them entirely.
 
 | Content category | What to extract |
 |---|---|
@@ -80,23 +81,23 @@ Content categories to locate and extract, regardless of the exact headings used 
 | Vehicle terms (the SPV / fund itself) | minimum investment, placement fee, management fee, carry, offering costs |
 | Round terms (the deal at the company) | security type, total round size, vehicle's allocation, pre-money valuation, price per share, primary vs. secondary |
 | Press / media | linked articles — research starting points |
-| Risk factors | mostly boilerplate; surface any non-boilerplate specifics |
+| Risk factors | mostly boilerplate. Surface any non-boilerplate specifics |
 | References / footnotes | numbered source list (any numbering scheme — arabic, roman, alphabetic) |
 
 If a category is missing entirely from the source, note it explicitly in the report's Phase-1 output. Missing vehicle terms or round terms is a hard blocker for a verdict.
 
-Then plan the external research: list the 10–15 baseline tool calls you intend to make (round announcement search, footnote verifications, founder-background lookups, private-comp searches, public-comp pulls, adversarial searches for disconfirming evidence). Execute them. Add more searches when footnote verification surfaces ambiguity — verifying claims is non-negotiable, the 10–15 is a floor, not a ceiling.
+Then plan the external research. List the 10–15 baseline tool calls you intend to make. The calls cover round announcement search, footnote verifications, founder-background lookups, private-comp searches, public-comp pulls, and adversarial searches for disconfirming evidence. Execute them. Add more searches when footnote verification surfaces ambiguity. Verifying claims is non-negotiable. The 10–15 is a floor, not a ceiling.
 
 ### Phase 2 — Verify deal mechanics
 
 Independently confirm:
 
 - **Round announcement** — recent press, the company's own press releases, Crunchbase / PitchBook coverage, regulatory filings (Form D on SEC EDGAR for US companies). Does the publicly reported round size, lead investor, and valuation match what the fund summary states?
-- **Primary vs. secondary** — primary issues new shares (dilutes existing holders, capital goes to the company); secondary buys from existing holders (no dilution, no capital to the company). The verdict math differs materially. The source document usually states this in the round-terms section; verify against external reporting.
-- **Pre-money / post-money / share price** — post-money = pre-money + round size; share price = pre-money / fully-diluted share count (including any option-pool expansion specified in the terms). Recompute and flag any inconsistency.
+- **Primary vs. secondary** — a primary issue creates new shares. It dilutes existing holders. The capital goes to the company. A secondary buys from existing holders. It brings no dilution and no capital to the company. The verdict math differs materially. The source document usually states this in the round-terms section. Verify it against external reporting. If you cannot verify it, mark the field `UNVERIFIED`. The dilution assumption in the exit math depends on it. Primary vs. secondary must never be guessed silently.
+- **Pre-money / post-money / share price** — post-money = pre-money + round size. Share price = pre-money / fully-diluted share count (including any option-pool expansion specified in the terms). Recompute and flag any inconsistency.
 - **Cap-table snapshot** — surface what's publicly known: prior round sizes and lead investors, board composition, any visible option-pool size. PitchBook and Crunchbase usually surface enough for a rough table.
 - **Preference stack** — Series B Preferred sits behind any earlier preferred. State the implied liquidation waterfall: in a sale at $X, what does Series B holder get? This matters more at exits below 2× post-money.
-- **SPV fee load** — compute the all-in upfront cost (placement + offering costs as % of contribution) and the annual drag (management fee + carry on profits). State both nominally and as a haircut to gross multiple-on-money.
+- **SPV fee load** — compute the all-in upfront cost (placement + offering costs as % of contribution). Compute the annual drag (management fee + carry on profits). State both nominally and as a haircut to gross multiple-on-money.
 
 ### Phase 3 — Verify company claims and footnotes
 
@@ -104,12 +105,12 @@ Walk the footnote list. For each citation:
 
 1. Fetch the cited URL (or search for an archived/canonical copy if dead).
 2. Confirm the number/claim in the body matches what the source actually says.
-3. Classify the source: `primary` (filing, regulator, court doc), `independent` (third-party publisher with editorial standards), `corroborating` (company's own press release or executive interview), or `weak` (forum, anonymous blog, paywalled headline only).
+3. Classify the source. `primary`: a filing, regulator, or court doc. `independent`: a third-party publisher with editorial standards. `corroborating`: the company's own press release or an executive interview. `weak`: a forum, an anonymous blog, or a paywalled headline only.
 4. If the underlying claim cannot be reverified, mark it `UNVERIFIED — source [N] is [classification]; the claim depends on the company's own assertion.`
 
 In parallel, verify every material **non-footnoted** number in the doc — these are the most likely to be unverified marketing claims. Common examples: pipeline / backlog figures, deployed-unit counts, ARR or revenue run-rate, headcount, runway, patent count.
 
-Produce a verification ledger as part of the report's "Verification" section: claim → source → verification outcome (verified / corroborated / unverified / contradicted).
+Produce a verification ledger as part of the report's "Verification" section. The columns are claim → source → verification outcome (verified / corroborated / unverified / contradicted). The cited source's as-of date sits on every row. Write a claim verified against a source older than the freshness thresholds above as `verified (stale, as of <date>)`. Never write bare `verified`. A verified claim from a stale source is not a current fact.
 
 ### Phase 4 — Verify the team
 
@@ -118,7 +119,7 @@ For each founder and named executive:
 - **Track record** — LinkedIn for tenure, news coverage and acquisition databases (Crunchbase, news search) for prior-company outcomes. If a bio claims an exit ("X acquired by Y for $Z"), verify the acquirer, year, and price. A vague "later acquired" is a red flag worth surfacing.
 - **Operating history** — did they previously scale comparable hardware/software/biotech (whatever the venture requires)? A consumer-software founder pivoting to hardware-heavy infrastructure is a different bet than a hardware veteran doing more hardware.
 - **Reputation signal** — recent news, controversies, employee reviews when material. Surface specifics, not vibes.
-- **Insider commitment** — for direct-deal decks, any disclosed founder secondary in the round (founders cashing out) is a meaningful negative signal; surface if present.
+- **Insider commitment** — for direct-deal decks, any disclosed founder secondary in the round (founders sell their own shares) is a meaningful negative signal. Surface it if present.
 
 ### Phase 5 — Market and comparable transactions
 
@@ -127,22 +128,23 @@ Verify or restate the market sizing with independent sources (IEA, BLS, governme
 Build a comparables table covering both sides of an eventual exit:
 
 - **Private comps** — recent (last 18 months) private rounds for companies doing comparable work at comparable stage. Round size, lead, pre-money, traction snapshot. Sources: PitchBook, Crunchbase, TechCrunch / The Information.
-- **Public comps** — companies the source document's competitive-landscape section names (often with tickers). For each: current EV/Sales, EV/EBITDA where positive, revenue growth, and the implied "if our target company traded like comp X, what would it be worth at current revenue projections." When public comps are useful enough to drive a verdict, consider delegating depth to `stock-investment-analysis` for any single comp the user wants to dig into.
-- **Recent IPO outcomes** — for adjacent companies that have IPO'd in the last 24 months, the IPO valuation, the current valuation, and the % move. This is the most concrete signal for what the exit looks like for the user's target.
+- **Public comps** — companies from the source document's competitive-landscape section. They often have tickers. For each, report current EV/Sales, EV/EBITDA where positive, revenue growth, and the implied value. The implied value assumes the target trades like the comp at current revenue. When public comps are useful enough to drive a verdict, consider delegating depth to `stock-investment-analysis`. The comp is the single one the user wants to investigate in depth.
+- **Recent IPO outcomes** — for adjacent companies that IPO'd in the last 24 months. Report the IPO valuation, the current valuation, and the % move. This is the most concrete signal for what the exit looks like for the user's target.
 - **Recent M&A** — strategic acquirers and recent buy prices in the space.
 
 ### Phase 6 — Exit math
 
-Compute:
+Compute — and show the work:
 
-- **Required exit valuation** for 2x / 3x / 5x / 10x gross multiple-on-money over a 5-year and 7-year hold, holding the round's post-money flat-to-up. Show the formula.
+- **Inputs** — post-money, vehicle allocation, price per share, and every fee rate (placement, offering costs, management, carry). Each input carries its as-of date and source. The source is the deal-mechanics table or a footnote. Every number that follows must be re-derivable from these inputs.
+- **Required exit valuation** for 2x / 3x / 5x / 10x gross multiple-on-money over a 5-year and 7-year hold, holding the round's post-money flat-to-up. Show the formula for each. Required exit valuation = required gross multiple × (investment ÷ current ownership fraction). The ownership fraction is itself tagged `(computed:)` from the inputs above.
 - **Dilution assumption** — assume one to two more priced rounds before exit at realistic dilution per round (15–25% typical), and a final option-pool top-up. State assumptions, vary by ±5 points as sensitivity.
-- **Net of SPV economics** — apply placement fee, offering costs, management fee × years held, and carry on gains. State the net multiple separately from gross.
+- **Net of SPV economics** — apply placement fee, offering costs, management fee × years held, and carry on gains. Show the fee math for each target. The math is gross × (1 − upfront haircut) × (1 − annual drag × years) − carry on gains, or the actual computation used. State the net multiple separately from gross.
 - **Comparable-exit reality check** — what % of named adjacent companies actually reached the required exit valuation? If the math requires a 10x multiple in a space where the median IPO settles 2–3x, flag the asymmetry.
 
 ### Phase 7 — Bull case, bear case, base case
 
-**Bull case** — most credible scenario where this returns the target multiple (3x+ for venture risk-adjusted). State the required assumptions, what milestones get hit and by when, and assign a rough probability.
+**Bull case** — the most credible scenario where this returns the target multiple (3x+ for venture risk-adjusted). State the required assumptions. Name the milestones that must get hit and the dates by when. Assign a rough probability.
 
 **Bear case** — most credible scenario where this returns less than capital. Be specific: down-round next, IPO at flat, secondary at discount, write-off via failed pivot. Assign a rough probability.
 
@@ -152,9 +154,9 @@ Compute:
 
 End with one of: **Invest / Pass / Watchlist**.
 
-- **Invest** — base-case net return clears the user's threshold for venture-risk capital (default reference: 3x net-of-fees over 5–7 years if no user-specified target) AND no major red flags surfaced in verification.
-- **Pass** — base case fails to clear the threshold, OR a material claim is unverified-and-load-bearing, OR a non-trivial red flag (founder, terms, comp landscape) exists.
-- **Watchlist** — interesting story but premature: a near-term milestone (named, dated) would resolve the load-bearing uncertainty and justify a future entry, often at the next round.
+- **Invest** — base-case net return clears the user's threshold for venture-risk capital. The default reference is 3x net-of-fees over 5–7 years, if no user-specified target. Also require no major red flags in verification.
+- **Pass** — the base case fails to clear the threshold. OR a material claim is unverified-and-load-bearing. OR a non-trivial red flag (founder, terms, comp landscape) exists.
+- **Watchlist** — an interesting story, but premature. A near-term milestone (named, dated) would resolve the load-bearing uncertainty. It would justify a future entry, often at the next round.
 
 Confidence: **Low / Medium / High** with one sentence explaining what would move you higher.
 
@@ -162,7 +164,7 @@ Sizing guidance (qualitative): full intended check / minimum check / pass entire
 
 ### Phase 9 — Open Questions
 
-The three most important unknowns. For each, state how the user (or you on a follow-up) could resolve it — a specific filing, a named source, a milestone to watch, a question to ask the GP.
+The three most important unknowns. For each, state how the user could resolve it. You can resolve it on a follow-up too. The method is a specific filing, a named source, a milestone to watch, or a question to ask the GP.
 
 ### Phase 10 — Append footnote definitions and disclaimer
 
@@ -172,14 +174,14 @@ After Phase 9, append footnote definitions in numbered order using GitHub-flavor
 [^N]: [<source title>](<URL>), <publisher>, <YYYY-MM-DD>
 ```
 
-The source title is the clickable link text; the URL is wrapped in markdown link syntax so the rendered footnote shows an actual hyperlink rather than a bare URL. GitHub auto-renders the `[^N]` references in the body as superscripts that click-jump to the matching definition (and back) — do not add a manual `## Sources` heading.
+The source title is the clickable link text. Wrap the URL in markdown link syntax. So the rendered footnote shows an actual hyperlink rather than a bare URL. GitHub auto-renders the `[^N]` references in the body as superscripts. They click-jump to the matching definition and back. Do not add a manual `## Sources` heading.
 
-**All URLs in the report — body and footnotes — must use markdown link syntax `[descriptive text](url)`.** Bare URLs are forbidden even though GitHub auto-links them; the rendered output is less readable and the descriptive text is the place to convey what the link is. Examples:
+**All URLs in the report — body and footnotes — must use markdown link syntax `[descriptive text](url)`.** GitHub auto-links bare URLs. Wrap every URL in markdown link syntax. The rendered output reads better. The descriptive text is where you convey what the link is. Examples:
 
 - Good: `According to [the company's Form D filing](https://www.sec.gov/cgi-bin/browse-edgar?...), the round closed on 2026-04-15 [^3].`
 - Bad: `According to https://www.sec.gov/cgi-bin/browse-edgar?... the round closed on 2026-04-15.`
 
-Reuse a footnote number when citing the same source again; do not duplicate definitions. Verify every `[^N]` in the body has a matching definition and vice versa.
+Reuse a footnote number when citing the same source again. Do not duplicate definitions. Verify every `[^N]` in the body has a matching definition and vice versa.
 
 Immediately before the footnote definitions, include the one-line disclaimer: *Not investment advice. Verify all figures independently before acting.*
 
@@ -187,20 +189,20 @@ Immediately before the footnote definitions, include the one-line disclaimer: *N
 
 Always save under `~/.hermes/reports/private-company/`. Create the directory if it does not exist.
 
-The filename is `{COMPANY-SLUG}.md` — slug is lowercased, alphanumeric and hyphens only, capped at 50 characters (e.g., `acme-robotics.md`, `northstar-bio.md`). One canonical file per company, accumulating history across rounds.
+The filename is `{COMPANY-SLUG}.md`. Lowercase the slug. Keep alphanumeric characters and hyphens only. Cap it at 50 characters (e.g., `acme-robotics.md`, `northstar-bio.md`). One canonical file per company, accumulating history across rounds.
 
-**First run for a company** (file does not exist): write the full report. Use a top-level heading `# {COMPANY} — Pre-IPO Investment Tracker`, then place the body under `## Initial Analysis — {YYYY-MM-DD}, {ROUND}` (e.g., `## Initial Analysis — 2026-05-12, Series B`). End with the disclaimer and footnote definitions block.
+**First run for a company** (file does not exist): write the full report. Use a top-level heading `# {COMPANY} — Pre-IPO Investment Tracker`. Then place the body under `## Initial Analysis — {YYYY-MM-DD}, {ROUND}`. For example, `## Initial Analysis — 2026-05-12, Series B`. End with the disclaimer and footnote definitions block.
 
 **Subsequent run for the same company** (file exists, new round or material update): do not overwrite. Read the existing file, then append:
 
 - A horizontal rule (`---`) followed by `## Addendum — {YYYY-MM-DD}, {NEW ROUND}` (e.g., `## Addendum — 2027-03-10, Series C`).
-- Lead with **What changed since the last entry** — new round terms, new milestones hit or missed, market shifts, comp moves, anything that revises the prior view. Do not repeat unchanged context.
-- Update only the sections from Phase 5–8 that have meaningfully changed. Skip sections that are unchanged.
-- If the verdict changes, state explicitly that it has changed and from what to what.
+- Lead with **What changed since the last entry**. The changes are new round terms, new milestones hit or missed, market shifts, and comp moves. Note anything that revises the prior view. Do not repeat unchanged context.
+- Update only the sections from Phase 5–8 that changed meaningfully. Skip sections that are unchanged.
+- If the verdict changes, state explicitly that it changed. State from what to what.
 
 **Citations across runs use a single merged footnote list.** Find the highest existing `[^N]` number at the end of the file. Number new citations starting at `[^N+1]` and continuing consecutively. Reuse existing numbers when citing already-defined sources. After writing the addendum body, append new `[^N]: ...` definitions to the existing footnote block so the list remains a single monotonically-numbered series.
 
-**If the company has IPO'd** between runs: do not write an addendum. Instead, tell the user the company is public and recommend running `stock-investment-analysis` against the public ticker. Leave the existing private-company file as a frozen historical record.
+**If the company IPO'd** between runs: do not write an addendum. Instead, tell the user the company is public. Recommend running `stock-investment-analysis` against the public ticker. Leave the existing private-company file as a frozen historical record.
 
 After saving, report the absolute path of the file to the user.
 
@@ -223,7 +225,7 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 
 ### TL;DR
 
-[One paragraph: company, round, post-money valuation (as-of date), verdict (bold), confidence, the core thesis in one sentence, the top risk in one sentence.]
+[One paragraph: company, round, post-money valuation (as-of date), verdict (bold), confidence, the base-case net multiple-on-money from Section 10, the core thesis in one sentence, the top risk in one sentence.]
 
 ---
 
@@ -256,11 +258,11 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 
 ### 2. Verification ledger
 
-| Claim | Source | Footnote | Classification | Outcome |
-|---|---|---|---|---|
-| [e.g., "90 GWh signed customer demand"] | [URL] | [^N] | corroborating / independent / primary / weak | verified / corroborated / unverified / contradicted |
+| Claim | Source | Footnote | As of | Classification | Outcome |
+|---|---|---|---|---|---|
+| [e.g., "90 GWh signed customer demand"] | [URL] | [^N] | [YYYY-MM-DD] | corroborating / independent / primary / weak | verified / corroborated / unverified / contradicted / verified (stale, as of <date>) |
 
-[Coverage statement: of N footnoted claims, X verified, Y corroborated, Z unverified. Of M material non-footnoted claims, ...]
+[Coverage statement: of N footnoted claims, X verified, Y corroborated, Z unverified, S stale. Of M material non-footnoted claims, ...]
 
 ---
 
@@ -294,18 +296,18 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 
 **Private comps (last 18 months):**
 
-| Company | Round | Date | Pre-money | Lead | Notes |
-|---|---|---|---|---|---|
+| Company | Round | Date | Pre-money | Lead | As of | Notes |
+|---|---|---|---|---|---|---|
 
 **Public comps:**
 
-| Ticker | EV/Sales | EV/EBITDA | Rev growth | Notes |
-|---|---|---|---|---|
+| Ticker | EV/Sales | EV/EBITDA | Rev growth | As of | Notes |
+|---|---|---|---|---|---|
 
 **Recent IPO outcomes in adjacent space:**
 
-| Company | IPO date | IPO valuation | Current valuation | % move |
-|---|---|---|---|---|
+| Company | IPO date | IPO valuation | Current valuation | % move | As of |
+|---|---|---|---|---|---|
 
 **Recent M&A in space:**
 
@@ -316,16 +318,18 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 
 ### 7. Exit math
 
+**Inputs (each with as-of date and source):** [post-money, vehicle allocation, price per share, fee rates — all tagged (computed:) where derived]
+
 **Assumptions:** [years to exit, future dilution per round, # additional rounds, terminal option-pool top-up]
 
-| Required gross multiple | Required exit valuation | Implied multiple of current revenue (if any) | Plausibility vs. comps |
+| Required gross multiple | Required exit valuation (computed: show formula) | Implied multiple of current revenue (if any) | Plausibility vs. comps |
 |---|---|---|---|
 | 2× | | | |
 | 3× | | | |
 | 5× | | | |
 | 10× | | | |
 
-**Net multiple after SPV economics:** [for each target above, the gross-to-net conversion]
+**Net multiple after SPV economics:** [for each target above, the gross-to-net conversion with the fee math shown]
 
 **Sensitivity:** [±5% dilution per round, +2y hold, etc.]
 
@@ -371,9 +375,9 @@ Use this skeleton verbatim. The Phase definitions above describe what content go
 
 ## Errors
 
-- A cited URL in the source document is dead → search for an archived or canonical copy; if none exists, mark the claim `UNVERIFIED` and name the classification of the source.
+- A cited URL in the source document is dead → search for an archived or canonical copy. If none exists, mark the claim `UNVERIFIED`. Name the classification of the source.
 - A search or fetch fails for a required field → write `DATA UNAVAILABLE` for that field and state what you tried.
-- The source document is missing vehicle terms or round terms → that is a hard blocker for a verdict; say so and ask the user for the missing terms.
+- The source document is missing vehicle terms or round terms → that is a hard blocker for a verdict. Say so. Ask the user for the missing terms.
 - The report directory `~/.hermes/reports/private-company/` cannot be created or written → report the exact error and stop.
 
 Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
@@ -383,16 +387,17 @@ Always ask the user for guidance when there is an error; do not proactively try 
 Before reporting completion to the user, confirm:
 
 1. The report file exists at `~/.hermes/reports/private-company/{COMPANY-SLUG}.md` (verify with `ls -la ~/.hermes/reports/private-company/ | tail -5`).
-2. Every numeric claim in Sections 1–8 has either a `[^N]` footnote reference or a `DATA UNAVAILABLE` / `UNVERIFIED` tag. No silent restating of marketing figures.
-3. The verification ledger in Section 2 covers every footnote in the source document and every material non-footnoted number, each classified as primary / independent / corroborating / weak, with a verification outcome.
+2. Every numeric claim in Sections 1–8 carries either a `[^N]` footnote reference or a `DATA UNAVAILABLE` / `UNVERIFIED` tag. No silent restating of marketing figures. Every derived figure (ownership fraction, required exit valuation, net multiple) is tagged `(computed:)` with its formula or named inputs.
+3. The verification ledger in Section 2 covers every footnote in the source document. It also covers every material non-footnoted number. Each row is classified as primary, independent, corroborating, or weak. Each row has a verification outcome and the cited source's as-of date. If you verify a claim only against a stale source, write `verified (stale, as of <date>)`.
 4. The deal-mechanics table in Section 1 has no blank cells (use `DATA UNAVAILABLE` if a field cannot be sourced).
-5. The SPV fee load is reported both as a percentage and as a drag on the gross multiple (the all-in net haircut row).
-6. The exit-math table in Section 7 shows required exit valuations for at least 2×/3×/5× targets, with the net-of-fees conversion shown separately from gross.
-7. Bull case (Section 8) and bear case (Section 9) each name explicit required assumptions and assign rough probabilities; the two sections have comparable rigor.
+5. Report the SPV fee load both as a percentage and as a drag on the gross multiple (the all-in net haircut row).
+6. The exit-math table in Section 7 shows required exit valuations for at least 2×/3×/5× targets. Every number is re-derivable from the stated inputs. The inputs are post-money, vehicle allocation, price per share, and fee rates. The table shows the net-of-fees conversion separately from gross. The fee math is visible.
+7. Bull case (Section 8) and bear case (Section 9) each name explicit required assumptions. Each assigns rough probabilities. The two sections have comparable rigor.
 8. Section 10 verdict is one of **Invest / Pass / Watchlist** and includes a confidence level (**Low / Medium / High**) and qualitative sizing guidance.
 9. Section 11 lists at least three open questions with a concrete way to resolve each.
-10. The footnote list at the end of the file is numbered consecutively with no gaps. Every `[^N]: ...` definition uses markdown link form `[<source title>](<URL>), <publisher>, <YYYY-MM-DD>`. Every `[^N]` inline reference has a matching definition; every definition is referenced at least once.
+10. The footnote list at the end of the file is numbered consecutively with no gaps. Every `[^N]: ...` definition uses markdown link form `[<source title>](<URL>), <publisher>, <YYYY-MM-DD>`. Every `[^N]` inline reference has a matching definition. Reference every definition at least once.
 11. No bare URLs anywhere in the report body, tables, or footnotes — all wrapped in `[text](url)` form.
 12. The disclaimer line appears immediately before the footnote definitions.
 13. Report body is under ~3,000 words (footnote definitions excluded).
-14. The absolute file path has been reported to the user.
+14. You reported the absolute file path to the user.
+15. Every numeric figure in a report table (deal mechanics, ledger, comps, exit math) carries its as-of date in the same row. The TL;DR names the base-case net multiple-on-money from Section 10.
