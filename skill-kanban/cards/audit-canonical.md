@@ -87,13 +87,23 @@ default for every call)
 - Evidence table in the completion summary, one row per check:
   rule | result | evidence (command + observed line, or file:line).
 - PASS:
-    0. RE-QUEUE GUARD: this card may be re-run after a timeout; a STE100
-       card may already exist. Check the board for a card whose parents
-       list contains your task id and whose title starts "STE100:". If
-       one exists (any status), create NOTHING - verify its payload,
-       proceed to the show-check and kanban_complete, citing the
-       EXISTING successor id.
-    1. kanban_create the successor BEFORE completing yourself:
+    ORDER (binding): kanban_complete YOUR card FIRST (step 1), THEN
+    create the successor (step 2). The successor must not exist
+    anywhere until you are done; because your task is "done" at create
+    time it is born "ready", not "todo". Your turn is NOT over after
+    completing - do not stop until the show-check (step 3) is done.
+    0. RE-QUEUE GUARD (defensive): this card may be re-run after a
+       timeout; a STE100 card may already exist. Check the board for a
+       card whose parents list contains your task id and whose title
+       starts "STE100:". If one exists (any status), create NOTHING in
+       step 2 - verify its payload and go straight to the show-check
+       (step 3), citing the EXISTING successor id.
+    1. kanban_complete YOUR card (the successor does not exist yet):
+       summary = "VERDICT: PASS" + the evidence table; metadata
+       {"verdict":"PASS","skill":<skill>,"mode":<mode>}. Do NOT pass
+       created_cards - there is no successor id yet (it is created in
+       step 2).
+    2. THEN kanban_create the successor:
        title "STE100: <skill> <mode>"
        assignee {{ASSIGNEE}}
        workspace_kind "dir", workspace_path "{{REPO_DIR}}"
@@ -114,12 +124,10 @@ default for every call)
        via skill_view. Your full PASS evidence table is in the parent's
        runs[0].summary (kanban_show the parent card id in the payload);
        cite it in your own summary."
-    2. kanban_show the successor: record its id, that its parents list
-       contains your id, and its status.
-    3. kanban_complete with summary = "VERDICT: PASS" + the evidence
-       table + the successor id + the show-check output; metadata
-       {"verdict":"PASS","skill":<skill>,"mode":<mode>,"successor":<id>};
-       created_cards [successor id].
+    3. kanban_show the successor: record its id, that its parents list
+       contains your id, and its status (it must be "ready"); post it
+       as a kanban_comment on your card so the successor id survives in
+       the record.
 - FAIL:
     1. Build the issue list: one entry per TRUE positive: rule |
        file:line | evidence | classification | required fix.
@@ -135,10 +143,15 @@ default for every call)
        findings table + decision options, then kanban_block
        kind="needs_input" reason="<findings table, PARK: loop cap
        reached>". That parked card IS the board state.
-    4. Otherwise kanban_create the retry Author BEFORE completing:
-       (RE-QUEUE GUARD: first check the board for an existing
-       "Author: <skill> [round N/2]" card whose parents list contains
-       your task id; if one exists, create NOTHING - cite it.)
+    4. Otherwise: ORDER (binding) - kanban_complete YOUR card FIRST
+       (summary = "VERDICT: FAIL" + issue list; metadata
+       {"verdict":"FAIL","skill":<skill>,"round":N,"issues":<count>};
+       do NOT pass created_cards), THEN kanban_create the retry
+       Author:
+       (RE-QUEUE GUARD (defensive): first check the board for an
+       existing "Author: <skill> [round N/2]" card whose parents list
+       contains your task id; if one exists, create NOTHING - go
+       straight to step 5 citing it.)
        title "Author: <skill> [round N/2] fix <count> audit issues"
        (assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
        "{{REPO_DIR}}", skills ["{{HOUSE_SKILL}}"], max_runtime_seconds
@@ -148,12 +161,10 @@ default for every call)
        path (or, for create mode, a new scratch path, reported in the
        payload)." + the standard Author work order from the pipeline
        spec (read conventions, trigger diff, contract table, evidence
-       rule, no self-approval, handoff to Audit before completing).
-    5. kanban_show the retry: record id, parents link, status.
-    6. kanban_complete with summary = "VERDICT: FAIL" + issue list +
-       retry id + show-check output; metadata
-       {"verdict":"FAIL","skill":<skill>,"round":N,"issues":<count>,
-       "retry":<id>}; created_cards [retry id].
+       rule, no self-approval, handoff to Audit after completing).
+    5. kanban_show the retry: record id, parents link, status (must be
+       "ready"); post it as a kanban_comment on your card so the retry
+       id survives in the record.
 
 RULES IN FORCE
 R1 evidence or no verdict. R3 repo state first. R6 self-report is not a

@@ -70,14 +70,24 @@ default for every call)
   rule | quote (trimmed to the violated span) | proposed rewrite |
   GATING / ADVISORY.
 - PASS (zero GATING findings):
-    0. RE-QUEUE GUARD: this card may be re-run after a timeout; a
-       Scripter (or Commit, for a script-less skill) card may already
-       exist. Check the board for a card whose parents list contains
-       your task id and whose title starts "Scripter:" or "Commit:".
-       If one exists (any status), create NOTHING - verify its payload,
-       proceed to the show-check and kanban_complete, citing the
-       EXISTING successor id.
-    1. kanban_create the successor BEFORE completing yourself:
+    ORDER (binding): kanban_complete YOUR card FIRST (step 1), THEN
+    create the successor (step 2). The successor must not exist
+    anywhere until you are done; because your task is "done" at create
+    time it is born "ready", not "todo". Your turn is NOT over after
+    completing - do not stop until the show-check (step 3) is done.
+    0. RE-QUEUE GUARD (defensive): this card may be re-run after a
+       timeout; a Scripter (or Commit, for a script-less skill) card
+       may already exist. Check the board for a card whose parents
+       list contains your task id and whose title starts "Scripter:"
+       or "Commit:". If one exists (any status), create NOTHING in
+       step 2 - verify its payload and go straight to the show-check
+       (step 3), citing the EXISTING successor id.
+    1. kanban_complete YOUR card (the successor does not exist yet):
+       summary "VERDICT: PASS" + the change list (ADVISORY rows only);
+       metadata {"verdict":"PASS","skill":<skill>}. Do NOT pass
+       created_cards - there is no successor id yet (it is created in
+       step 2).
+    2. THEN kanban_create the successor:
        - the script note says the skill HAS scripts:
          title "Scripter: <skill> <mode>"
        - the skill has NO scripts:
@@ -96,21 +106,25 @@ default for every call)
        read is the house rule for large work orders. For the Commit
        case, render the changeset manifest from the files-expected
        list: one row per file: file | scratch path | sha256 anchor.
-    2. kanban_show the successor: record its id, that its parents list
-       contains your id, and its status.
-    3. kanban_complete summary "VERDICT: PASS" + the change list
-       (ADVISORY rows only) + successor id + show-check output;
-       metadata {"verdict":"PASS","skill":<skill>,"successor":<id>};
-       created_cards [successor id].
+    3. kanban_show the successor: record its id, that its parents list
+       contains your id, and its status (it must be "ready"); post the
+       id + status as a kanban_comment on your card so the successor
+       id survives in the record (the completion summary is already
+       fixed and cannot carry it).
 - FAIL (>= 1 GATING finding):
     1. If ste100_round >= 2, create NO successor. kanban_comment the
        change list + decision options, then kanban_block
        kind="needs_input" reason="<change list, PARK: STE100 loop cap
        reached>". That parked card IS the board state.
-    2. Otherwise kanban_create the retry Author BEFORE completing:
-       (RE-QUEUE GUARD: first check the board for an existing
-       "Author: <skill> [round N/2]" card whose parents list contains
-       your task id; if one exists, create NOTHING - cite it.)
+    2. Otherwise: ORDER (binding) - kanban_complete YOUR card FIRST
+       (summary "VERDICT: FAIL" + the change list; metadata
+       {"verdict":"FAIL","skill":<skill>,"round":N,"issues":<count>};
+       do NOT pass created_cards), THEN kanban_create the retry
+       Author:
+       (RE-QUEUE GUARD (defensive): first check the board for an
+       existing "Author: <skill> [STE100 round N/2]" card whose
+       parents list contains your task id; if one exists, create
+       NOTHING - go straight to step 3 citing it.)
        title "Author: <skill> [STE100 round N/2] fix <count> writing
        issues", N = ste100_round + 1 (assignee {{ASSIGNEE}},
        workspace_kind "dir", workspace_path "{{REPO_DIR}}", skills
@@ -126,12 +140,10 @@ default for every call)
        path (or, for create mode, a new scratch path, reported in the
        payload)." + the standard Author work order (read conventions,
        trigger diff, contract table, evidence rule, no self-approval,
-       handoff to Audit before completing).
-    3. kanban_show the retry: record id, parents link, status.
-    4. kanban_complete summary "VERDICT: FAIL" + the change list +
-       retry id + show-check output; metadata
-       {"verdict":"FAIL","skill":<skill>,"round":N,"issues":<count>,
-       "retry":<id>}; created_cards [retry id].
+       handoff to Audit after completing).
+    3. kanban_show the retry: record id, parents link, status (must be
+       "ready"); post the id + status as a kanban_comment on your card
+       so the retry id survives in the record.
 - STANDALONE mode (the PIPELINE INPUT line says "standalone: true" -
   one SKILL.md audited off-pipeline, the card has no parent): create
   NO successor, ever. PASS -> complete "VERDICT: PASS" + the ADVISORY

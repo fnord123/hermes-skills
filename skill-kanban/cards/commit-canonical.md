@@ -79,13 +79,25 @@ rules)
 
 VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
 - COMMITTED:
-  0. RE-QUEUE GUARD: a Fleet-Update-Check card may already exist from a
-     re-queued run. Check the board for a card whose parents list
-     contains your task id and whose title starts "Fleet-Update-Check:".
-     If one exists (any status), create NOTHING - verify its payload,
-     proceed to the show-check and kanban_complete, citing the EXISTING
-     successor id.
-  1. kanban_create the Fleet-Update-Check card FIRST:
+  ORDER (binding): kanban_complete YOUR card FIRST (step 1), THEN
+  create the successor (step 2). The successor must not exist anywhere
+  until you are done; because your task is "done" at create time it is
+  born "ready", not "todo". Your turn is NOT over after completing -
+  do not stop until the show-check (step 3) is done.
+  0. RE-QUEUE GUARD (defensive): a Fleet-Update-Check card may already
+     exist from a re-queued run. Check the board for a card whose
+     parents list contains your task id and whose title starts
+     "Fleet-Update-Check:". If one exists (any status), create NOTHING
+     in step 2 - verify its payload and go straight to the show-check
+     (step 3), citing the EXISTING successor id.
+  1. kanban_complete YOUR card (the successor does not exist yet):
+     summary = "COMMIT-PUSHED: <sha> - <skill> <mode> (round N/2)" +
+     the evidence list (seam table, pre-flight lines, hook output
+     verbatim, push-verify lines, scratch archive path); metadata
+     {"verdict":"COMMITTED","skill":<skill>,"round":"N/2",
+     "commit":<sha>}. Do NOT pass created_cards - there is no
+     successor id yet (it is created in step 2).
+  2. THEN kanban_create the Fleet-Update-Check card:
      title "Fleet-Update-Check: <skill> <mode> (round N/2)"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
      "{{REPO_DIR}}", skills ["{{HOUSE_SKILL}}"],
@@ -97,13 +109,9 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
      work must stay REPORT-ONLY per the standing decision (no update,
      no --force, no reconcile). Then verify the body is complete (no
      truncation, both substitutions present).
-  2. kanban_show the successor; record id, parents link, status.
-  3. kanban_complete with summary = "COMMIT-PUSHED: <sha> - <skill>
-     <mode> (round N/2)" + the evidence list (seam table, pre-flight
-     lines, hook output verbatim, push-verify lines, scratch archive
-     path) + successor id; metadata {"verdict":"COMMITTED","skill":
-     <skill>,"round":"N/2","commit":<sha>,"successor":<fleet id>};
-     created_cards [fleet id].
+  3. kanban_show the successor; record id, parents link, status (must
+     be "ready"); post the id + status as a kanban_comment on your
+     card so the successor id survives in the record.
 - PARK (any pre-flight, seam, lint, stage, or push failure):
   1. UNDO YOUR FOOTPRINT FIRST: if step 3 ran, mv the repo-root skill
      dir back under /tmp/kanban-archived/ so the worktree is EXACTLY

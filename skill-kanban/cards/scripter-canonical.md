@@ -62,12 +62,24 @@ WORK (in order)
    - git status --short (must be EMPTY - nothing here is tracked yet).
 
 HANDOFF (use your kanban_* tools; your own task id is the default)
-0. RE-QUEUE GUARD: this card may be re-run after a timeout; a Verifier
-   may already exist. Check the board for a card whose parents list
-   contains your task id and whose title starts "Verifier:". If one
-   exists (any status), create NOTHING - verify its payload, proceed to
-   the show-check and kanban_complete, citing the EXISTING successor id.
-1. kanban_create the Verifier BEFORE completing yourself:
+ORDER (binding): kanban_complete YOUR card FIRST (step 1), THEN create
+the successor (step 2). The successor must not exist anywhere until
+you are done; because your task is "done" at create time it is born
+"ready", not "todo". Your turn is NOT over after completing - do not
+stop until the show-check (step 3) is done.
+0. RE-QUEUE GUARD (defensive): this card may be re-run after a timeout;
+   a Verifier may already exist. Check the board for a card whose
+   parents list contains your task id and whose title starts
+   "Verifier:". If one exists (any status), create NOTHING in step 2 -
+   verify its payload and go straight to the show-check (step 3),
+   citing the EXISTING successor id.
+1. kanban_complete YOUR card (the successor does not exist yet):
+   summary = "SCRIPTS WRITTEN" + per-script (path | sha256 | lines) +
+   test matrix rows + witness lines; metadata
+   {"skill":<skill>,"mode":<mode>,"round":N,"scripts":{
+   "<name>":"<sha>"}}. Do NOT pass created_cards - there is no
+   successor id yet (it is created in step 2).
+2. THEN kanban_create the Verifier:
    title "Verifier: <skill> <mode> [round 1/2]"
    (on a retry round: "[round N/2]" with the retry round)
    assignee {{ASSIGNEE}}
@@ -77,13 +89,10 @@ HANDOFF (use your kanban_* tools; your own task id is the default)
    body: the pipeline input block (skill, mode, round) + draft
    SKILL.md path + sha256 + script paths + sha256s + the full test
    matrix + the contract table.
-2. kanban_show the Verifier: record its id, that its parents list
-   contains your id, and its status.
-3. kanban_complete with summary = "SCRIPTS WRITTEN" + per-script
-   (path | sha256 | lines) + test matrix rows + witness lines;
-   metadata {"skill":<skill>,"mode":<mode>,"round":N,"scripts":{
-   "<name>":"<sha>"}, "successor":<verifier-id>}; created_cards
-   [verifier id].
+3. kanban_show the Verifier: record its id, that its parents list
+   contains your id, and its status (it must be "ready"); post the id
+   + status as a kanban_comment on your card so the successor id
+   survives in the record.
 
 RULES IN FORCE
 R1 evidence or no verdict. R3 repo state first. R6 self-report is not

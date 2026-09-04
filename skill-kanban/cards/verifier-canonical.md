@@ -62,13 +62,23 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
 - Evidence: per-row run table + seam table + lint delta + cleanup
   witness.
 - PASS:
-  0. RE-QUEUE GUARD: this card may be re-run after a timeout; a Commit
-     card may already exist. Check the board for a card whose parents
-     list contains your task id and whose title starts "Commit:". If
-     one exists (any status), create NOTHING - verify its payload,
-     proceed to the show-check and kanban_complete, citing the
-     EXISTING successor id.
-  1. kanban_create the successor BEFORE completing:
+  ORDER (binding): kanban_complete YOUR card FIRST (step 1), THEN
+  create the successor (step 2). The successor must not exist anywhere
+  until you are done; because your task is "done" at create time it is
+  born "ready", not "todo". Your turn is NOT over after completing -
+  do not stop until the show-check (step 3) is done.
+  0. RE-QUEUE GUARD (defensive): this card may be re-run after a
+     timeout; a Commit card may already exist. Check the board for a
+     card whose parents list contains your task id and whose title
+     starts "Commit:". If one exists (any status), create NOTHING in
+     step 2 - verify its payload and go straight to the show-check
+     (step 3), citing the EXISTING successor id.
+  1. kanban_complete YOUR card (the successor does not exist yet):
+     summary = "VERDICT: PASS" + per-row table + lint delta; metadata
+     {"verdict":"PASS","skill":<skill>,"round":N}. Do NOT pass
+     created_cards - there is no successor id yet (it is created in
+     step 2).
+  2. THEN kanban_create the successor:
      title "Commit: <skill> <mode> (round N/2)"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
      "{{REPO_DIR}}", skills ["{{HOUSE_SKILL}}"],
@@ -82,12 +92,10 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
      manifest legitimately mentions pycache). The body is the ONLY
      channel the Commit worker sees: a handoff whose body is missing
      the manifest or carries an unsubstituted token is INVALID - fix
-     it before completing.
-  2. kanban_show the successor; record id, parents link, status.
-  3. kanban_complete with summary = "VERDICT: PASS" + per-row table +
-     lint delta + successor id + show-check; metadata
-     {"verdict":"PASS","skill":<skill>,"round":N,"successor":<id>};
-     created_cards [successor id].
+     it before creating.
+  3. kanban_show the successor; record id, parents link, status (must
+     be "ready"); post the id + status as a kanban_comment on your
+     card so the successor id survives in the record.
 - NOTE ON PRECEDENT: a predecessor's handoff once carried a
   paraphrased "step 4" note, and the Commit worker read it as a real
   work order and committed a throwaway fixture to origin (caught
@@ -103,10 +111,15 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
      carrier for this loop), create NO successor; kanban_comment the
      findings + options, then kanban_block kind="needs_input"
      reason="<findings table, PARK: loop cap reached>".
-  3. Otherwise kanban_create the retry Scripter BEFORE completing:
-     (RE-QUEUE GUARD: first check the board for an existing
-     "Scripter: <skill> [round N+1/2]" card whose parents list contains
-     your task id; if one exists, create NOTHING - cite it.)
+  3. Otherwise: ORDER (binding) - kanban_complete YOUR card FIRST
+     (summary = "VERDICT: FAIL (script defects)" + findings table;
+     metadata {"verdict":"FAIL","skill":<skill>,"round":N,
+     "issues":<count>}; do NOT pass created_cards), THEN
+     kanban_create the retry Scripter:
+     (RE-QUEUE GUARD (defensive): first check the board for an
+     existing "Scripter: <skill> [round N+1/2]" card whose parents
+     list contains your task id; if one exists, create NOTHING - go
+     straight to step 4 citing it.)
      title "Scripter: <skill> [round N+1/2] fix <count> verifier
      findings"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
@@ -118,17 +131,19 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
      the affected script(s) in place at <scratch>/<skill>/scripts/
      and report new path + sha256 per script." + the full Scripter
      work order from the pipeline spec.
-  4. kanban_show the retry; record id, parents link, status.
-  5. kanban_complete with summary = "VERDICT: FAIL (script defects)"
-     + findings table + retry id + show-check; metadata
-     {"verdict":"FAIL","skill":<skill>,"round":N,"issues":<count>,
-     "retry":<id>}; created_cards [retry id].
+  4. kanban_show the retry; record id, parents link, status (must be
+     "ready"); post the id + status as a kanban_comment on your card
+     so the retry id survives in the record.
 - FAIL (contract infeasible) - a declared output shape or behavior
   cannot be produced by any correct implementation: do NOT loop the
-  Scripter. kanban_create an Author card (model "{{MID_MODEL}}") with
-  the infeasibility finding: what the contract declares, what the runs
-  show, suggested contract fix. One-shot; a second infeasibility on
-  the same skill = PARK (kanban_block kind="needs_input").
+  Scripter. ORDER (binding) - kanban_complete YOUR card FIRST (summary
+  = "VERDICT: CONTRACT-INFEASIBLE" + the finding; do NOT pass
+  created_cards), THEN kanban_create an Author card (model
+  "{{MID_MODEL}}") with the infeasibility finding: what the contract
+  declares, what the runs show, suggested contract fix. Then
+  kanban_show it and post its id as a kanban_comment on your card.
+  One-shot; a second infeasibility on the same skill = PARK
+  (kanban_block kind="needs_input").
 
 RULES IN FORCE
 R1 evidence or no verdict. R3 repo state first. R6 seams re-verified.

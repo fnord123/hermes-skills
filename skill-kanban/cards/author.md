@@ -90,12 +90,22 @@ evidence:
 N/2)" and you echo your title marker verbatim.)
 
 HANDOFF (use your kanban_* tools; your own task id is the default)
-0. RE-QUEUE GUARD: this card may be re-run after a timeout; an Audit card
-   may already exist. Check the board for a card whose parents list
-   contains your task id and whose title starts "Audit:". If one exists
-   (any status), create NOTHING - verify its payload, proceed to the
-   show-check and kanban_complete, citing the EXISTING successor id.
-1. kanban_create the Audit card BEFORE completing yourself:
+ORDER (binding): kanban_complete YOUR card FIRST, then create the
+successor. The successor must not exist anywhere - not todo, not
+anywhere - until you are done. Because your task is "done" at create
+time, it is born "ready", not "todo". Your turn is NOT over after
+completing; do not stop until the show-check in step 3 is done.
+0. RE-QUEUE GUARD (defensive): this card may be re-run after a timeout;
+   an Audit card may already exist. Check the board for a card whose
+   parents list contains your task id and whose title starts "Audit:".
+   If one exists (any status), create NOTHING in step 2 - verify its
+   payload and go straight to the show-check in step 3, citing the
+   EXISTING successor id.
+1. kanban_complete YOUR card (the successor does not exist yet):
+   summary = the OUTPUT shape above (the verdict + evidence table);
+   metadata {"skill":<skill>,"mode":<mode>}. Do NOT pass created_cards
+   - there is no successor id yet (it is created in step 2).
+2. THEN kanban_create the Audit card:
    title "Audit: <skill> <mode>"
    assignee {{ASSIGNEE}}
    workspace_kind "dir", workspace_path "{{REPO_DIR}}"
@@ -106,12 +116,8 @@ HANDOFF (use your kanban_* tools; your own task id is the default)
    table, the files-expected list, ste100_round: 0) PLUS this verbatim
    instruction: "Your work order: read {{CARDS_DIR}}/audit-canonical.md
    and follow it, with the payload above as your PIPELINE INPUT."
-2. kanban_show the successor: record its id, that its parents list
-   contains your id, and its status.
-3. kanban_complete with summary = the OUTPUT shape above + the
-   successor id + the show-check output; metadata
-   {"skill":<skill>,"mode":<mode>,"successor":<id>}; created_cards
-   [successor id].
+3. kanban_show the successor: record its id, that its parents list
+   contains your id, and its status (it must be "ready").
 
 RULES IN FORCE
 R1 evidence or no verdict. R3 repo-state check first. R4/R5/R7: you

@@ -77,21 +77,29 @@ infeasibility on the same skill PARKs.
 **Graph invariants** (binding, verified against the live board):
 
 - **Parentage rule:** no pipeline card is ever created without `parents`;
-  every card creates its successor BEFORE completing itself. A card with
-  no parent is immediately `ready` and runs against nothing — the
-  structural parentage failure. (The kickoff's first card is the one
-  exception: it has no parent by design and carries its input in its body.)
-- **No verdict channel:** a child promotes on parent `done` regardless of
-  what the parent's summary says. PASS and FAIL differ only in WHICH
-  successor gets created — a FAIL still creates its (retry) successor and
-  only then completes.
+  every card COMPLETES ITSELF FIRST, then creates its successor. The
+  successor must not exist anywhere — not `todo`, not anywhere — until
+  its parent is `done`; because the parent is already `done` at create
+  time, the successor is born `ready` (the substrate's create rule:
+  all parents `done` ⇒ `ready`, else `todo`). A card with no parent is
+  immediately `ready` and runs against nothing — the structural
+  parentage failure. (The kickoff's first card is the one exception: it
+  has no parent by design and carries its input in its body.)
+- **No verdict channel:** PASS and FAIL differ only in WHICH successor
+  gets created — a FAIL still completes first and then creates its
+  (retry) successor. The successor id is recorded via a
+  `kanban_comment` on the parent (the completion summary is fixed by
+  the time the successor exists), so the parent's `kanban_complete`
+  call must NOT pass `created_cards`.
 - **The successor's body is the only channel the successor sees.** A
   placeholder body that reads like a work order IS a work order (that is
   how a throwaway fixture once got committed and pushed). See
   `known-pitfalls.md`.
 - **Payload lives in two places on purpose:** the successor's `--body`
   (standing work order) and the parent's `kanban_complete --summary`
-  (evidence snapshot the child re-verifies).
+  (evidence snapshot the child re-verifies). The successor id itself
+  cannot ride in that summary (the complete call precedes the create),
+  so it is recorded as a `kanban_comment` on the parent instead.
 - **Body cap:** the worker context builder caps the stored body at 8 KB
   (`_CTX_MAX_BODY_BYTES = 8*1024` in `kanban_db.py`, applied in
   `_build_worker_context` — tail-truncated at context-build time; the DB

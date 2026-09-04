@@ -218,7 +218,8 @@ rewrite | GATING/ADVISORY — written so an Author card can execute it
 verbatim, plus the protected-surface note.
 
 **Verdict.**
-- **PASS (zero GATING)** → successor BEFORE completing: skill has scripts
+- **PASS (zero GATING)** → complete FIRST, then successor: skill has
+  scripts
   → **Skill Scripter** with the full payload; script-less → **Skill.md
   Commit** (changeset = SKILL.md + state files only; render the manifest
   from the files-expected list).
@@ -372,7 +373,7 @@ the worker sees; see `known-pitfalls.md`).
 9. **ARCHIVE THE SCRATCH:** move the scratch skill dir to a timestamped
    subdirectory under the /tmp archive dir (MOVE, never bulk delete);
    verify the scratch path is gone and git status is empty.
-10. **SUCCESSOR:** create the Fleet-Update-Check card (before completing).
+10. **SUCCESSOR:** complete FIRST, then create the Fleet-Update-Check card.
 
 **Verdict.**
 - **COMMITTED** (push verified `0 0`) → the Fleet-Update-Check card is the
@@ -560,8 +561,10 @@ scratch by `mv`-ing it to /tmp, never by bulk delete.
 
 ### 9.2 The parentage rule (the whole discipline in one line)
 
-**A pipeline card is never created without `parents`; every card creates
-its successor before completing itself.**
+**A pipeline card is never created without `parents`; every card
+completes itself FIRST, then creates its successor — so the successor
+does not exist anywhere until its parent is `done`, and (all parents
+done ⇒ `ready`) it is born `ready`, never parked in `todo`.**
 
 Consequences and why:
 
@@ -570,16 +573,21 @@ Consequences and why:
   substrate, and it is structural: the link must exist AT CREATION.
   Post-hoc `link` is the failure mode (create, forget to link, child runs
   early) — the handoff step's ordering makes that impossible.
-- The substrate gives NO verdict channel: a child promotes on parent
-  `done`, whatever the parent's summary says. So a card with a FAIL
-  verdict must not complete-and-stop; it completes AFTER its successor
-  exists. The handoff step is therefore ordered: (1) create successor
-  with `parents=[<this-id>]`, (2) show-check the successor, (3) complete
-  with the payload + evidence.
+- The substrate gives NO verdict channel: a child is born `ready` the
+  moment all its parents are `done`, whatever the parent's summary
+  says. That is exactly why the successor must be created ONLY after
+  the parent is done — create it earlier and it sits in `todo` as a
+  pre-registered promise, which the design forbids. The handoff step is
+  therefore ordered: (1) `kanban_complete` the card (summary = verdict
+  + evidence; no `created_cards`), (2) `kanban_create` the successor
+  with `parents=[<this-id>]` (born `ready`), (3) show-check the
+  successor and record its id via `kanban_comment` on the parent. The
+  worker's turn is not over until step 3 is done.
 - Handoff payload lives in TWO places on purpose: the successor's `body`
   (the standing spec: what to do, round number, issue list) and the
   parent's `complete --summary` (the evidence snapshot the child
-  re-verifies per R6).
+  re-verifies per R6). The successor id rides in a `kanban_comment` on
+  the parent, because the complete call happens before the id exists.
 - Neither `block` nor `archive` signals an already-spawned worker — the
   in-flight run continues its work order and its `kanban_complete` is
   later rejected ("already terminal"); the durable record for that run is
