@@ -37,10 +37,10 @@ is documented in `PROFILE.example`.
 
    | Token | Meaning | Appears in |
    |-------|---------|------------|
-   | `{{ASSIGNEE}}` | the profile/bot that runs the cards (`--assignee` / `--created-by`) | every card's handoff args |
+   | `{{ASSIGNEE}}` | the profile(s) that run the cards (`--assignee`); one profile name, or a `role=profile` map for role-isolated installs | every card's handoff args + kickoff |
    | `{{REPO_DIR}}` | absolute path to your house skill repo checkout (the `--workspace dir:` target) | every card |
    | `{{CARDS_DIR}}` | absolute dir holding these card bodies (for "read the sibling canonical" work-order lines) | Audit, STE100, Verifier, Commit |
-   | `{{MID_MODEL}}` | the mid-tier model id for grunt-work cards (Author, Scripter, retry cards) | Author, Scripter, Verifier, STE100 |
+   | `{{MID_MODEL}}` | the mid-tier model id for grunt-work cards (Author, Scripter, and their retry cards; the STE100 card itself runs on the operator default) | Author, Scripter, Verifier, STE100 |
    | `{{HOUSE_SKILL}}` | the house-repo skill name force-loaded on most cards | Author, Audit, Scripter, Verifier, Commit, Fleet |
    | `{{STD_SKILL}}` | the writing-standard (ASD-STE100) skill name force-loaded on the STE100 card | Audit, STE100 |
 

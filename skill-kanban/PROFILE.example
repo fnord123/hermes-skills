@@ -8,12 +8,25 @@ by the creating card, not here).
 
 ## The tokens
 
-- **`{{ASSIGNEE}}`** — the Hermes profile / bot that runs every card.
-  This is the `--assignee` on every `kanban create` and the `created_by`
-  the kickoff records. Use a single profile for the whole pipeline (it is
-  the profile that has the house skill, the repo, and the kanban toolset).
-  Example value: a profile name. One pipeline per repo (R3) assumes one
-  assignee's worktree.
+- **`{{ASSIGNEE}}`** — the Hermes profile(s) that run the cards. This is
+  the `--assignee` on every `kanban create`. It is **one token** that
+  resolves per site (never split into per-role tokens):
+    - **Single-runner install** — the value is one profile name; every
+      card runs as that profile (it must have the house skill, the repo,
+      and the kanban toolset). `ASSIGNEE = myprofile`
+    - **Role-isolated install** — the value is a `role=profile` map; the
+      assembler fills each `{{ASSIGNEE}}` site with the profile for the
+      role of the card that site creates, read from the map. One profile
+      + one Hindsight bank per role severs the shared-memory backchannel
+      between adversarial roles (an Audit/Verifier must not recall what
+      the Author/Scripter it is checking reasoned).
+      `ASSIGNEE = author=sr-author, audit=sr-audit, ste100=sr-ste100,
+      scripter=sr-scripter, verifier=sr-verifier, commit=sr-commit,
+      fleet=sr-fleet`
+  One pipeline per repo (R3) assumes one assignee's worktree. The kickoff
+  records `--created-by` as the orchestrator's profile (who ran the
+  `hermes kanban create`); that equals `{{ASSIGNEE}}` only in the
+  single-runner case.
 
 - **`{{REPO_DIR}}`** — absolute path to your house skill repo checkout.
   This is the `--workspace dir:` target on every card and the place the
@@ -28,11 +41,15 @@ by the creating card, not here).
   wherever you install the `cards/` tree.
 
 - **`{{MID_MODEL}}`** — the model id for the grunt-work cards: Author,
-  Scripter, and the retry cards they spawn. This is the *lower* tier —
-  drafting and mechanical script-writing. The judgment cards (Audit,
-  Verifier, Commit, Fleet-Update-Check) carry **no** `--model`, so they run
-  on your profile's default (the *higher* tier). Pick a model id that your
-  LLM proxy actually serves under that name.
+  Scripter, and the retry cards they spawn (the retry Author cards and the
+  retry Scripter card carry an explicit `--model` pin; the STE100 retry
+  Author does too). This is the *lower* tier — drafting and mechanical
+  script-writing. The judgment cards (Audit, Verifier, Commit,
+  Fleet-Update-Check, and the STE100 card itself) carry **no** `--model`,
+  so they run on the operator's default (the *higher* tier). Pick a model
+  id that your LLM proxy actually serves under that name. (Role-isolated
+  install: a role that should run mid is given a profile whose default is
+  mid — the pin travels with the profile, not the card.)
 
 - **`{{HOUSE_SKILL}}`** — the name of the house-repo skill that documents
   how to work in `{{REPO_DIR}}` (the rubric, the linter, the commit
@@ -47,14 +64,34 @@ by the creating card, not here).
 
 ## Worked example (what a filled PROFILE looks like)
 
+Single-runner install (one profile runs every card):
+
 ```
-ASSIGNEE     = <your-runner-profile>
+ASSIGNEE     = myprofile
 REPO_DIR     = <absolute>/hermes-skills
-CARDS_DIR    = <absolute>/.hermes/profiles/<profile>/future-work/skill-kanban-cards
+CARDS_DIR    = <absolute>/.hermes/profiles/myprofile/future-work/skill-kanban-cards
 MID_MODEL    = <your-mid-tier-model-id>
 HOUSE_SKILL  = hermes-skills-repo
 STD_SKILL    = asd-ste100
 ```
+
+Role-isolated install (one profile + one Hindsight bank per role; same
+single `{{ASSIGNEE}}` token, value is the map):
+
+```
+ASSIGNEE     = author=sr-author, audit=sr-audit, ste100=sr-ste100,
+               scripter=sr-scripter, verifier=sr-verifier,
+               commit=sr-commit, fleet=sr-fleet
+REPO_DIR     = <absolute>/hermes-skills
+CARDS_DIR    = <absolute>/.hermes/profiles/<operator>/future-work/skill-kanban-cards
+MID_MODEL    = <your-mid-tier-model-id>
+HOUSE_SKILL  = hermes-skills-repo
+STD_SKILL    = asd-ste100
+```
+
+Every `{{ASSIGNEE}}` in `cards/` resolves to the map entry for the role of
+the card that site creates (e.g. the Author's "create the Audit" handoff
+→ `audit=` → `sr-audit`).
 
 ## Notes
 

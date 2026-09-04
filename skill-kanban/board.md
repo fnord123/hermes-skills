@@ -369,6 +369,10 @@ hermes kanban --board skills create "<title>" \
   --skill {{HOUSE_SKILL}} --max-runtime 30m --created-by {{ASSIGNEE}} --json
 ```
 
+Role-map install: `--assignee` resolves to the `author=` map entry, and
+`--created-by` is the OPERATOR profile (the one running this command),
+not a map entry. Single-runner install: both are the one profile.
+
 The `--json` echo confirms `workspace_kind: dir`, the resolved
 `workspace_path`, and `skills` before anything else.
 
