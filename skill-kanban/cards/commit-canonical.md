@@ -79,6 +79,12 @@ rules)
 
 VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
 - COMMITTED:
+  0. RE-QUEUE GUARD: a Fleet-Update-Check card may already exist from a
+     re-queued run. Check the board for a card whose parents list
+     contains your task id and whose title starts "Fleet-Update-Check:".
+     If one exists (any status), create NOTHING - verify its payload,
+     proceed to the show-check and kanban_complete, citing the EXISTING
+     successor id.
   1. kanban_create the Fleet-Update-Check card FIRST:
      title "Fleet-Update-Check: <skill> <mode> (round N/2)"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path

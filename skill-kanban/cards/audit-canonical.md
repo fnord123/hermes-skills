@@ -87,11 +87,17 @@ default for every call)
 - Evidence table in the completion summary, one row per check:
   rule | result | evidence (command + observed line, or file:line).
 - PASS:
+    0. RE-QUEUE GUARD: this card may be re-run after a timeout; a STE100
+       card may already exist. Check the board for a card whose parents
+       list contains your task id and whose title starts "STE100:". If
+       one exists (any status), create NOTHING - verify its payload,
+       proceed to the show-check and kanban_complete, citing the
+       EXISTING successor id.
     1. kanban_create the successor BEFORE completing yourself:
        title "STE100: <skill> <mode>"
        assignee {{ASSIGNEE}}
        workspace_kind "dir", workspace_path "{{REPO_DIR}}"
-       skills ["{{HOUSE_SKILL}}", "{{STD_SKILL}}"], max_runtime_seconds 1800
+       skills ["{{HOUSE_SKILL}}", "{{STD_SKILL}}"], max_runtime_seconds 2700
        parents [your task id]
        body: the handoff payload - draft path + its sha256, mode,
        skill, trigger diff, your script-contract table (it is the spec
@@ -130,6 +136,9 @@ default for every call)
        kind="needs_input" reason="<findings table, PARK: loop cap
        reached>". That parked card IS the board state.
     4. Otherwise kanban_create the retry Author BEFORE completing:
+       (RE-QUEUE GUARD: first check the board for an existing
+       "Author: <skill> [round N/2]" card whose parents list contains
+       your task id; if one exists, create NOTHING - cite it.)
        title "Author: <skill> [round N/2] fix <count> audit issues"
        (assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
        "{{REPO_DIR}}", skills ["{{HOUSE_SKILL}}"], max_runtime_seconds

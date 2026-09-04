@@ -90,6 +90,11 @@ evidence:
 N/2)" and you echo your title marker verbatim.)
 
 HANDOFF (use your kanban_* tools; your own task id is the default)
+0. RE-QUEUE GUARD: this card may be re-run after a timeout; an Audit card
+   may already exist. Check the board for a card whose parents list
+   contains your task id and whose title starts "Audit:". If one exists
+   (any status), create NOTHING - verify its payload, proceed to the
+   show-check and kanban_complete, citing the EXISTING successor id.
 1. kanban_create the Audit card BEFORE completing yourself:
    title "Audit: <skill> <mode>"
    assignee {{ASSIGNEE}}

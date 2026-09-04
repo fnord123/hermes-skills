@@ -70,6 +70,13 @@ default for every call)
   rule | quote (trimmed to the violated span) | proposed rewrite |
   GATING / ADVISORY.
 - PASS (zero GATING findings):
+    0. RE-QUEUE GUARD: this card may be re-run after a timeout; a
+       Scripter (or Commit, for a script-less skill) card may already
+       exist. Check the board for a card whose parents list contains
+       your task id and whose title starts "Scripter:" or "Commit:".
+       If one exists (any status), create NOTHING - verify its payload,
+       proceed to the show-check and kanban_complete, citing the
+       EXISTING successor id.
     1. kanban_create the successor BEFORE completing yourself:
        - the script note says the skill HAS scripts:
          title "Scripter: <skill> <mode>"
@@ -101,6 +108,9 @@ default for every call)
        kind="needs_input" reason="<change list, PARK: STE100 loop cap
        reached>". That parked card IS the board state.
     2. Otherwise kanban_create the retry Author BEFORE completing:
+       (RE-QUEUE GUARD: first check the board for an existing
+       "Author: <skill> [round N/2]" card whose parents list contains
+       your task id; if one exists, create NOTHING - cite it.)
        title "Author: <skill> [STE100 round N/2] fix <count> writing
        issues", N = ste100_round + 1 (assignee {{ASSIGNEE}},
        workspace_kind "dir", workspace_path "{{REPO_DIR}}", skills

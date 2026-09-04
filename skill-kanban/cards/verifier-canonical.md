@@ -62,6 +62,12 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
 - Evidence: per-row run table + seam table + lint delta + cleanup
   witness.
 - PASS:
+  0. RE-QUEUE GUARD: this card may be re-run after a timeout; a Commit
+     card may already exist. Check the board for a card whose parents
+     list contains your task id and whose title starts "Commit:". If
+     one exists (any status), create NOTHING - verify its payload,
+     proceed to the show-check and kanban_complete, citing the
+     EXISTING successor id.
   1. kanban_create the successor BEFORE completing:
      title "Commit: <skill> <mode> (round N/2)"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path
@@ -98,6 +104,9 @@ VERDICT + HANDOFF (kanban_* tools; your own task id is the default)
      findings + options, then kanban_block kind="needs_input"
      reason="<findings table, PARK: loop cap reached>".
   3. Otherwise kanban_create the retry Scripter BEFORE completing:
+     (RE-QUEUE GUARD: first check the board for an existing
+     "Scripter: <skill> [round N+1/2]" card whose parents list contains
+     your task id; if one exists, create NOTHING - cite it.)
      title "Scripter: <skill> [round N+1/2] fix <count> verifier
      findings"
      assignee {{ASSIGNEE}}, workspace_kind "dir", workspace_path

@@ -20,9 +20,10 @@ by the creating card, not here).
       + one Hindsight bank per role severs the shared-memory backchannel
       between adversarial roles (an Audit/Verifier must not recall what
       the Author/Scripter it is checking reasoned).
-      `ASSIGNEE = author=sr-author, audit=sr-audit, ste100=sr-ste100,
-      scripter=sr-scripter, verifier=sr-verifier, commit=sr-commit,
-      fleet=sr-fleet`
+      `ASSIGNEE = author=<author-profile>, audit=<audit-profile>,
+      ste100=<ste100-profile>, scripter=<scripter-profile>,
+      verifier=<verifier-profile>, commit=<commit-profile>,
+      fleet=<fleet-profile>`
   One pipeline per repo (R3) assumes one assignee's worktree. The kickoff
   records `--created-by` as the orchestrator's profile (who ran the
   `hermes kanban create`); that equals `{{ASSIGNEE}}` only in the
@@ -79,9 +80,10 @@ Role-isolated install (one profile + one Hindsight bank per role; same
 single `{{ASSIGNEE}}` token, value is the map):
 
 ```
-ASSIGNEE     = author=sr-author, audit=sr-audit, ste100=sr-ste100,
-               scripter=sr-scripter, verifier=sr-verifier,
-               commit=sr-commit, fleet=sr-fleet
+ASSIGNEE     = author=<author-profile>, audit=<audit-profile>,
+               ste100=<ste100-profile>, scripter=<scripter-profile>,
+               verifier=<verifier-profile>, commit=<commit-profile>,
+               fleet=<fleet-profile>
 REPO_DIR     = <absolute>/hermes-skills
 CARDS_DIR    = <absolute>/.hermes/profiles/<operator>/future-work/skill-kanban-cards
 MID_MODEL    = <your-mid-tier-model-id>
@@ -91,7 +93,7 @@ STD_SKILL    = asd-ste100
 
 Every `{{ASSIGNEE}}` in `cards/` resolves to the map entry for the role of
 the card that site creates (e.g. the Author's "create the Audit" handoff
-→ `audit=` → `sr-audit`).
+→ `audit=` → `<audit-profile>`).
 
 ## Notes
 

@@ -67,6 +67,16 @@ fix — do not re-derive it.
   build time while the DB keeps the full row — so the DB can show an
   over-cap body the worker never saw. Keep bodies under 8 KB; put the
   load-bearing steps at the head.
+- **A timeout re-queues the card, and a re-run re-executes the work
+  order.** When a run hits `max_runtime_seconds`, the substrate marks it
+  `timed_out` and puts the card back in the queue; the next spawn
+  re-reads the whole work order from the top. If that run had ALREADY
+  created its successor before dying, the re-run will create a duplicate
+  unless it checks first. Every successor-creating card therefore opens
+  its HANDOFF with a RE-QUEUE GUARD (step 0): query the board for an
+  existing successor whose `parents` list contains the card's own id and
+  whose title matches its branch; if one exists, create NOTHING, verify
+  its payload, and `kanban_complete` citing the existing id.
 
 ## Token and assembly discipline
 

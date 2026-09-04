@@ -62,6 +62,11 @@ WORK (in order)
    - git status --short (must be EMPTY - nothing here is tracked yet).
 
 HANDOFF (use your kanban_* tools; your own task id is the default)
+0. RE-QUEUE GUARD: this card may be re-run after a timeout; a Verifier
+   may already exist. Check the board for a card whose parents list
+   contains your task id and whose title starts "Verifier:". If one
+   exists (any status), create NOTHING - verify its payload, proceed to
+   the show-check and kanban_complete, citing the EXISTING successor id.
 1. kanban_create the Verifier BEFORE completing yourself:
    title "Verifier: <skill> <mode> [round 1/2]"
    (on a retry round: "[round N/2]" with the retry round)
