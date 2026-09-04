@@ -31,3 +31,10 @@ jobs:
           set -e
           find . -path ./node_modules -prune -o -name '.venv' -prune -o \
                  -name '*.py' -print0 | xargs -0 python3 -m py_compile
+
+      # ARCHITECTURE.md documents all 21 rx-review card types. A hand-maintained list is wrong
+      # within a week, so the table is generated and this fails the build when the doc no longer
+      # matches the code. (Moved here from the Hermes repo's tests workflow, 2026-09-04, when the
+      # pipeline code moved into this skill.)
+      - name: rx-review architecture card map is current
+        run: python3 rx-review/scripts/cardmap.py --check
