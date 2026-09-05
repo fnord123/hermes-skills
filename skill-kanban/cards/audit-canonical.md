@@ -115,7 +115,7 @@ default for every call)
        scripts vs script-less - which the STE100 card uses to route to
        Scripter or Commit), the Author's files-expected list,
        "ste100_round: 0" (or, if the Author's title in the parent
-       results carries [STE100 round N/2], that N verbatim - you COPY
+       results carries [STE100 round N/3], that N verbatim - you COPY
        it, you do not set it), your card id - PLUS this verbatim
        instruction:
        "Your work order: read {{CARDS_DIR}}/ste100-audit-canonical.md

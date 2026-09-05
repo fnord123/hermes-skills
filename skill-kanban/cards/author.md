@@ -15,7 +15,7 @@ list (from Audit) or the change list (from STE100). On a loop-back you
 fix EXACTLY the listed issues - no scope expansion. From a STE100
 loop-back the protected surface (the PREFER clause, the eight-section
 order, the quoted trigger phrases) must be byte-identical after your
-edit, and you ECHO your title's [STE100 round N/2] marker VERBATIM in
+edit, and you ECHO your title's [STE100 round N/3] marker VERBATIM in
 your completion summary - that echo is how the round counter
 propagates.
 ## PIPELINE INPUT (this run)

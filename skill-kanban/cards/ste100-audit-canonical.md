@@ -21,7 +21,7 @@ live anchor / trigger diff / the script-contract table (the spec the
 Scripter builds to; its marks carry the script note - has scripts vs
 script-less - which you use to route to Scripter or Commit) / the
 Author's files-expected list / ste100_round (0 = first pass; on a
-loop-back the Author's title carried [STE100 round N/2]) / the parent
+loop-back the Author's title carried [STE100 round N/3]) / the parent
 card id. The full Audit PASS evidence table: kanban_show the parent ->
 runs[0].summary; cite the parent card id in your own summary.
 Re-verify the seams (R6) before acting: the draft exists at the path
@@ -112,7 +112,7 @@ default for every call)
        id survives in the record (the completion summary is already
        fixed and cannot carry it).
 - FAIL (>= 1 GATING finding):
-    1. If ste100_round >= 2, create NO successor. kanban_comment the
+    1. If ste100_round >= 3, create NO successor. kanban_comment the
        change list + decision options, then kanban_block
        kind="needs_input" reason="<change list, PARK: STE100 loop cap
        reached>". That parked card IS the board state.
@@ -122,10 +122,10 @@ default for every call)
        do NOT pass created_cards), THEN kanban_create the retry
        Author:
        (RE-QUEUE GUARD (defensive): first check the board for an
-       existing "Author: <skill> [STE100 round N/2]" card whose
+       existing "Author: <skill> [STE100 round N/3]" card whose
        parents list contains your task id; if one exists, create
        NOTHING - go straight to step 3 citing it.)
-       title "Author: <skill> [STE100 round N/2] fix <count> writing
+       title "Author: <skill> [STE100 round N/3] fix <count> writing
        issues", N = ste100_round + 1 (assignee {{ASSIGNEE}},
        workspace_kind "dir", workspace_path "{{REPO_DIR}}", skills
        ["{{HOUSE_SKILL}}"], max_runtime_seconds 1800, model
@@ -135,7 +135,7 @@ default for every call)
        PREFER clause, the eight-section order, and the quoted trigger
        phrases must be byte-identical after your edit; where a
        proposed rewrite cannot meet both, keep the house format and
-       note the conflict. Echo your title's [STE100 round N/2] marker
+       note the conflict. Echo your title's [STE100 round N/3] marker
        VERBATIM in your completion summary. Draft to the same scratch
        path (or, for create mode, a new scratch path, reported in the
        payload)." + the standard Author work order (read conventions,
@@ -152,8 +152,8 @@ default for every call)
 
 RULES IN FORCE
 R1 evidence or no verdict: every finding cites rule + quote +
-section:line. R2 loop cap 2 against the Author, marker [STE100 round
-N/2] - a SEPARATE counter from the Audit loop's [round N/2]; a draft
+section:line. R2 loop cap 3 against the Author, marker [STE100 round N/3]
+- a SEPARATE counter from the Audit loop's [round N/2]; a draft
 can run both loops. R6 self-report is not a fact - re-verify the
 draft seam before auditing. R4/R5/R7: you never stage git files,
 commit, force, or push; the change list is your only output. R8

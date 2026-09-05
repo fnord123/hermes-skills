@@ -49,7 +49,7 @@ multi-card pipeline in which **no card is trusted on its own self-report**:
 | 2b. STE100 (writing)       |
 +----------------------------+
       | pass                                                        |
-      v                     (script-less skill: jump straight to 5) | fail (max 2): [STE100 round N/2]
+      v                     (script-less skill: jump straight to 5) | fail (max 3): [STE100 round N/3]
 +----------------------------+                                      | (retry re-enters at 2)
 | 3. Scripter                |<-------------------------------------+
 +----------------------------+
@@ -151,7 +151,7 @@ writing-standard skill).
   creates **Audit** as its successor.
 - **Loop role:** the retry Author (from Audit FAIL, `[round N/2]`) fixes
   exactly the listed issues, no scope expansion; the retry Author (from
-  STE100 FAIL, `[STE100 round N/2]`) fixes the change list, keeps the
+  STE100 FAIL, `[STE100 round N/3]`) fixes the change list, keeps the
   protected surface (PREFER clause, eight-section order, quoted trigger
   phrases) byte-identical, and echoes its title marker verbatim in its
   summary (that is how the round counter propagates).
@@ -198,7 +198,7 @@ writing-standard skill).
 - **Verdict/handoff:** PASS → **Scripter** (skill has scripts) or
   **Commit** (script-less — the changeset is SKILL.md + state files; the
   manifest is rendered from the files-expected list). FAIL → retry Author
-  `[STE100 round N/2]` (separate counter; the retry re-enters at Audit for
+  `[STE100 round N/3]` (separate counter; the retry re-enters at Audit for
   a fresh house check); cap → comment + PARK. **Standalone mode** (input
   says `standalone: true`, no parent): no successor, ever — the change
   list is the deliverable.
@@ -309,7 +309,7 @@ writing-standard skill).
 | Loop | Edge | Marker | Cap | On exhaust |
 |------|------|--------|-----|------------|
 | Author ↔ Audit | Audit FAIL → retry Author | `[round N/2]` | 2 | PARK (blocked + findings table) |
-| STE100 → Author | STE100 FAIL → retry Author (re-enters at Audit) | `[STE100 round N/2]` | 2 | PARK (blocked + change list) |
+| STE100 → Author | STE100 FAIL → retry Author (re-enters at Audit) | `[STE100 round N/3]` | 3 | PARK (blocked + change list) |
 | Scripter ↔ Verifier | Verifier FAIL (defects) → retry Scripter | `[round N/2]` on the successor's title | 2 | PARK (blocked + findings table) |
 | Verifier → Author | contract infeasible (one-shot) | — | 1 per contract | second infeasibility = PARK |
 

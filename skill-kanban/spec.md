@@ -51,8 +51,8 @@ not part of this spec.
 
  Special edge: 4 --(contract infeasible, one-shot)--> 1
                (a second infeasibility on the same skill = PARK)
- Special edge: 2b --(gating finding, max 2)--> 1
-               (title marker [STE100 round N/2] - a SEPARATE counter from
+ Special edge: 2b --(gating finding, max 3)--> 1
+               (title marker [STE100 round N/3] - a SEPARATE counter from
                loop 2's [round N/2]; the retry re-enters at 2 (Audit) for
                a fresh house check before the draft comes back to 2b)
 ```
@@ -66,7 +66,7 @@ Rules that bind every card:
   output: command + result line, file:line, or JSON. "Looks fine" is not a
   verdict.
 - **R2 - Bounded loops.** Author ↔ Audit: max 2 retries. Scripter ↔
-  Verifier: max 2 retries. STE100 → Author: max 2 (separate counter).
+  Verifier: max 2 retries. STE100 → Author: max 3 (separate counter).
   Verifier → Author (contract infeasible): one-shot. Any exhaustion →
   **PARK**: board stops, the owner gets a findings table (rule, file:line,
   evidence, true/FP classification) and decides. No third spin, no silent
@@ -190,7 +190,7 @@ a loop-back: the issue list.
 table (the spec the Scripter builds to; its marks also carry the script
 note — has scripts / script-less — used for routing), trigger diff, the
 Author's files-expected list, ste100_round (0 = first pass; on a loop-back
-the Author's title carries `[STE100 round N/2]`), the parent card id (the
+the Author's title carries `[STE100 round N/3]`), the parent card id (the
 full Audit PASS evidence table lives in the parent's `runs[0].summary`).
 Standalone variant: one SKILL.md path, no pipeline context (the card has
 no parent).
@@ -224,9 +224,9 @@ verbatim, plus the protected-surface note.
   Commit** (changeset = SKILL.md + state files only; render the manifest
   from the files-expected list).
 - **FAIL (>= 1 GATING)** → retry **Skill.md Creation/Update** card with
-  the change list, title marker `[STE100 round N/2]` (separate counter
+  the change list, title marker `[STE100 round N/3]` (separate counter
   from loop 2). The retry re-enters at **2 Skill.md Audit** and the draft
-  comes back to 2b. Loop max 2 (R2); then PARK with the change list as
+  comes back to 2b. Loop max 3 (R2); then PARK with the change list as
   the findings table.
 - **Standalone (no parent)** → create NO successor, ever: the change list
   is the deliverable, for the human to hand to a create/update card. Do
@@ -611,7 +611,7 @@ max_runtime_seconds per the card class — except 2b STE100, which adds
 |------|----------------|-------------------|
 | 1 Author | `create --body <author body> --assignee {{ASSIGNEE}} --workspace dir:{{REPO_DIR}} --skill {{HOUSE_SKILL}} --max-runtime 30m --model {{MID_MODEL}}` | PASS: kanban_create Audit `parents=[self]`; FAIL (max 2): kanban_create Author `parents=[self]` round N+1 + issues in body |
 | 2 Audit | as above, profile-default model; same `--skill` flags as row 1 (30m) | PASS: kanban_create STE100 `parents=[self]` (STE100 owns the script-less→Commit routing); FAIL: loop per row 1; cap: kanban_block kind=needs_input |
-| 2b STE100 | as above (30m), `--skill {{HOUSE_SKILL}} --skill {{STD_SKILL}}` | PASS: kanban_create Scripter (skill has scripts) or Commit (script-less) `parents=[self]`; FAIL (max 2): kanban_create Author `[STE100 round N/2]` + change list; standalone (no parent): complete with the change list, NO successor |
+| 2b STE100 | as above (30m), `--skill {{HOUSE_SKILL}} --skill {{STD_SKILL}}` | PASS: kanban_create Scripter (skill has scripts) or Commit (script-less) `parents=[self]`; FAIL (max 3): kanban_create Author `[STE100 round N/3]` + change list; standalone (no parent): complete with the change list, NO successor |
 | 3 Scripter | as above (45m, `--model {{MID_MODEL}}`) | ALWAYS kanban_create Verifier `parents=[self]` with scripts + test matrix |
 | 4 Verifier | (1h) | PASS: kanban_create Commit; FAIL-defect (max 2): kanban_create Scripter round+1; FAIL-contract: kanban_create Author with infeasibility finding (one-shot) |
 | 5 Commit | (40m) | update: kanban_create Fleet Check; create: kanban_complete, pipeline done |
@@ -621,7 +621,7 @@ max_runtime_seconds per the card class — except 2b STE100, which adds
 
 - Retry counter lives in the retry card's **body and title** (`[round
   2/2]`) — self-contained; each card knows its own round without reading
-  history. The STE100 loop runs its OWN counter, `[STE100 round N/2]` in
+  history. The STE100 loop runs its OWN counter, `[STE100 round N/3]` in
   the retry Author's title + body, carried in the payload field
   `ste100_round` — a draft can spin in both loops; the counters are
   independent.
