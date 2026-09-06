@@ -29,6 +29,17 @@ test. You never edit the skill.
 - **Lint in place on the branch** (`python3 tools/lint_skills.py --skill
   <skill> --json`) and diff against the baseline the Audit recorded.
   Classify every new finding true vs false-positive.
+- **Style standard (mechanized — one script call):**
+  `python3 <script> --instance <instance> style-check --issue <n>`.
+  The house code standard is **bash or python only** (a different
+  language needs a very good reason, documented in the pull request) and
+  the **Google Shell / Google Python style guides**. The verb checks the
+  files this branch changed against origin/main: language allowlist,
+  shebangs, 80-column lines, unused imports/variables, google-profile
+  import order, and shellcheck-clean bash. Every `findings[]` entry is
+  a FAIL finding — verbatim into `--findings-file`. A language finding
+  is a FAIL unless the pull request body documents a very good reason
+  (then record it as reviewed-and-accepted in your comment instead).
 - **Clean up and verify the cleanup:** move the fixtures to a throwaway
   archive under the system temp dir (move, never bulk delete), and confirm
   the working tree shows only the intended changes.

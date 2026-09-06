@@ -638,6 +638,196 @@ def _merge_preflight(inst: dict, state: dict) -> str:
     return ""
 
 
+# --------------------------------------------- style standard (the verifier)
+#
+# The house code standard: bash or python only (a different language needs
+# a very good reason, documented in the PR), Google Shell Style Guide and
+# Google Python Style Guide. Mechanized subset, diff-scoped against
+# origin/main on purpose: the fleet carries pre-existing debt (thousands of
+# PEP8 findings), so the gate is "no NEW violations in the files the PR
+# changes", not "zero in the repo" (that would make every pipeline park).
+#
+
+CODE_EXTS = {".py": "python", ".sh": "bash", ".bash": "bash"}
+KNOWN_CODE_EXTS = {".js", ".ts", ".jsx", ".tsx", ".mjs", ".pl", ".pm",
+                   ".rb", ".go", ".rs", ".php", ".lua", ".swift", ".kt",
+                   ".java", ".c", ".h", ".cpp", ".hpp", ".cs", ".ps1"}
+
+
+def _toolkit(inst: dict) -> str:
+    t = inst.get("STYLE_TOOLKIT")
+    if not t or not os.path.isdir(t):
+        fail(f"STYLE_TOOLKIT unset or missing in the instance file "
+             f"(got {t!r}): the style-check needs the pinned linter toolkit "
+             f"(venv with pycodestyle/pyflakes/isort + a shellcheck binary)")
+    return t
+
+
+def _git_show(worktree: str, ref: str) -> Optional[str]:
+    proc = run(["git", "-C", worktree, "show", ref], check=False)
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _changed_files(worktree: str) -> dict:
+    """Files this branch changed vs origin/main: {path: status}."""
+    proc = run(["git", "-C", worktree, "diff", "--name-status",
+                "--diff-filter=AM", "origin/main...HEAD"], check=False)
+    files = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            files[parts[-1]] = parts[0][0]  # R100\told\tnew -> new path
+    return files
+
+
+def _py_findings(toolkit: str, path: str, worktree: str) -> set:
+    """{(line, code)} from pycodestyle (80 col) + pyflakes for one file."""
+    binv = os.path.join(toolkit, "venv", "bin")
+    findings = set()
+    proc = run([os.path.join(binv, "pycodestyle"), "--max-line-length=80",
+                os.path.join(worktree, path)], check=False)
+    for line in proc.stdout.splitlines():
+        # pycodestyle: path:line:col: CODE message (no colon after CODE)
+        m = re.search(r":(\d+):(\d+): (\w+) ", line)
+        if m:
+            findings.add((int(m.group(1)), m.group(3)))
+    proc = run([os.path.join(binv, "pyflakes"),
+                os.path.join(worktree, path)], check=False)
+    for line in proc.stdout.splitlines():
+        m = re.search(r":(\d+):\d+: (.*)", line)
+        if m:
+            findings.add((int(m.group(1)), "F " + m.group(2)[:40]))
+    return findings
+
+
+def _isort_clean(toolkit: str, path: str) -> bool:
+    binv = os.path.join(toolkit, "venv", "bin")
+    proc = run([os.path.join(binv, "isort"), "--profile=google",
+                "--check-only", path], check=False)
+    return proc.returncode == 0
+
+
+def _sh_findings(toolkit: str, path: str, worktree: str) -> set:
+    """{(line, SCcode)} from shellcheck for one file."""
+    findings = set()
+    proc = run([os.path.join(toolkit, "bin", "shellcheck"), "-f", "gcc",
+                os.path.join(worktree, path)], check=False)
+    for line in proc.stdout.splitlines():
+        m = re.match(r".*?:(\d+):(\d+): \w+:.*?\[(SC\d+)\]", line)
+        if m:
+            findings.add((int(m.group(1)), m.group(3)))
+    return findings
+
+
+def _baseline(toolkit: str, worktree: str, path: str):
+    """The same findings computed on the origin/main blob (empty if new)."""
+    blob = _git_show(worktree, f"origin/main:{path}")
+    if blob is None:
+        return set(), None  # new file: baseline is zero
+    ext = os.path.splitext(path)[1].lower()
+    p = write_tmp(blob)
+    if ext == ".py":
+        findings = set()
+        binv = os.path.join(toolkit, "venv", "bin")
+        proc = run([os.path.join(binv, "pycodestyle"), "--max-line-length=80",
+                    p], check=False)
+        for line in proc.stdout.splitlines():
+            m = re.search(r":(\d+):(\d+): (\w+) ", line)
+            if m:
+                findings.add((int(m.group(1)), m.group(3)))
+        proc = run([os.path.join(binv, "pyflakes"), p], check=False)
+        for line in proc.stdout.splitlines():
+            m = re.search(r":(\d+):\d+: (.*)", line)
+            if m:
+                findings.add((int(m.group(1)), "F " + m.group(2)[:40]))
+        return findings, p
+    if ext in (".sh", ".bash"):
+        findings = set()
+        proc = run([os.path.join(toolkit, "bin", "shellcheck"), "-f", "gcc",
+                    p], check=False)
+        for line in proc.stdout.splitlines():
+            m = re.match(r".*?:(\d+):(\d+): \w+:.*?\[(SC\d+)\]", line)
+            if m:
+                findings.add((int(m.group(1)), m.group(3)))
+        return findings, p
+    return set(), None
+
+
+def verb_style_check(inst: dict, args) -> None:
+    """Mechanized style standard — the verifier's style evidence.
+
+    Read-only: checks the files the branch changed vs origin/main.
+    `clean` false is the verifier's to turn into a FAIL; the verb only
+    reports. Pre-existing debt is not a finding; NEW debt is.
+    """
+    toolkit = _toolkit(inst)
+    state = parse_state(issue_body(inst, args.issue))
+    wt = state.get("worktree")
+    if not wt or not os.path.isdir(wt):
+        fail(f"worktree missing: {wt!r} (state block of issue {args.issue})")
+    run(["git", "-C", wt, "fetch", "origin"], check=False)
+    files = _changed_files(wt)
+    py = sorted(p for p in files if p.endswith(".py"))
+    sh = sorted(p for p in files if p.endswith((".sh", ".bash")))
+    findings = []
+
+    # 1. language allowlist: bash + python, or a documented very-good-reason
+    for path in sorted(files):
+        ext = os.path.splitext(path)[1].lower()
+        if ext in KNOWN_CODE_EXTS and ext not in CODE_EXTS:
+            findings.append(
+                f"language: {path} — {ext} is not a house language. Code is "
+                f"bash or python unless the PR documents a very good reason")
+        elif ext not in CODE_EXTS and ext not in KNOWN_CODE_EXTS:
+            head = _git_show(wt, f"HEAD:{path}")
+            if head is not None and head.startswith("#!"):
+                findings.append(
+                    f"language: {path} — executable (shebang) but not bash "
+                    f"(.sh) or python (.py); a different language needs a "
+                    f"very good reason, documented in the PR")
+
+    # 2. bash shebangs
+    for path in sh:
+        blob = _git_show(wt, f"HEAD:{path}")
+        first = blob.splitlines()[0] if blob else ""
+        if not first.startswith("#!") or "bash" not in first:
+            findings.append(f"shebang: {path} — expected '#!/usr/bin/env bash', "
+                            f"got {first!r}")
+
+    # 3. zero NEW violations, diff-scoped against origin/main
+    for path in py:
+        base, base_tmp = _baseline(toolkit, wt, path)
+        cur = _py_findings(toolkit, path, wt)
+        new = sorted(cur - base)
+        if new:
+            findings.append(
+                f"python style: {path} — {len(new)} new finding(s) vs "
+                f"origin/main (pycodestyle 80-col / pyflakes, Google Python "
+                f"Style Guide): " + "; ".join(f"L{l} {c}" for l, c in new[:8])
+                + (" ..." if len(new) > 8 else ""))
+        if _isort_clean(toolkit, os.path.join(wt, path)) is False:
+            if base_tmp is not None and _isort_clean(toolkit, base_tmp):
+                findings.append(f"import order: {path} — isort (google "
+                                f"profile) now fails, baseline was clean")
+    for path in sh:
+        base, _ = _baseline(toolkit, wt, path)
+        cur = _sh_findings(toolkit, path, wt)
+        new = sorted(cur - base)
+        if new:
+            findings.append(
+                f"shell style: {path} — {len(new)} new finding(s) vs "
+                f"origin/main (shellcheck, Google Shell Style Guide): "
+                + "; ".join(f"L{l} {c}" for l, c in new[:8])
+                + (" ..." if len(new) > 8 else ""))
+
+    out({"issue": args.issue, "clean": not findings,
+         "standard": "bash+python only; Google Shell + Google Python style "
+                     "(mechanized: pycodestyle@80, pyflakes, isort-google, "
+                     "shellcheck); diff-scoped vs origin/main",
+         "checked": {"python": py, "bash": sh},
+         "findings": findings})
+
+
 def _merge_cleanup(inst: dict, state: dict) -> None:
     if os.path.isdir(state["worktree"]):
         git(inst, ["worktree", "remove", state["worktree"], "--force"],
@@ -908,6 +1098,11 @@ def guard_main() -> None:
     p = sub.add_parser("status", help="one issue's state")
     p.add_argument("--issue", type=int, required=True)
 
+    p = sub.add_parser("style-check",
+                       help="verifier: bash+python only, Google Shell+Python "
+                            "style, diff-scoped vs origin/main")
+    p.add_argument("--issue", type=int, required=True)
+
     sub.add_parser("list", help="all open pipelines")
 
     p = sub.add_parser("abandon", help="close issue + remove worktree/branch")
@@ -922,8 +1117,8 @@ def guard_main() -> None:
     handlers = {"intake": verb_intake, "intake-all": verb_intake_all,
                 "transition": verb_transition, "merge": verb_merge,
                 "resume": verb_resume, "comment": verb_comment,
-                "status": verb_status, "list": verb_list,
-                "abandon": verb_abandon}
+                "status": verb_status, "style-check": verb_style_check,
+                "list": verb_list, "abandon": verb_abandon}
     handlers[args.verb](inst, args)
 
 
@@ -932,6 +1127,16 @@ def main() -> None:
         guard_main()
     except SystemExit:
         raise
+    except PermissionError as exc:
+        # A role worker can be mid-write on a worktree file (a fresh
+        # 000/600 inode) while this read-only check runs. Name it so the
+        # caller retries instead of guessing.
+        print(json.dumps({"ok": False, "error": f"permission denied "
+                                                f"({getattr(exc, 'filename', '?')}): "
+                                                f"a role worker may be "
+                                                f"mid-write in the worktree — "
+                                                f"retry once the stage settles"}))
+        sys.exit(1)
     except Exception as exc:  # noqa: BLE001 — contract: always one JSON object
         print(json.dumps({"ok": False, "error": f"unhandled: {exc!r}"}))
         sys.exit(1)

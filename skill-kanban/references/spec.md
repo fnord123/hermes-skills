@@ -229,3 +229,38 @@ the PR diff exists and matches the summary; the lint JSON / run output is
 cited; the state block's counter advanced by exactly the `decide()` amount;
 the next card was created (its id is in the state block) and is `ready`/
 `running`. The script's JSON return is the receipt — read it, do not assume.
+
+## 11. The code style standard (the verifier's `style-check`)
+
+The house writes skill scripts in **bash or python — full stop**. A
+different language is allowed only with a very good reason, documented in
+the pull request body (the verifier then records the exception as
+reviewed-and-accepted instead of FAILing it). Within those two languages
+the standard is the **Google Shell Style Guide** and the **Google Python
+Style Guide**, mechanized by the `style-check` verb into a subset that
+runs deterministically:
+
+| check | tool | rule |
+|---|---|---|
+| language | ext/shebang scan | `.py`/`.sh`/`.bash` only; a known code extension in a different language, or a shebang that is neither python nor bash, is a finding |
+| bash shebang | first line | `#!/usr/bin/env bash` |
+| python lines | `pycodestyle --max-line-length=80` | 80 columns, whitespace, naming |
+| python hygiene | `pyflakes` | undefined names, unused imports/variables |
+| import order | `isort --profile=google --check-only` | stdlib / third-party / local, sorted |
+| shell style | `shellcheck -f gcc` | the Google Shell guide's core |
+
+**Diff-scoped, on purpose.** The check runs only over the files the branch
+changed versus `origin/main`, and a *modified* file is judged against the
+findings its `origin/main` blob already carried. New files get a zero
+baseline. The existing fleet carries thousands of pre-existing PEP8
+findings (the 7,251-finding baseline was measured, not assumed), so a
+repo-wide gate would make every pipeline park; "no *new* debt in the
+files you touched" is the enforceable form of "the standard applies."
+
+**The toolkit** is a pinned, host-side install (`STYLE_TOOLKIT` in the
+instance file): a venv with `pycodestyle` + `pyflakes` + `isort` and a
+`shellcheck` binary. The verb refuses to run if it is missing — the
+standard is enforced or the verifier reports the tooling gap; it never
+silently skips. The verb is read-only and emits the house JSON contract:
+`{"ok", "clean", "standard", "checked", "findings"}` — every `findings[]`
+entry is a FAIL finding the verifier files verbatim.

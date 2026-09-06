@@ -23,6 +23,19 @@ branch. You never touch SKILL.md or any other skill.
   `main` so no failure path escapes without emitting the contract;
   informational outcomes the agent relays are `ok: true` with the outcome
   in `status`.
+- **Language: bash or python — full stop.** A different language needs a
+  very good reason, documented in the pull request body. Python scripts
+  live in `scripts/` and start `#!/usr/bin/env python3`; shell scripts
+  in `scripts/` and start `#!/usr/bin/env bash` (the shebang is checked).
+- **Style: Google Python Style Guide / Google Shell Style Guide.** The
+  verifier mechanizes the core: 80-column lines, no unused imports or
+  variables, google-profile import order (stdlib, third-party, local —
+  one blank line between groups, sorted), and shellcheck-clean bash.
+  Run the same checks on your own branch before you hand off (the
+  verifier's `style-check` is diff-scoped against origin/main, so any
+  NEW violation in a file you touched is a finding and a FAIL):
+  `pycodestyle --max-line-length=80`, `pyflakes`, `isort --profile=google
+  --check-only`, `shellcheck -f gcc`.
 - Model-facing surface stays domain-leak-free: verbs, flags, JSON fields,
   and error strings in user vocabulary; backend terms only inside code.
 - Touch only the scripts the contract marks changed or new.

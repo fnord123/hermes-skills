@@ -55,6 +55,12 @@ HOUSE_SKILL=hermes-skills-repo
 # only (next to the house skill).
 STD_SKILL=asd-ste100
 
+# The pinned linter toolkit for style-check: a venv with pycodestyle,
+# pyflakes and isort plus a shellcheck binary (bin/). The style-check verb
+# refuses to run without it — the standard is enforced or the gap is
+# reported, never silently skipped.
+STYLE_TOOLKIT=/abs/path/to/skillpipe-style
+
 # The profile recorded as the creator on every dispatch card.
 CREATED_BY=skillpipe
 
@@ -83,6 +89,7 @@ MID_MODEL=<your-mid-tier-model-id>
 HOUSE_SKILL=hermes-skills-repo
 STD_SKILL=asd-ste100
 CREATED_BY=skillpipe
+STYLE_TOOLKIT=/home/user/tools/skillpipe-style
 ```
 
 ## Notes

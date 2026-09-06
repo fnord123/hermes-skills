@@ -112,3 +112,21 @@ paths — the doctrine must stay reusable.
   model drifted. Confirm the tree after a rewrite: `board.md` and `cards/`
   should be gone, and only `SKILL.md`, `scripts/`, `references/`,
   `templates/`, `README.md` should remain.
+- **A role catching a pipeline bug blocks; it does not fix.** The first
+  E2E author hit a broken `all_state_labels()` (role-name labels
+  `author-1` vs the real `author-ready-1` — every transition dead) and
+  blocked the card with the diagnosis + proposed fix instead of editing
+  shared machinery. That is the design working. The operator fixes,
+  re-runs the one blocked mechanical step, and the regression test that
+  pins the fix is part of the same commit.
+- **`gh` list commands page at 30.** `gh label list` / `gh issue list`
+  return only the first page without `--limit`; the script always passes
+  `--limit 200` on list calls and `--force` on label create, because a
+  truncated label set makes the exists-check wrong and the create crash
+  (or worse, miss an in-flight pipeline).
+- **Mechanized checks parse their own output.** The style-check initially
+  reported `clean` on files with 30 findings because the pycodestyle
+  line regex expected a trailing colon the tool never prints. A checker
+  that runs the tool and then fails to read the tool is worse than no
+  checker — every new parser gets a one-line "does it actually see the
+  finding" probe before it ships.

@@ -75,6 +75,7 @@ nonzero exit.
 | `intake` | Open one tracking issue + a branch + the author dispatch for one skill |
 | `intake-all` | Intake every skill in the repo, or a named list |
 | `transition` | Hand a finished role off: move the label, post its verdict, wake the next role |
+| `style-check` | Verifier: bash+python only, Google Shell+Python style, diff-scoped vs main |
 | `merge` | Merge the pull request, close the issue, wake the fleet check |
 | `resume` | Move a parked issue to any ready state (the owner's hand) |
 | `status` / `list` | Read one pipeline's state, or every open one |
