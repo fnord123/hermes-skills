@@ -16,7 +16,9 @@ import sys
 from typing import NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from skillpipe import decide, fail  # noqa: E402  # noqa: F401
+from skillpipe import (  # noqa: E402  # noqa: F401
+    decide, fail, all_state_labels, parse_label, READY_PREFIX, LABEL_CAPS,
+    PARK_LABELS)
 
 
 def state(author=1, ste100=0, scripter=0, infeasible=0) -> dict:
@@ -146,6 +148,29 @@ def main() -> None:
         else:
             raise AssertionError(f"desync not detected: {role},{N},{st}")
     assert desyncs == 5, f"expected 5 desync detections, got {desyncs}"
+
+    # -- label-vocabulary consistency ----------------------------------
+    # Every label the transition table can emit must be recognized by
+    # all_state_labels() (the set current_state_label() filters against)
+    # and round-trip through parse_label(). This is the layer the pure
+    # decide() table doesn't touch — a mismatch there breaks every
+    # transition even though the table itself is correct.
+    all_labels = all_state_labels()
+    for role, prefix in READY_PREFIX.items():
+        if role in LABEL_CAPS:
+            for i in range(1, LABEL_CAPS[role] + 1):
+                lab = f"{prefix}-{i}"
+                assert lab in all_labels, f"{lab} not in all_state_labels()"
+                assert parse_label(lab) == (role, i), \
+                    f"parse_label({lab}) != ({role}, {i})"
+    assert "commit-ready" in all_labels
+    assert parse_label("commit-ready") == ("commit", 0)
+    for lab in PARK_LABELS:
+        assert lab in all_labels, f"{lab} not in all_state_labels()"
+    # and no stray role-name labels (author-1) may sneak in
+    for role in LABEL_CAPS:
+        assert f"{role}-1" not in all_labels, \
+            f"stray role-name label {role}-1 in all_state_labels()"
 
     print(json.dumps({"ok": True, "cases": cases + desyncs,
                       "table": "all edges covered",

@@ -192,8 +192,12 @@ def render_body(body: str, state: dict, note: str = None) -> str:
 
 
 def all_state_labels() -> set:
+    # The READY_PREFIX form (author-ready-1), NOT the role name
+    # (author-1): ensure_labels creates and parse_label parses the
+    # prefix form, so the match set must use it too.
     ready = {f"{prefix}-{i}" for prefix, cap in
-             ((p, LABEL_CAPS[p]) for p in LABEL_CAPS) for i in range(1, cap + 1)}
+             ((READY_PREFIX[p], LABEL_CAPS[p]) for p in LABEL_CAPS)
+             for i in range(1, cap + 1)}
     return ready | {"commit-ready"} | set(PARK_LABELS)
 
 
