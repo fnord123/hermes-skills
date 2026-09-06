@@ -34,7 +34,8 @@ the house JSON contract via the vendored `scripts/skill_json.py`: one JSON
 object on stdout, `ok: false` + exit 1 on failure.
 
 `delete` is destructive, so it sits behind `--confirm` (house footgun guard);
-the model is instructed to get the user's approval for the exact note first.
+SKILL.md instructs the model to get the user's approval for the exact note
+first.
 
 ## Rationale
 
