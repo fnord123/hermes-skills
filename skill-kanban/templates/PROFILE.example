@@ -1,0 +1,98 @@
+# PROFILE.example — the skillpipe instance file (host-bound)
+
+The repo carries doctrine with this example; the FILLED instance lives
+host-side (one per install) and is NOT committed here. Copy it, fill every
+key, and point the operator at it via the `SKILLPIPE_INSTANCE`
+environment variable or the `--instance` flag.
+
+This is the ONE place host-bound values live: repo paths, the GitHub repo
+slug, the board name, the role profiles. The doctrine (this skill, the
+playbooks, the script) is host-neutral and references the instance by
+token only.
+
+## Required keys
+
+```
+# Absolute path to the house skill repo checkout (the main worktree, on
+# main, clean). The pipeline reads CONVENTIONS.md and the linter from
+# here; intake refuses to run if the TARGET SKILL DIR is dirty on main.
+REPO_DIR=/abs/path/to/hermes-skills
+
+# The GitHub repo slug the issues and PRs live in (gh --repo).
+REPO=owner/hermes-skills
+
+# The kanban board the dispatch cards are created on.
+BOARD=skills
+
+# Parent dir for one worktree per in-flight pipeline. intake creates
+# <WORKTREE_ROOT>/<skill> on branch sr/<skill>; merge removes it.
+WORKTREE_ROOT=/abs/path/to/hermes-skills-worktrees
+
+# The directory holding the six role playbooks (<role>-role.md). The
+# script asserts the playbook exists before it dispatches a role.
+CARDS_DIR=/abs/path/to/skill-kanban/references
+
+# Who runs the cards. Single-runner install: one profile name (every role
+# runs as it). Role-isolated install: a role=profile map — one profile +
+# one memory bank per role severs the backchannel between adversarial
+# roles (an auditor must not recall what the author it is checking
+# reasoned).
+ASSIGNEE=author=sr-author, audit=sr-audit, ste100=sr-ste100, scripter=sr-scripter, verifier=sr-verifier, commit=sr-commit, fleet=sr-fleet
+```
+
+## Optional keys
+
+```
+# Model pin for the drafting roles (author, scripter). Leave unset to run
+# those roles on the profile default. Judging roles (audit, ste100,
+# verifier, commit, fleet) always run on the profile default.
+MID_MODEL=qwen-27b-agentic
+
+# The house-repo skill force-loaded on every card (the rubric + linter).
+HOUSE_SKILL=hermes-skills-repo
+
+# The controlled-language writing standard force-loaded on the ste100 card
+# only (next to the house skill).
+STD_SKILL=asd-ste100
+
+# The profile recorded as the creator on every dispatch card.
+CREATED_BY=skillpipe
+
+# Per-role runtime caps (default 30m). Long scans (ste100, verifier)
+# benefit from more; these are the only knobs for that.
+RUNTIME_AUTHOR=30m
+RUNTIME_AUDIT=30m
+RUNTIME_STE100=45m
+RUNTIME_SCRIPTER=45m
+RUNTIME_VERIFIER=1h
+RUNTIME_COMMIT=40m
+RUNTIME_FLEET=30m
+```
+
+## Worked example (role-isolated install)
+
+```
+REPO_DIR=/home/user/hermes-skills
+REPO=user/hermes-skills
+BOARD=skills
+WORKTREE_ROOT=/home/user/hermes-skills-worktrees
+CARDS_DIR=/home/user/hermes-skills/skill-kanban/references
+ASSIGNEE=author=sr-author, audit=sr-audit, ste100=sr-ste100, \
+  scripter=sr-scripter, verifier=sr-verifier, commit=sr-commit, fleet=sr-fleet
+MID_MODEL=<your-mid-tier-model-id>
+HOUSE_SKILL=hermes-skills-repo
+STD_SKILL=asd-ste100
+CREATED_BY=skillpipe
+```
+
+## Notes
+
+- One pipeline per skill in flight: `intake` refuses a second pipeline for
+  a skill that already has an open issue. Different skills run in parallel
+  (separate worktrees).
+- The state machine is the script, not the doctrine: the transition table,
+  the loop caps, and the park labels all live in `skillpipe.py` and are
+  covered by `skillpipe_test.py` (run by CI and the pre-push hook). If a
+  label or cap changes, it changes there and in the test together.
+- The filled instance is host-bound by design. Do not commit it; the repo
+  keeps only this example.
