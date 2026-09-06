@@ -233,18 +233,24 @@ def target_role_of(label: str) -> str:
 
 
 def ensure_labels(inst: dict) -> None:
+    # --limit: gh list commands page at 30; the pipeline needs the FULL
+    # label set or the exists-check is wrong and create hits "already
+    # exists".
     existing = {l["name"] for l in
-                gh_json(inst, ["label", "list", "--json", "name"])}
+                gh_json(inst, ["label", "list", "--json", "name",
+                               "--limit", "200"])}
     wanted = set(PARK_LABELS) | {"pipeline"}
-    for prefix in READY_PREFIX.values():
-        cap = LABEL_CAPS[prefix.rsplit("-", 1)[0]]
-        wanted |= {f"{prefix}-{i}" for i in range(1, cap + 1)}
+    for role, prefix in READY_PREFIX.items():
+        if role in LABEL_CAPS:  # commit-ready is terminal: no cap, no number
+            wanted |= {f"{prefix}-{i}" for i in range(1, LABEL_CAPS[role] + 1)}
     wanted.add("commit-ready")
     for name in sorted(wanted):
         if name not in existing:
             family = ("parked" if name.startswith("parked-")
                       else name.split("-")[0])
-            gh(inst, ["label", "create", name,
+            # --force: idempotent — a concurrent intake or a prior partial
+            # run may have created it between the list and the create.
+            gh(inst, ["label", "create", name, "--force",
                       f"--color={LABEL_COLORS.get(family, 'cccccc')}",
                       f"--description=skillpipe state: {name}"])
 
@@ -499,7 +505,7 @@ def intake_plan(inst: dict, skill: str, mode_arg: str) -> dict:
         mode = "update" if proc.stdout.strip() else "create"
     dirty = dirty_target(inst, skill)
     open_issues = gh_json(inst, ["issue", "list", "--label", "pipeline",
-                                 "--state", "open",
+                                 "--state", "open", "--limit", "200",
                                  "--json", "number,title,labels"])
     in_flight = None
     for issue in open_issues:
@@ -531,8 +537,9 @@ def verb_intake(inst: dict, args) -> None:
     ensure_labels(inst)
     skill_label = f"skill-{skill}"
     if skill_label not in {l["name"] for l in
-                           gh_json(inst, ["label", "list", "--json", "name"])}:
-        gh(inst, ["label", "create", skill_label,
+                           gh_json(inst, ["label", "list", "--json", "name",
+                                          "--limit", "200"])}:
+        gh(inst, ["label", "create", skill_label, "--force",
                   f"--color={LABEL_COLORS['skill']}",
                   f"--description=skillpipe pipeline for {skill}"])
     request = args.request.strip()
@@ -810,7 +817,7 @@ def verb_status(inst: dict, args) -> None:
 
 def verb_list(inst: dict, args) -> None:
     open_issues = gh_json(inst, ["issue", "list", "--label", "pipeline",
-                                 "--state", "open",
+                                 "--state", "open", "--limit", "200",
                                  "--json", "number,title,labels"])
     rows = []
     for issue in open_issues:
