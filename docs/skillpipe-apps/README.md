@@ -38,9 +38,13 @@ All apps: **Metadata: Read only** (default, required). **No webhooks.**
   and never posts to GitHub, so it has no app either.
 - Tokens are minted per role by the `skillpipe-auth` helper (RS256 JWT →
   1-hour installation token, cached ~55 min); the private keys live
-  host-side (`~/.hermes/creds/gh-skillpipe-<role>.pem`, mode 600) and are
-  referenced by path from each role's `.env`. Nothing secret is in this
-  repo.
+  host-side in the role's own profile directory
+  (`~/.hermes/profiles/<role>/gh-skillpipe-<role>.pem`, mode 600, next to
+  that role's `.env`) and are referenced by path from the `.env`.
+  `skillpipe-auth discover` lists an app's installations from its key, so
+  the `installation_id` is read from the API, not the URL;
+  `skillpipe-auth whoami` proves a minted token reaches the installed
+  repo. Nothing secret is in this repo.
 
 ## Rotating an app
 
