@@ -1,6 +1,6 @@
 # sr-verifier
 
-**skillpipe — Verifier role** for the [skill review
+**Verifier role** for the [skill review
 pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-kanban).
 
 Runs the test matrix and the style checks against a finished skill

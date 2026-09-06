@@ -1,6 +1,6 @@
 # sr-scripter
 
-**skillpipe — Scripter role** for the [skill review
+**Scripter role** for the [skill review
 pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-kanban).
 
 Implements the script contract an approved skill declares, on the
