@@ -18,7 +18,8 @@ metadata:
 
 # e2e-throwaway — record a single short note
 
-Log a short note the user wants kept. Each note lives in its own note file.
+Record a short note that the user wants to keep. Each note lives in its own
+note file.
 You work entirely through the note verbs below; the tool does all the file
 handling, so you never write or delete note files yourself.
 
@@ -26,7 +27,7 @@ handling, so you never write or delete note files yourself.
 
 Activate when the user wants to:
 - **Record** a short note ("jot this down: 'call the plumber'").
-- **Read back** a note they recorded earlier.
+- **Read** a note that they recorded earlier.
 - **List** the notes that exist.
 - **Delete** a note they no longer want.
 
@@ -39,14 +40,14 @@ Activate when the user wants to:
 
 ## The tool
 
-One script at `${HERMES_SKILL_DIR}/scripts/e2e_note.py`, invoked as
+One script sits at `${HERMES_SKILL_DIR}/scripts/e2e_note.py`. Invoke it as
 `python3 <path> <verb> [args]`. Each call prints ONE JSON object on stdout
 (`{"ok": true, ...}`; failures are `{"ok": false, "error": "..."}` with exit 1).
 
 | Verb | Purpose |
 |---|---|
 | `add --text "<note>"` | Records a short note in its own note file. |
-| `show --note "<id>"` | Reads back the note text for one note. |
+| `show --note "<id>"` | Reads the note text for one note. |
 | `list` | Gets the ids of all recorded notes, newest first. |
 | `delete --note "<id>" --confirm` | Removes one note and its file. The `--confirm` flag is required. |
 
@@ -76,8 +77,8 @@ Parsing notes:
 - `list` → `{"ok": true, "notes": ["20260905-1432-call-the-plumber", ...]}`
 - `delete` → `{"ok": true, "note": "20260905-1432-call-the-plumber", "deleted": true}`
 
-Always echo the confirmation back (the note id on `add`, the text on `show`)
-so a mis-heard word is caught immediately.
+Always state the confirmation (the note id on `add`, the text on `show`)
+so you catch a mis-heard word immediately.
 
 ## A typical session
 
