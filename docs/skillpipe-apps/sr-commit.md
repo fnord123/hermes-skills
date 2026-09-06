@@ -1,6 +1,6 @@
 # sr-commit
 
-**skillpipe — Commit role** for the [skill review
+**Commit role** for the [skill review
 pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-kanban).
 
 The only role that lands work: merges an approved pull request (after the
