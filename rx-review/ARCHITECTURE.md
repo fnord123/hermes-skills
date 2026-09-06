@@ -24,7 +24,7 @@ This report is taken by the person who started it to a doctor for further review
 Stage 1's ingestion materialises the patient input document into the files the pipeline reads from, using two scripts — one for the regimen, one for the patient.
 * `rx.py regimen` creates the user's regimen in `inputs/regimen.txt` (the regimen part) — nothing else.
 * `rx.py patient` takes the same input document and extracts recognised fact lines subset — `Name:`, `DOB:`, `Age:` and creates the user's medical facts in `inputs/patient.md`
-The two documents (`inputs/regimen.txt`, `inputs/patient.txt` are recreated fresh on every run.
+The two documents (`inputs/regimen.txt`, `inputs/patient.md` are recreated fresh on every run.
 
 Of the patient information, the pipeline requires today: `Name:` for the record, `Sex:`, and `DOB:` — date of birth is the first fact the pipeline needs for its own computation (FIB-4 is age-weighted, and the age is computed from the DOB at read time, so it stays correct on the next birthday). Other fields potentially present in the user-provided document such as `Race:`, `Sex:`, and **Medical conditions** are ignored by the pipeline at this time.
 
@@ -297,7 +297,7 @@ Each transcription child is handed one overlapping window of the PDF's flattened
 
 ### Stage 4: Labs Transcribed Barrier Card functionality
 
-`Stage 4: Labs Transcribed` waits on every per-PDF extraction card and every transcription child. Once they have all completed it runs `rx.py merge-labs`, which combines the per-window transcriptions into `labs-draft.md`, collapses readings the overlap transcribed twice (keyed on analyte + specimen + units, so blood and urine glucose stay distinct), reports any disagreement between the two transcriptions of an overlapping window, and flags an overlap that names no reading in common as a possible missed marker, then completes — releasing Stage 5.
+`Stage 4: Labs Transcribed` waits on every per-PDF extraction card and every transcription child. Once they have all completed it runs `rx.py merge-labs`, which combines the per-window transcriptions into `labs-draft.md`, collapses readings the overlap transcribed twice (keyed on analyte + specimen + scale, so blood and urine glucose stay distinct), reports any disagreement between the two transcriptions of an overlapping window, and flags an overlap that names no reading in common as a possible missed marker, then completes — releasing Stage 5.
 
 A window that could not reach an analyte's value writes `UNREADABLE` for it while the neighbouring window reads it. Those rows are **subsumed**: an `UNREADABLE` row is dropped when a readable reading of the same analyte, date and document exists — keyed WITHOUT specimen, because the specimen cell of an unread row is unread too. The drop is listed under *Unreadable rows superseded* rather than made silently, and an analyte that is unreadable everywhere keeps its row, because that is a real gap the Stage 6 backstop must still see.
 
@@ -457,11 +457,6 @@ Barriers, completes last and releases `Stage 7: Adversarial Review`.
      |                           confirmed is recorded. `start` refuses without it.
      |
      |       rx.py start           Begins the review, ONCE. Refuses on anything unstaged, on
-     |                           zero PDFs, on an unresolved regimen, and until the labs are
-     |                           confirmed complete (or one arrived since). Creates the WHOLE
-
-REPLACEMENT TEXT:
-     |       rx.py start           Begins the review, ONCE. Refuses on anything unstaged, on
      |                           zero PDFs, on an unresolved regimen, on no ingested patient
      |                           information (NO PATIENT), and until the labs are confirmed
      |                           complete (or one arrived since). Creates the WHOLE
@@ -557,7 +552,7 @@ when its parents finish, not when some upstream stage remembers to create it. A 
 no parents is `ready` the instant it exists — on 2026-08-01 an accidentally empty parent list put
 28 `Transcribe Lab` cards on the board at once — so a Stage Begin card is created with the
 Barrier(s) it waits on among its parents, and parentless is reserved for the deliberate cases
-whose creator's completion IS their release: the `Stage 4: Transcribe Labs` branch head, `Lab:`
+whose creator's completion IS their release: the `Stage 2: Read Regimen` and `Stage 4: Transcribe Labs` branch heads, `Lab:`
 cards, and the 6a/6b/6c substage Begins. Deliberate or not, those cards then run
 `max_in_progress` at a time, which is a constraint on what they may write as well as a latency
 win — see *Parentless means concurrent* in Flow Control. Worker
@@ -615,12 +610,9 @@ that run outside any card.
 | **`rx.py patient`** | Takes the same document and writes the recognised fact lines (`Name:`, `DOB:`, `Age:`) to `inputs/patient.md` — the patient part, nothing else; a document with no fact lines at all leaves no `patient.md` at all | A person when they ask for a rx-review |  **nothing** — it lands the input; later cards read from it |
 | **`rx.py fib4`** | The FIB-4 liver-fibrosis risk score from the newest draw that reports AST, ALT and a platelet count together, with the age from `inputs/patient.md` (computed from the `DOB:` at read time, so it stays correct on the next birthday). Refuses — and names what is missing — when no age is recorded or no draw carries all three inputs | A person, on demand | **nothing** — a read, not a stage |
 | **`rx.py stage`** | Copies every PDF Hermes received into `inputs/raw/`. If Hermes received a zip file containing PDFs, unzips it into `inputs/raw`, then re-scans to prove nothing was missed. Run after **every** upload round; idempotent | A person, by hand, each time attachments arrive | **nothing** — copying what arrived and beginning the work are different decisions |
-| **`rx.py start`** | Stage 1. Refuses on anything unstaged, on zero staged PDFs, on an unresolved regimen — which arrives as a doc or a file, so nothing upstream could have staged it — and, last, until `uploads-done` records that the user called the lab set complete (and again if one arrived since) | A person, once the user says the labs are complete | The **whole** Begin→Barrier chain for the numbered spine — stages 2–5, `Stage 6: Research Begin`/`Complete`, Stage 7 and Stage 8 — each Barrier parented in front of the next stage's Begin, so the order is fixed from the first minute. The 6a–6d substage shells are created dynamically by `Stage 6: Research Begin` |
-
-REPLACEMENT TEXT:
-| **`rx.py start`** | Stage 1. Refuses on anything unstaged, on zero staged PDFs, on an unresolved regimen — which arrives as a doc or a file, so nothing upstream could have staged it — on no ingested patient information (no `patient.md`, `NO PATIENT`), and, last, until `uploads-done` records that the user called the lab set complete (and again if one arrived since) | A person, once the user says the labs are complete | The **whole** Begin→Barrier chain for the numbered spine — stages 2–5, `Stage 6: Research Begin`/`Complete`, Stage 7 and Stage 8 — each Barrier parented in front of the next stage's Begin, so the order is fixed from the first minute. The 6a–6d substage shells are created dynamically by `Stage 6: Research Begin` |
-| **`Stage 2: Read Regimen`** (Begin) | Stage 2 spine. **Refuses when there is no `regimen.txt`** — before creating anything | Released when its parent Barrier — `rx.py start` itself, at the head of the chain — is clear | `Worker: Read regimen`, set as a parent of the `Stage 2: Regimen Read` Barrier |
-| ↳ `rx.py intake-regimen` | Reads `regimen.txt` and creates the read-regimen worker with that text inline in its body, keyed on the text's digest so a corrected regimen is a new card; holds if it exceeds the 8KB body cap | — | `Worker: Read regimen` |
+| **`rx.py start`** | Stage 1. Refuses on anything unstaged, on zero staged PDFs, on an unresolved regimen — which arrives as a doc or a file, so nothing upstream could have staged it — on no ingested patient information (no `patient.md`, `NO PATIENT`), and, last, until `uploads-done` records that the user called the lab set complete (and again if one arrived since) | A person, once the user says the labs are complete | The **whole** Begin→Barrier spine — stages 2–5, `Stage 6: Research Begin`/`Complete`, Stage 7 and Stage 8 — each Barrier parented in front of the next stage's Begin, so the order is fixed from the first minute. The 6a–6d substage shells are created dynamically by `Stage 6: Research Begin` |
+| **`Stage 2: Read Regimen`** (Begin) | Stage 2 spine. **Refuses when there is no `regimen.txt`** — before creating anything | Parentless branch head — eligible as soon as `rx.py start` creates it, in parallel with the labs branch (Stage 4) | `Worker: Read regimen`, set as a parent of the `Stage 2: Regimen Read` Barrier |
+| ↳ `rx.py intake-regimen` | Reads `regimen.txt` and creates the read-regimen worker with that text inline in its body, keyed on the text's digest so a corrected regimen is a new card; refuses if it exceeds the 8KB body cap | — | `Worker: Read regimen` |
 | **`Worker: Read regimen`** | Transcribes the regimen text carried in its own body → `regimen-draft.txt`, one pipe-delimited line per product (`product | brand | quantity | schedule | started`). It opens no file and looks nothing up — stage 3's `Regimen Intake:` workers do the manufacturer lookup | The `Stage 2: Read Regimen` Begin card | — |
 | **`Stage 2: Regimen Read`** (Barrier) | Confirms `regimen-draft.txt` exists, then completes — releasing `Stage 3: Settle the Regimen` | `Worker: Read regimen` done | — |
 | **`Stage 3: Settle the Regimen`** (Begin) | Stage 3 spine. Creates one `Regimen Intake: <name>` worker per product row in `regimen-draft.txt`, each a parent of the `Stage 3: Finalize Regimen` Barrier and eligible at once | Released when `Stage 2: Regimen Read` completes | one `Regimen Intake:` per regimen item |
@@ -632,9 +624,9 @@ REPLACEMENT TEXT:
 | ↳ `rx.py correct-item-slug-request <user response>` | Reads the leading number the user wrote — so a correction can never land on another item — and returns that one line plus the correction text; `<n> drop` removes the line and renumbers. Refuses input with no leading number, re-prompting the `<n> <correction>` format | — | — |
 | ↳ `rx.py correct-item-slug-response <llm-updated line>` | Takes the LLM's merged line for the number a prior request handed out, validates it (same field count, Schedule not blanked), and replaces that line in `regimen-final.md`; a stale response with no pending request is refused. `approved` completes the barrier | — | — |
 | **`Stage 4: Transcribe Labs`** (Begin) | Stage 4 spine | Parentless branch head — eligible as soon as `rx.py start` creates it, in parallel with Stages 2–3 | one `Lab: <file>` card per staged PDF |
-| ↳ `rx.py intake-labs` | Records each document's binding as its own `.xcribe/<token>.json`, then creates one `Lab: <file>` card per staged PDF — body naming only the token — each a parent of the `Stage 4: Labs Transcribed` Barrier. Two refusals first: HOLDS on an unstaged document (`--force` overrides), ERRORS on zero staged PDFs | — | `Lab: <file>` ×(PDFs) |
+| ↳ `rx.py intake-labs` | Records each document's binding as its own `.xcribe/<token>.json`, then creates one `Lab: <file>` card per staged PDF — body naming only the token — each a parent of the `Stage 4: Labs Transcribed` Barrier. Two refusals first: non-zero on an unstaged document (`--force` overrides), non-zero on zero staged PDFs | — | `Lab: <file>` ×(PDFs) |
 | **`Lab: <file>`** | One per staged PDF. Runs `plan-lab <token>`, which OCR-detects, flattens, windows, and creates that PDF's transcription child card(s) — each a parent of the Barrier before it completes, so one large or unreadable document never blocks the others | The `Stage 4: Transcribe Labs` Begin card | its `Transcribe Lab` child(ren) |
-| ↳ `rx.py plan-lab <token>` | Resolves the token to its document, then: extract the text layer (OCR a scan to a searchable PDF first), flatten it to furniture-free result lines, split those into overlapping line-windows, and create one `Transcribe Lab` child per window — the window's lines inline in the card body, a `<token>.json` record each, and each child a parent of the Barrier. An unknown token returns non-zero WITHOUT blocking, for the worker to re-run; only a document that cannot be read holds. `--pdf <file>` is a hand-run escape hatch, hidden from `--help` | — | `Transcribe Lab` ×(windows) |
+| ↳ `rx.py plan-lab <token>` | Resolves the token to its document, then: extract the text layer (OCR a scan to a searchable PDF first), flatten it to furniture-free result lines, split those into overlapping line-windows, and create one `Transcribe Lab` child per window — the window's lines inline in the card body, a `<token>.json` record each, and each child a parent of the Barrier. An unknown token returns non-zero WITHOUT blocking, for the worker to re-run; only a document that cannot be read halts the pipeline. `--pdf <file>` is a hand-run escape hatch, hidden from `--help` | — | `Transcribe Lab` ×(windows) |
 | **`Transcribe Lab <file>`** | One inline line-window → one markdown table; settled by `check-transcription`, never by the model | Created by its `Lab: <file>` card | — |
 | ↳ `rx.py check-transcription <token>` | Verifies every row against the source window, stamps the `source file` column, and completes the card; a row not in the source returns non-zero for the worker to delete and re-run, with per-row verdicts in `.xcribe/<token>.check.log` | — | — |
 | ↳ `rxsplit.py` | PDF → text; furniture stripping, flattening, and overlapping line-windows; OCR of a scanned PDF via the OCR service | — | — |
@@ -650,11 +642,8 @@ REPLACEMENT TEXT:
 | ↳ `rx.py analyze-research` | Execs `fanout.py --phase research`. With **no** `--family` (the Stage 6 Begin) it creates the four substage shells; with `--family <substances\|markers\|trends\|screens>` (a substage Begin) it builds that family's workers | — | the substage shells, or one family's workers |
 | ↳ `fanout.py --phase {research,adversarial,conclude}` | Builds one stage-phase's cards; card bodies are templates here. Consults the ignore decisions `marker-review` recorded, at the single point where a marker becomes a card, and refuses to create one for a marker the user asked to ignore | — | the phase's cards (a substage's workers, or the shells, or Stage 7/8) |
 | **`Stage 6a: Research Substances`** (Begin) | 6a spine — one card-set per regimen substance | Released by `Stage 6: Research Begin`, in parallel with 6b/6c | per substance, three part-cards + a synthesis; each synthesis a parent of `Stage 6a: Substances Researched` |
-| **`Research: <substance> — part N/3`** | Sharded substance research: the 7 questions grouped into three cards — evidence & efficacy · safety & marker effects · timing. Parts never read each other. An item marked unknown gets no card | Created by the 6a Begin | — |
+| **`Research: <substance> — part N/3`** | Sharded substance research: the 7 questions grouped into three cards — evidence & efficacy · safety & marker effects · timing. Parts never read each other. | Created by the 6a Begin | — |
 | **`Research: <substance> — report`** | Synthesis; the only card that sees all three fragments → `substance-<slug>.md` | Its own three parts | — |
-| **`Efficacy: <substance>`** | One per substance whose settled regimen row carries a non-blank `Started` — supplements never get one. Created when its substance's research synthesis completes; reads that synthesis's marker list (the part-2 q4 answer — the script learns no drug knowledge) and runs `rx.py before-after --marker <marker> --since <started>` for each, writing pre values, post values, delta, and the post-start draw count; fewer than two post-start draws ⇒ **"TOO EARLY TO TELL"**, carried through verbatim → `efficacy-<slug>.md`. Spliced in front of the 6a Barrier like a synthesis | Its substance's `Research: <substance> — report` card | — |
-
-REPLACEMENT TEXT:
 | **`Efficacy: <substance>`** | One per substance whose settled regimen row carries a non-blank `Started`. Created when its substance's research synthesis completes; reads that synthesis's marker list (the part-2 q4 answer — the script learns no drug knowledge) and runs `rx.py before-after --marker <marker> --since <started>` for each, writing pre values, post values, delta, and the post-start draw count; fewer than two post-start draws ⇒ **"TOO EARLY TO TELL"**, carried through verbatim → `efficacy-<slug>.md`. Spliced in front of the 6a Barrier like a synthesis | Its substance's `Research: <substance> — report` card | — |
 | **`Stage 6a: Substances Researched`** (Barrier) | Confirms every substance report written, then completes — releasing the 6d Begin; like all four substage Barriers, it is a parent of `Stage 6: Research Complete` | Every substance synthesis done | — |
 | **`Stage 6b: Research Markers`** (Begin) | 6b spine — one card-set per out-of-range marker | Released by `Stage 6: Research Begin`, in parallel with 6a/6c | per marker, three part-cards + a synthesis; each synthesis a parent of `Stage 6b: Markers Researched` |
@@ -685,7 +674,7 @@ REPLACEMENT TEXT:
 | **`Stage 8: Conclusion`** (Begin) | Stage 8 spine. Creates the three conclusion cards in fixed order — no data-dependent fan-out | Released when `Stage 7: Adversarial Complete` completes | Reconcile → Assemble → Adversarial review of the brief |
 | ↳ `rx.py analyze-conclude` | Execs `fanout.py` to create the reconcile → assemble → devil chain | — | the three conclusion cards |
 | **`Reconcile adversarial verdicts`** (rx-verify) | Resolves disagreements between the lenses; a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or un-narrowed `serious`) finding. Ingests `efficacy-*.md` alongside the research reports — any "expected to move X" claim is audited like any other, while observed values stand on lab confirmation, not citation | The Stage 8 Begin | — |
-| **`Assemble prescriber discussion brief`** (rx-verify) | Writes `<date>-rx-review.md`, including what the review did **not** cover (from `coverage.md`): markers excluded by `--ignore`, items the user dropped at the regimen review, and a **Medication efficacy** section carrying each dated substance's before/after findings — with any **"TOO EARLY TO TELL"** verdict verbatim | The reconciler | — |
+| **`Assemble prescriber discussion brief`** (rx-verify) | Writes `<date>-rx-review.md`, including what the review did **not** cover (from `coverage.md`): markers excluded by `--ignore`, items the user dropped at the regimen review, and a **Medication/Supplement efficacy** section carrying each dated substance's before/after findings — with any **"TOO EARLY TO TELL"** verdict verbatim | The reconciler | — |
 | **`Adversarial review of the brief`** (rx-devil) | Final hostile pass over the finished product; a parent of `Stage 8: Conclusion Complete` | The assembler | — |
 | **`Stage 8: Conclusion Complete`** (Barrier) | Confirms `<date>-rx-review.md` produced, then completes — the run is done | The brief's adversarial review | — |
 | **`rxkanban.py`** | Kanban mechanics: create, announce, subscribe. Library for `rx.py` and `fanout.py`. Every card is a separate `hermes kanban create` subprocess, so creations are PACED — `CREATE_DELAY_S`, 1s between them (`RX_CARD_CREATE_DELAY`, 0 disables). A burst of 86 unpaced creations tore the board's SQLite one page short of its own header on 2026-08-11; the cost is (N-1)x1s per fan-out | Imported | — |
@@ -696,7 +685,7 @@ REPLACEMENT TEXT:
 | **`cardmap.py`** | Generates the card map below; `--check` fails when it is stale | CI and commit | — |
 | **`cardstats.py`** | Per-card peak context and inferred compactions, from litellm's logs | A person | — |
 | **`provision-profiles.py`** | Builds the nine `rx-*` profiles. Profile directories are gitignored, so this is the only durable record | A person | — |
-| **`rx_test.py`, `card_command_test.py`, `test-terminal-pipeline-only.sh`, `provision_profiles_test.py`** | Parser, regimen-intake/batched-review and sharding tests; every card command against the allowlist; the hook's 19 escape cases; profile config | CI and commit | — |
+| **`rx_test.py`, `card_command_test.py`, `test-terminal-pipeline-only.sh`, `provision_profiles_test.py`** | Parser, regimen-intake/batched-review and sharding tests; every card command against the allowlist; the hook's 23 escape cases; profile config | CI and commit | — |
 
 The per-chunk lens and audit cards are generated at runtime — how many there are depends on how
 many chunks the reports pack into — so they carry no fixed titles and do not appear in the
@@ -711,7 +700,7 @@ generated card map. The role names above are the only names they have.
 Stages 2, 3 and 4 — `rx.py intake-regimen`, `rx.py intake-regimen-items`, `rx.py intake-labs` —
 behind stage 1's `rx.py stage` / `rx.py start`, and stage 5's `rx.py review_labs` after them. Each
 stage's Stage Begin card was created up front by stage 1 and is released when the Barrier ahead of
-it completes (`Stage 4: Transcribe Labs`, the labs branch head, has none and is eligible at once),
+it completes (`Stage 2: Read Regimen` and `Stage 4: Transcribe Labs`, the two branch heads, have none and are eligible at once),
 so the order is an edge in the graph and nothing has to check whether another branch has finished. Each command is **idempotent**: it creates its full worker set every run, and the
 idempotency keys mean the same inputs return the same cards, so re-running one is how the pipeline
 recovers rather than something to avoid.
@@ -809,17 +798,12 @@ another card expresses the dependency as an edge and steps back into `todo`, nev
 will not auto-promote a card a worker blocked itself (upstream NousResearch/hermes-agent#40312:
 sticky blocks are not cleared when parents complete), so a card that blocks to wait stays blocked
 until it is cleared. The cards that reach `blocked` on purpose are the stage-3 and stage-5
-barriers — each cleared by its finish verb (`approved` / `labs-accept`), never by unblocking it —
-and the Stage 6 backstop when its re-verification fails.
+barriers — each cleared by its finish verb (`approved` / `labs-accept`), never by unblocking it. The Stage 6 backstop does not reach `blocked` — when its re-verification fails, the card fails and the pipeline halts.
 
 **Every hold posts to chat.** `needs_input` reaches nobody by itself: cards on this board are not
 subscribed, so a hold used to sit on the board until somebody happened to look, and a stopped
 pipeline was indistinguishable from a slow one. `_hold()` therefore posts one message naming the
-stage, the reason and the repair. It REPORTS; it does not ask — the repair is an operator action,
-and the two batched barrier reviews remain the only questions the pipeline puts to a human.
-
-REPLACEMENT TEXT:
-It REPORTS; it does not ask. A hold holds its card and tells the user what is needed — the repair is an operator action to perform, not a decision to make — so the two batched barrier reviews remain the only questions the pipeline puts to a human.
+stage, the reason and the repair. It REPORTS; it does not ask. A hold holds its card and tells the user what is needed — the repair is an operator action to perform, not a decision to make — so the two batched barrier reviews remain the only questions the pipeline puts to a human.
 
 **Model-facing output never says "you" for the human.** Every script's stdout has exactly one
 reader — the model — so it addresses that reader in the imperative and calls the human *the
@@ -972,13 +956,6 @@ transcribed the labs.
 archiving every open card. That is not a fifth ordering — it is one of the four above, truncated.
 
 **And none of the four is reachable without both halves of the input.** A run with no lab PDFs is
-not a fifth scenario, it is an error refused in stage 4; a run with no regimen source is refused
-in stage 2. Neither produces a shorter review. The refusals and the reasoning behind them are in
-*An empty case is not the same as an empty run*, above; what matters here is that "the labs were
-empty" and "the regimen was empty" never appear as branches in this table, because the pipeline
-
-REPLACEMENT TEXT:
-**And none of the four is reachable without both halves of the input.** A run with no lab PDFs is
 not a fifth scenario, it is an error refused in stage 1; a run with no regimen source is refused
 in stage 1; a document with no fact lines at all is refused in stage 1 (`NO PATIENT`). None
 produces a shorter review. The refusals and the reasoning behind them are in
@@ -1040,9 +1017,6 @@ transcriptions) into `<run>/inputs/`, so each timestamped dir is a self-containe
 | `inputs/regimen.txt` | `rx.py regimen`, at ingest - materialized from medication and supplementation lines | stage 2 | no |
 | `inputs/patient.md` | `rx.py patient`, at ingest — materialised from the fact lines (`Name:`, `DOB:` and `Age:` — `Race:`, `Sex:`, and medical conditions are not yet extracted) of the patient's single input document; the document is the surface, this file is what the pipeline reads from | the age-weighted scores (`rx.py fib4` today; any later score that needs the patient) | **yes** — the patient facts as recorded in the document: they re-derive from it on every ingest, so a fact the document no longer carries is gone from this file after the next ingest, and a document with no fact lines at all leaves no file at all |
 | `inputs/*.pdf` (labs) | the user | `rx.py plan-lab` / `check-transcription` — transcription children never open a PDF | **yes** |
-| `inputs/product-<slug>.md` | `Regimen Intake:` | regimen settling, `doctor` diagnosis | no |
-
-REPLACEMENT TEXT:
 | `inputs/regimen-draft.txt` | `Worker: Read regimen` (stage 2) | stage 3's `Regimen Intake:` workers | working draft (pipe-delimited `product | brand | quantity | schedule | started`) |
 | `inputs/regimen-item-<slug>.md` | `Regimen Intake:` (one per item, its sole writer) | `gather-regimen-slugs`, which combines them into `regimen-final.md` | per-item settled row (Name · Ingredients · Quantity · Schedule · Started · Confidence) — avoids the parallel-write clobber a shared file caused |
 | `inputs/regimen-final.md` | `gather-regimen-slugs` (the barrier); corrections replace lines in place | every research card | **yes** — the settled regimen |
@@ -1128,7 +1102,7 @@ python3 ~/hermes-skills/browse-task/scripts/browse_task.py ...
 
 It scopes itself by reading `HERMES_KANBAN_DB`, so it restricts this board and nothing else on
 the machine. It must be registered in each **profile** config — the global one is not what a
-worker reads. `hooks/test-terminal-pipeline-only.sh` covers 19 cases including the escapes that
+worker reads. `hooks/test-terminal-pipeline-only.sh` covers 23 cases including the escapes that
 defeated earlier versions; `card_command_test.py` checks the other direction, that every command
 a card instructs is one the allowlist permits.
 
@@ -1234,7 +1208,7 @@ and the inputs that produced them are gone.
 | `model.max_tokens` | 24,576 | every rx profile | Unset, workers request the model's 65,536 ceiling and blow the window. |
 | `compression.threshold` | 0.6 | every rx profile | Compaction fires at `0.6 x context_length` = 120k estimated (was 108k at 180k). Every card that timed out had crossed it. Do not raise it without re-reading the undercount note above. |
 | `file_read_max_chars` | 100,000 | global | `labs-complete.md` exceeded this and was silently truncated; `labs-succinct.md` fits. |
-| Card runtimes | 25m parts, 30m synthesis | `fanout.py` | A card killed at its limit is retried, then blocked. |
+| Card runtimes | 25m parts, 30m synthesis | `fanout.py` | A card killed at its limit is retried, then halts the pipeline. |
 | `dispatch_in_gateway` | true | archivist profile + global | With this false the board sits at `ready` and spawns nothing — indistinguishable from a hang. |
 
 ---
@@ -1254,11 +1228,6 @@ python3 rx.py doctor               # why is a barrier review still waiting, or w
 python3 rx.py labs-report          # readable out-of-range list
 python3 cardstats.py               # per-card peak context and compactions
 python3 rx.py reset --confirm --clear-cache --clear-documents
-python3 rx.py regimen --from <patient document>   # or --stdin / --from-gdoc <id>: records the
-                                                  # patient's single document; the fact lines it
-                                                  # carries (Name/DOB/Age) materialise to inputs/patient.md
-
-REPLACEMENT TEXT:
 python3 rx.py regimen --from <patient document>   # or --stdin / --from-gdoc <id>: records the
                                                   # patient's single document; the regimen part
                                                   # goes to inputs/regimen.txt
@@ -1313,7 +1282,7 @@ transcription child.
 
 Note the scope: those runs all have `HERMES_KANBAN_TASK` set, so "nothing on the spine is created
 parentless" is asserted **of a stage running as a card**. A hand run of `rx.py start` legitimately
-creates `Stage 2: Read Regimen` with no parents — see the stage-1 exception above.
+creates the two branch heads — `Stage 2: Read Regimen` and `Stage 4: Transcribe Labs` — parentless. See the stage-1 exception above.
 
 **This document is the specification; the tests are how it is held to it.** A behaviour described
 here that no test asserts is a behaviour the next change can remove silently — a described
