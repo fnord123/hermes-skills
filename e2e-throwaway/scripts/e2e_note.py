@@ -2,25 +2,27 @@
 """e2e-throwaway — record a single short note, one note per note file.
 
 Verbs (each prints ONE JSON object on stdout; exit 1 on error):
-  add     --text "<note>"                     record a short note
-  show    --note "<id>"                       read back one note
-  list                                                   all note ids, newest first
-  delete  --note "<id>" --confirm              remove one note (guard: --confirm)
+  add     --text "<note>"                   record a short note
+  show    --note "<id>"                     read back one note
+  list                                            all note ids, newest first
+  delete  --note "<id>" --confirm           remove one note (needs --confirm)
 
 Notes live in per-note files under $E2E_NOTES_DIR (default
 ~/.local/share/e2e-throwaway/notes/). A note id is the file's stem:
 "YYYYMMDD-HHMM-<slug>".
 """
-
+import datetime
+from pathlib import Path
 import re
 import sys
-from datetime import datetime
-from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from skill_json import ArgumentParser, fail, guard, ok  # noqa: E402
+from skill_json import ArgumentParser  # noqa: E402
+from skill_json import fail  # noqa: E402
+from skill_json import guard  # noqa: E402
+from skill_json import ok  # noqa: E402
 
 
 def notes_dir() -> Path:
@@ -34,7 +36,7 @@ def notes_dir() -> Path:
 
 def note_path(note_id: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", note_id):
-        fail("note id must be letters, digits, dot, dash or underscore: %r" % note_id)
+        fail("note id must be letters, digits, dot, dash or underscore")
     return notes_dir() / (note_id + ".md")
 
 
@@ -44,19 +46,15 @@ def slugify(text: str) -> str:
     return slug[:40].rstrip("-") or "note"
 
 
-def note_file(path: Path, text: str) -> None:
-    path.write_text(text + "\n", encoding="utf-8")
-
-
 def cmd_add(args) -> None:
     text = args.text.strip()
     if not text:
         fail("the note is empty")
     if len(text) > 500:
         fail("a note is a single short line (500 characters or fewer)")
-    now = datetime.now()
+    now = datetime.datetime.now()
     note_id = "%s-%s" % (now.strftime("%Y%m%d-%H%M"), slugify(text))
-    # Same minute, same words -> a new id, so two identical notes both survive.
+    # Same minute, same words -> a new id, so two identical notes survive.
     path = note_path(note_id)
     counter = 1
     while path.exists():
@@ -64,14 +62,14 @@ def cmd_add(args) -> None:
         path = note_path("%s-%d" % (note_id, counter))
     d = notes_dir()
     d.mkdir(parents=True, exist_ok=True)
-    note_file(path, text)
+    path.write_text(text + "\n", encoding="utf-8")
     ok(note=path.stem, created=True)
 
 
 def cmd_show(args) -> None:
     path = note_path(args.note)
     if not path.exists():
-        fail("note '%s' not found - run list to see the notes that exist" % args.note)
+        fail("note '%s' not found - run list to see the notes" % args.note)
     text = path.read_text(encoding="utf-8").strip()
     ok(note=path.stem, text=text)
 
@@ -90,18 +88,22 @@ def cmd_list(_args) -> None:
 def cmd_delete(args) -> None:
     path = note_path(args.note)
     if not path.exists():
-        fail("note '%s' not found - run list to see the notes that exist" % args.note)
+        fail("note '%s' not found - run list to see the notes" % args.note)
     path.unlink()
     ok(note=path.stem, deleted=True)
 
 
 @guard
 def main() -> None:
-    parser = ArgumentParser(prog="e2e_note.py", description="Record short notes, one per file.")
+    parser = ArgumentParser(
+        prog="e2e_note.py",
+        description="Record short notes, one per file.",
+    )
     subs = parser.add_subparsers(dest="verb", required=True)
 
     p_add = subs.add_parser("add", help="record a short note")
-    p_add.add_argument("--text", required=True, help="the note text (one short line)")
+    p_add.add_argument(
+        "--text", required=True, help="the note text (one short line)")
     p_add.set_defaults(fn=cmd_add)
 
     p_show = subs.add_parser("show", help="read back one note")
@@ -113,12 +115,14 @@ def main() -> None:
 
     p_del = subs.add_parser("delete", help="remove one note")
     p_del.add_argument("--note", required=True, help="the note id (from list)")
-    p_del.add_argument("--confirm", action="store_true", help="required: user approved this exact delete")
+    p_del.add_argument(
+        "--confirm", action="store_true",
+        help="required: user approved this exact delete")
     p_del.set_defaults(fn=cmd_delete)
 
     args = parser.parse_args()
     if args.verb == "delete" and not args.confirm:
-        fail("delete requires --confirm - ask the user to approve this exact note first")
+        fail("delete requires --confirm - ask the user to approve first")
     args.fn(args)
 
 
