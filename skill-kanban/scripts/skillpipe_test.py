@@ -16,6 +16,7 @@ import sys
 from typing import NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import skillpipe  # noqa: E402  (for patching run / _ROLE_TOKEN in gh tests)
 from skillpipe import (  # noqa: E402  # noqa: F401
     decide, fail, all_state_labels, parse_label, READY_PREFIX, LABEL_CAPS,
     PARK_LABELS)
@@ -172,9 +173,80 @@ def main() -> None:
         assert f"{role}-1" not in all_labels, \
             f"stray role-name label {role}-1 in all_state_labels()"
 
-    print(json.dumps({"ok": True, "cases": cases + desyncs,
+    # -- gh actor auth: the SKILLPIPE_GH_APP_ID presence is the only switch
+    # gh() is the single seam every gh call funnels through. Only the
+    # subprocess boundary (skillpipe.run) is faked, so the real _role_token
+    # — including its once-per-process cache — is what gets tested.
+    import subprocess as _sp
+    captured = {}
+
+    orig_run = skillpipe.run
+
+    def _unpatched(*a, **k):
+        raise AssertionError("skillpipe.run left unpatched by a gh test case")
+    skillpipe.run = _unpatched
+    inst = {"REPO": "owner/repo", "REPO_DIR": "/tmp"}
+
+    # operator context: no SKILLPIPE vars -> gh runs exactly as found,
+    # GH_TOKEN left untouched (the operator's own auth, on purpose).
+    def op_run(cmd, cwd=None, check=True):
+        captured["cmd"] = cmd
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+    skillpipe.run = op_run
+    os.environ.pop("GH_TOKEN", None)
+    os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+    skillpipe.gh(inst, ["issue", "list"])
+    assert captured["cmd"][:1] == ["gh"], captured["cmd"]
+    assert "GH_TOKEN" not in os.environ, \
+        "operator run must not invent a GH_TOKEN"
+
+    # role context: SKILLPIPE_GH_APP_ID present -> the real _role_token
+    # mints once (fake subprocess) and gh() publishes it as GH_TOKEN; a
+    # second gh call in the same process must NOT re-mint.
+    mints = {"n": 0}
+
+    def role_run(cmd, cwd=None, check=True):
+        if cmd[-1] == "token":  # the helper mint call
+            mints["n"] += 1
+            return _sp.CompletedProcess(cmd, 0,
+                                        stdout="ghs_12345_test\n")
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+    skillpipe.run = role_run
+    skillpipe._ROLE_TOKEN = None
+    os.environ["SKILLPIPE_GH_APP_ID"] = "12345"
+    os.environ["GH_TOKEN"] = "stale-should-be-replaced"
+    skillpipe.gh(inst, ["issue", "comment", "1", "--body", "x"])
+    assert os.environ["GH_TOKEN"] == "ghs_12345_test", \
+        f"role run must set GH_TOKEN, got {os.environ.get('GH_TOKEN')!r}"
+    assert mints["n"] == 1, f"expected 1 mint, got {mints['n']}"
+    skillpipe.gh(inst, ["issue", "comment", "2", "--body", "y"])
+    assert mints["n"] == 1, "second gh call must reuse the cached token"
+
+    # fail-closed: a mint that fails must exit the script — gh must never
+    # proceed with the operator's ambient GH_TOKEN in a role context.
+    def dead_mint_run(cmd, cwd=None, check=True):
+        if cmd[-1] == "token":
+            raise SystemExit(1)
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+    skillpipe.run = dead_mint_run
+    skillpipe._ROLE_TOKEN = None
+    os.environ["GH_TOKEN"] = "operator-pat"
+    try:
+        skillpipe.gh(inst, ["issue", "comment", "3", "--body", "z"])
+        raise AssertionError("mint failure must exit, not proceed")
+    except SystemExit:
+        pass
+    finally:
+        skillpipe.run = orig_run
+        skillpipe._ROLE_TOKEN = None
+        os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+        os.environ.pop("GH_TOKEN", None)
+    gh_cases = 3
+
+    print(json.dumps({"ok": True, "cases": cases + desyncs + gh_cases,
                       "table": "all edges covered",
-                      "desyncs": desyncs}))
+                      "desyncs": desyncs,
+                      "gh_actor": gh_cases}))
     sys.exit(0)
 
 

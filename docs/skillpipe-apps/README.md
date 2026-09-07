@@ -45,6 +45,16 @@ All apps: **Metadata: Read only** (default, required). **No webhooks.**
   the `installation_id` is read from the API, not the URL;
   `skillpipe-auth whoami` proves a minted token reaches the installed
   repo. Nothing secret is in this repo.
+- **Both auth layers act as the role inside a worker.** The git layer
+  (credential helper + commit identity) is env-scoped in the role's
+  `.env` (`GIT_CONFIG_*`, self-contained: `GIT_CONFIG_GLOBAL`/`SYSTEM`
+  point at `/dev/null` so the operator's `gh`-PAT helper can't answer
+  first). The API layer: `skillpipe.py` sets `GH_TOKEN` from
+  `skillpipe-auth token` whenever the role context is present
+  (`SKILLPIPE_GH_APP_ID` in the environment) — fail-closed, it never
+  falls back to the operator's PAT. Operator runs (no `SKILLPIPE_*`
+  vars: `intake`, `resume`, `status` from chat) leave `gh` untouched,
+  so the issue/worktree origin stays the owner's identity by design.
 
 ## Rotating an app
 
