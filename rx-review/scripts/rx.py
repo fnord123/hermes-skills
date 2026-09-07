@@ -3273,6 +3273,53 @@ def is_transaminase(name):
     return _norm_marker(name) in TRANSGAMINASES
 
 
+# Spelled-out month names, full and 3-letter, as lab reports and patient documents write
+# them. "sept" is accepted alongside "sep" because both appear in the wild.
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
+def _named_date(t):
+    """Normalise a spelled-out date to YYYY-MM-DD, or "" when it is not one.
+
+    Covers the human forms ISO/US-numeric miss - "September 13, 1970", "Sept 13 2026",
+    "13 September 1970", "September 1970" - the ones a patient document writes a DOB in.
+    Month precision (no day) lands on the first of the month; a day that cannot exist is a
+    parse failure, like the numeric path.
+    """
+    t = (t or "").strip()
+    m = re.match(r"^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s+(\d{4})$", t)
+    if m:
+        mo, d, y = _MONTHS.get(m.group(1).lower()), int(m.group(2)), m.group(3)
+        if mo and 1 <= d <= 31:
+            return "%s-%02d-%02d" % (y, mo, d)
+        return ""
+    m = re.match(r"^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\.?,?\s+(\d{4})$", t)
+    if m:
+        d, mo, y = int(m.group(1)), _MONTHS.get(m.group(2).lower()), m.group(3)
+        if mo and 1 <= d <= 31:
+            return "%s-%02d-%02d" % (y, mo, d)
+        return ""
+    m = re.match(r"^([A-Za-z]+)\.?,?\s+(\d{4})$", t)
+    if m:
+        mo, y = _MONTHS.get(m.group(1).lower()), m.group(2)
+        if mo:
+            return "%s-%02d-01" % (y, mo)
+    return ""
+
+
 def _norm_date(t):
     """Normalise a date to YYYY-MM-DD so a table cell and a section heading compare equal."""
     t = (t or "").strip()
@@ -3289,7 +3336,9 @@ def _norm_date(t):
     else:
         m = re.search(r"(?<!\d)(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?!\d)", t)
         if not m:
-            return ""
+            # Neither numeric form: a spelled-out date ("September 13, 1970") is the last
+            # place a human writes one - patient documents, chiefly.
+            return _named_date(t)
         mo, d, y = m.groups()
         y = ("20" + y) if len(y) == 2 else y
     mo, d = int(mo), int(d)
@@ -3450,9 +3499,9 @@ def _write_patient_facts(text):
     m = re.search(r"^\s*Age\s*[:=]\s*(\d{1,3})\b.*$", text, re.I | re.M)
     if m:
         facts.append(("Age", m.group(1)))
-    m = re.search(r"^\s*(?:DOB|Date of birth)\s*[:=]\s*([^\s(]+)", text, re.I | re.M)
+    m = re.search(r"^\s*(?:DOB|Date of birth)\s*[:=]\s*([^\n(]+)", text, re.I | re.M)
     if m and _norm_date(m.group(1)):
-        facts.append(("DOB", m.group(1)))
+        facts.append(("DOB", m.group(1).strip()))
     path = os.path.join(INPUTS, "patient.md")
     if not facts:
         # A document with no fact lines at all leaves no file at all: the document is the
@@ -3488,7 +3537,7 @@ def patient_age():
     m = re.search(r"^\s*Age\s*[:=]\s*(\d{1,3})\b", txt, re.I | re.M)
     if m:
         return int(m.group(1))
-    m = re.search(r"^\s*(?:DOB|Date of birth)\s*[:=]\s*(\S+)", txt, re.I | re.M)
+    m = re.search(r"^\s*(?:DOB|Date of birth)\s*[:=]\s*([^\n(]+)", txt, re.I | re.M)
     if m:
         d = _norm_date(m.group(1))
         if d:

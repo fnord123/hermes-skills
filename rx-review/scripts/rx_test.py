@@ -145,6 +145,22 @@ def main():
     check("impossible date rejected", rx._norm_date("13/45/2026"), "", "garbage must not sort")
     check("no date", rx._norm_date("not a date"), "", "")
 
+    print("\n_norm_date - spelled-out dates: the form a patient document writes a DOB in")
+    # The materialiser's first run on a real document (2026-09-07) saw "Date of birth:
+    # September 13, 1970" and dropped the fact: the capture took one token and the
+    # normaliser knew no month names. The age then rode as unrecorded and FIB-4 came
+    # back not-computable instead of a score.
+    check("Month D, YYYY", rx._norm_date("September 13, 1970"), "1970-09-13", "")
+    check("3-letter month, no comma", rx._norm_date("Sept 13 1970"), "1970-09-13", "")
+    check("sep. abbreviation", rx._norm_date("sep. 13 1970"), "1970-09-13", "")
+    check("D Month YYYY (day first)", rx._norm_date("13 September 1970"), "1970-09-13", "")
+    check("ordinal day", rx._norm_date("September 13th 1970"), "1970-09-13", "")
+    check("month-only lands on the 1st", rx._norm_date("September 1970"), "1970-09-01", "")
+    check("upper case", rx._norm_date("SEPTEMBER 13, 1970"), "1970-09-13", "")
+    check("named impossible day rejected", rx._norm_date("September 32, 1970"), "", "same rule as the numeric path")
+    check("named unknown month rejected", rx._norm_date("Brumary 13, 1970"), "", "a non-month is not a date")
+    check("named date embedded in prose still missed", rx._norm_date("born in September 1970"), "", "anchored: no partial-line guess")
+
     print("\n_norm_marker — vendors name one analyte several ways")
     same = [("Triglyceride", "TRIGLYCERIDES"),
             ("Cholesterol/HDL ratio", "CHOL/HDLC RATIO"),
@@ -3874,8 +3890,27 @@ def main():
               "Name, Age, DOB", "")
         check("materialize: after refresh, the explicit Age: line is the one read",
               _spa(), 55, "")
-        # a document with no fact lines at all leaves no file at all
+        # The real document writes the DOB spelled out: "Date of birth: September 13, 1970".
+        # The first materialiser run dropped that fact (one-token capture, no month names),
+        # so age rode as unrecorded and FIB-4 came back not-computable instead of a score.
+        # Expected age computed here, not hardcoded, so the check holds on any run date.
+        _import_ = __import__("time")
+        _t = _import_.gmtime()
+        _exp = _t.tm_year - 1970 - (1 if (_t.tm_mon, _t.tm_mday) < (9, 13) else 0)
+        _doc_named = ("# Patient - David Putzolu\n"
+                      "Name: David Putzolu\n"
+                      "Date of birth: September 13, 1970\n"
+                      "WEEKLY\n"
+                      "Zepbound 5mg\n")
+        check("materialize: a spelled-out DOB is a fact, not dropped",
+              _mpf(_doc_named), "Name, DOB", "the document is the surface")
+        check("materialize: the spelled-out DOB survives into patient.md verbatim",
+              "DOB: September 13, 1970" in open(pmd, encoding="utf-8").read(), True,
+              "the reader, not the materialiser, normalises - the file keeps the document's words")
+        check("materialize: patient_age() computes from the spelled-out DOB", _spa(), _exp,
+              "ingest output is what the score reads - the whole point")
         os.remove(pmd)
+        # a document with no fact lines at all leaves no file at all
         check("ingest with no fact line: no file created, no report",
               (rx._write_patient_facts("MORNING\n\u2022 Thorne Creatine - 5g\n"),
                os.path.exists(pmd)),
