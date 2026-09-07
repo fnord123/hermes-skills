@@ -66,8 +66,8 @@ Parsing notes:
 
 - `add` → `{"ok": true, "note": "note-20260906-143211-call-the-plumber", "file": "<path>"}`
 
-State the note id and the file path back, so a mis-heard word is caught
-immediately.
+State the note id and the file path back. The reply catches a mis-heard
+word immediately.
 
 ## A typical session
 
