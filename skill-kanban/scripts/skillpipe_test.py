@@ -324,11 +324,112 @@ def main() -> None:
         os.environ.pop("GH_TOKEN", None)
     pr_cases = 3
 
-    print(json.dumps({"ok": True, "cases": cases + desyncs + gh_cases + pr_cases,
+    # -- abandon removes the REMOTE branch too (and reports truthfully) --
+    # The author role PUSHES the branch, so abandon must delete it on
+    # origin, not just `git branch -D` locally — and branch_removed must
+    # reflect a verified remote state, not an unconditional True (2026-09-07:
+    # all three throwaway branches leaked because of the old lie).
+    import tempfile as _tf
+    import shutil as _sh
+    wt_dir = _tf.mkdtemp(prefix="sp-ab-")
+    ab_state = {"skill": "demo", "mode": "create", "branch": "sr/demo",
+                "worktree": wt_dir, "author_round": 1, "ste100_round": 0,
+                "scripter_round": 0, "infeasible": 0, "cards": {}}
+    body_ab = "# i\n\n" + skillpipe.state_block(ab_state)
+
+    def make_ab_run(remote_present: bool):
+        calls = {"git": [], "push": None, "close": None, "comment": False}
+
+        def ab_run(cmd, cwd=None, check=True):
+            if cmd[0] == "git":
+                calls["git"].append(cmd[1:])
+                if cmd[1:3] == ["worktree", "remove"]:
+                    import shutil as _sh2
+                    _sh2.rmtree(cmd[3], ignore_errors=True)
+                    return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
+                if cmd[1:4] == ["push", "origin", "--delete"] and \
+                        cmd[-1] == ab_state["branch"]:
+                    calls["push"] = cmd
+                    return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
+                if cmd[1:3] == ["ls-remote", "--heads"] and \
+                        cmd[-1] == ab_state["branch"]:
+                    # probe #1 (or #2 after the delete)
+                    deleted = calls["push"] is not None
+                    so = "" if (deleted or not remote_present) else \
+                        "abc123\trefs/heads/" + ab_state["branch"] + "\n"
+                    return _sp2.CompletedProcess(cmd, 0, stdout=so, stderr="")
+                return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[-1] == "token" and "skillpipe-auth" in cmd[1]:
+                return _sp2.CompletedProcess(cmd, 0, stdout="ghs_12345_test\n")
+            if cmd[0] == "gh":
+                if cmd[1:3] == ["issue", "close"]:
+                    calls["close"] = cmd
+                if "comment" in cmd:
+                    calls["comment"] = True
+                return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return ab_run, calls
+
+    orig_run3 = skillpipe.run
+    orig_ib3 = skillpipe.issue_body
+    orig_lt3 = skillpipe.issue_labels
+    os.environ["SKILLPIPE_GH_APP_ID"] = "12345"
+    os.environ.pop("GH_TOKEN", None)
+
+    class _AbArgs:
+        issue, reason, yes = 42, "test", True
+    try:
+        # case 1: remote branch present -> must push --delete + verify
+        run1, calls1 = make_ab_run(remote_present=True)
+        skillpipe.run = run1
+        skillpipe.issue_body = lambda inst, n: body_ab
+        skillpipe.issue_labels = lambda inst, n: ["ste100-ready-1"]
+        try:
+            skillpipe.verb_abandon(inst, _AbArgs())
+            raise AssertionError("abandon must out()")
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert calls1["close"] and calls1["close"][:3] == ["gh", "issue", "close"], \
+            "abandon must close the issue"
+        assert calls1["comment"], "abandon must post the ABANDONED note"
+        assert calls1["push"] is not None, \
+            "abandon must push --delete the REMOTE branch"
+        assert [c for c in calls1["git"] if c[:2] == ["branch", "-D"]] == \
+            [["branch", "-D", ab_state["branch"]]], "local branch delete"
+        assert not os.path.isdir(wt_dir), "worktree must be removed"
+        # case 2: remote branch already gone -> no push, still True
+        run2, calls2 = make_ab_run(remote_present=False)
+        skillpipe.run = run2
+        try:
+            skillpipe.verb_abandon(inst, _AbArgs())
+            raise AssertionError("abandon must out()")
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert calls2["push"] is None, \
+            "no push --delete when the remote branch is already gone"
+        assert [c for c in calls2["git"]
+                if c[:3] == ["ls-remote", "--heads", "origin"]], \
+            "still probes the remote before deciding"
+        assert not [c for c in calls2["git"]
+                    if c[:3] == ["push", "origin", "--delete"]], \
+            "no delete attempt when the probe found nothing"
+    finally:
+        skillpipe.run = orig_run3
+        skillpipe.issue_body = orig_ib3
+        skillpipe.issue_labels = orig_lt3
+        skillpipe._ROLE_TOKEN = None
+        os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+        os.environ.pop("GH_TOKEN", None)
+        _sh.rmtree(wt_dir, ignore_errors=True)
+    ab_cases = 2
+
+    print(json.dumps({"ok": True,
+                      "cases": cases + desyncs + gh_cases + pr_cases + ab_cases,
                       "table": "all edges covered",
                       "desyncs": desyncs,
                       "gh_actor": gh_cases,
-                      "pr_open": pr_cases}))
+                      "pr_open": pr_cases,
+                      "abandon": ab_cases}))
     sys.exit(0)
 
 
