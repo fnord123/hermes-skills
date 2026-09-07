@@ -13,7 +13,7 @@ description: >
   "review my labs", "here are my blood tests", "here's my regimen", "add these
   new lab results", "how's my med review going", "the review is asking me
   something".
-version: 0.3.0
+version: 0.4.0
 license: MIT
 metadata:
   hermes:
@@ -45,8 +45,10 @@ review already running.
 ## When NOT to use
 
 - General medical, drug, or supplement questions not about the user's own regimen and labs.
-- Anything asking for a dose, a diagnosis, or a recommendation. The output is evidence and
-  questions for a prescriber, never advice.
+- Anything asking for a dose, a diagnosis, or a recommendation about a person outside a
+  review. The brief MAY carry recommendations (2026-08-13 contract) — a dose, a change, or a
+  stop, where the surviving evidence supports it; each traces to a source that survived
+  adversarial review, for the prescriber to confirm, never a directive.
 - Someone else's medications or labs.
 
 ## The tool
@@ -279,7 +281,8 @@ Reports land in `~/.hermes/reports/rx-review/`. When `BRIEF.md` and `CRITIQUE.md
 it is done. Send `CRITIQUE.md` first — what the final reviewer challenged — then `BRIEF.md`.
 
 Say plainly that this is evidence and questions for their prescriber or pharmacist to confirm,
-not medical advice, and that nothing in it recommends a dose.
+not medical advice: where the brief recommends a dose, a change, or a stop, that recommendation
+traces to a source that survived adversarial review, and the prescriber is the one who decides.
 
 ## Progress
 
