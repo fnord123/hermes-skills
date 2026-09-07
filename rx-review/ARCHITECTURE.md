@@ -1102,9 +1102,9 @@ python3 ~/hermes-skills/browse-task/scripts/browse_task.py ...
 
 It scopes itself by reading `HERMES_KANBAN_DB`, so it restricts this board and nothing else on
 the machine. It must be registered in each **profile** config — the global one is not what a
-worker reads. `hooks/test-terminal-pipeline-only.sh` covers 23 cases including the escapes that
-defeated earlier versions; `card_command_test.py` checks the other direction, that every command
-a card instructs is one the allowlist permits.
+worker reads. `test-terminal-pipeline-only.sh` in `~/hermes-skills/rx-review/scripts/` covers
+23 cases including the escapes that defeated earlier versions; `card_command_test.py` checks
+the other direction, that every command a card instructs is one the allowlist permits.
 
 ---
 
@@ -1262,12 +1262,12 @@ review it describes.
 ```
 python3 rx_test.py                          # the parser, regimen intake/batched review, sharding
 python3 card_command_test.py                # every card command passes the terminal allowlist
-bash ~/.hermes/hooks/test-terminal-pipeline-only.sh
+bash ~/hermes-skills/rx-review/scripts/test-terminal-pipeline-only.sh
 python3 ~/.hermes/provision_profiles_test.py
 python3 cardmap.py --check                  # the card map above is current
 ```
 
-All of these run in CI (`.github/workflows/test.yml`) and on commit.
+The rx-review tests run in hermes-skills CI (`.github/workflows/tests.yml`) and at pre-push; the provisioning test runs in the Hermes repo CI (`.github/workflows/test.yml`) and at pre-commit.
 
 **The chain tests assert ORDERING, not creation.** Asking whether a stage creates its successor
 is what let two ordering defects reach production: both stages created their cards correctly and
