@@ -43,6 +43,7 @@ Verbs:
   intake      open issue + worktree + author card for ONE skill
   intake-all  intake every skill in the repo (or --skills a,b,c)
   transition  a role finished: relabel, update state, PR comment, next card
+  pr-open     author role: open the pipeline PR as the role app (bot author)
   merge       merge the PR, close the issue, dispatch fleet card
   resume      owner: parked issue back to ANY ready label (+ your comment)
   comment     post a note to the PR (or issue)
@@ -982,6 +983,56 @@ def verb_merge(inst: dict, args) -> None:
     out({"issue": n, **result, "fleet_card": card})
 
 
+def verb_pr_open(inst: dict, args) -> None:
+    """author role: open the pipeline PR AS the role app.
+
+    Routes `gh pr create` through the same gh() seam that mints the role
+    installation token, so the PR's *author* field is the role bot
+    (sr-<role>[bot]) — not the operator the worker's HOME would otherwise
+    authenticate as. A direct `gh pr create` in the worker shell uses
+    HOME-based auth (the owner); that is the misattribution this verb
+    closes. It also records state["pr"] so a re-run is idempotent (it
+    refuses to open a second PR) and so the subsequent `transition --pass`
+    can read the URL from state.
+    """
+    n = args.issue
+    body = issue_body(inst, n)
+    state = parse_state(body)
+    if state.get("pr"):
+        fail(f"issue {n} already has a PR ({state['pr']}); rework rounds "
+             "update it — do not open a second")
+    branch = args.head or state.get("branch")
+    if not branch:
+        fail("no branch to open a PR from (state has none; pass --head)")
+    body_text = None
+    if args.body_file:
+        body_text = open(args.body_file).read()
+    elif args.body:
+        body_text = args.body
+    if body_text is None:
+        body_text = (f"{state.get('skill', 'skill')}: {args.title}\n\n"
+                     f"Serves issue #{n}. Opened by the author stage of "
+                     "the skill review pipeline.")
+    if re.search(rf"(?im)^\s*(closes|fixes|resolves)\s*#\s*{n}\b",
+                 body_text):
+        fail(f"the PR body must not auto-close issue #{n} "
+             "(the script closes it at merge)")
+    path = write_tmp(body_text)
+    proc = gh(inst, ["pr", "create", "--head", branch, "--title", args.title,
+                     "--body-file", path])
+    url = ""
+    for line in (proc.stdout or "").splitlines():
+        if re.search(r"/pull/\d+", line):
+            url = line.strip()
+            break
+    if not url:
+        fail(f"gh pr create did not return a PR URL: "
+             f"{(proc.stdout or '')[:200]!r}")
+    state["pr"] = url
+    edit_issue(inst, n, render_body(body, state))
+    out({"issue": n, "pr": url, "branch": branch})
+
+
 def verb_resume(inst: dict, args) -> None:
     n = args.issue
     cur = current_state_label(inst, n)
@@ -1112,6 +1163,14 @@ def guard_main() -> None:
     p.add_argument("--findings-file", default=None)
     p.add_argument("--findings-text", default=None)
 
+    p = sub.add_parser("pr-open", help="author: open the PR as the role app")
+    p.add_argument("--issue", type=int, required=True)
+    p.add_argument("--title", required=True)
+    p.add_argument("--head", default=None,
+                   help="branch to open from (default: state block branch)")
+    p.add_argument("--body", default=None)
+    p.add_argument("--body-file", default=None)
+
     p = sub.add_parser("merge", help="merge the PR (commit role, or retry after park)")
     p.add_argument("--issue", type=int, required=True)
     p.add_argument("--pr", default=None)
@@ -1149,6 +1208,7 @@ def guard_main() -> None:
     handlers = {"intake": verb_intake, "intake-all": verb_intake_all,
                 "transition": verb_transition, "merge": verb_merge,
                 "resume": verb_resume, "comment": verb_comment,
+                "pr-open": verb_pr_open,
                 "status": verb_status, "style-check": verb_style_check,
                 "list": verb_list, "abandon": verb_abandon}
     handlers[args.verb](inst, args)

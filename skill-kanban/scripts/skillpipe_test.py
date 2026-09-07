@@ -243,10 +243,92 @@ def main() -> None:
         os.environ.pop("GH_TOKEN", None)
     gh_cases = 3
 
-    print(json.dumps({"ok": True, "cases": cases + desyncs + gh_cases,
+    # -- pr-open: the PR author must be the role app, not the operator ----
+    # The step-2 live proof found a direct `gh pr create` in the worker
+    # shell authed as the owner (HOME-based). pr-open routes the create
+    # through the same gh() seam, so it mints the role token. We patch
+    # the subprocess boundary (run) + the issue read/write boundary so
+    # the REAL gh(), _role_token, parse_state, state_block, render_body
+    # all execute; only the external calls are captured.
+    import subprocess as _sp2
+    pr_calls = {}
+    edited: dict = {"body": None}
+
+    state_nopr = {"skill": "demo", "mode": "update", "branch": "sr/demo",
+                  "worktree": "/tmp/wt/demo", "author_round": 1,
+                  "ste100_round": 0, "scripter_round": 0, "infeasible": 0,
+                  "cards": {}}
+    body_nopr = "# issue\n\n" + skillpipe.state_block(state_nopr)
+
+    def pr_run(cmd, cwd=None, check=True):
+        if cmd[-1] == "token":
+            return _sp2.CompletedProcess(cmd, 0, stdout="ghs_12345_test\n")
+        if cmd[0] == "gh" and cmd[1] == "pr" and cmd[2] == "create":
+            pr_calls["cmd"] = cmd
+            pr_calls["token"] = os.environ.get("GH_TOKEN")
+            return _sp2.CompletedProcess(cmd, 0,
+                                         stdout="https://x/pull/42\n")
+        return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    orig_run2 = skillpipe.run
+    orig_body = skillpipe.issue_body
+    orig_edit = skillpipe.edit_issue
+    skillpipe.run = pr_run
+    skillpipe.issue_body = lambda inst, n: body_nopr
+    skillpipe.edit_issue = lambda inst, n, body, **k: edited.__setitem__("body", body)
+    skillpipe._ROLE_TOKEN = None
+    os.environ["SKILLPIPE_GH_APP_ID"] = "12345"
+    os.environ.pop("GH_TOKEN", None)
+
+    class _PrArgs:
+        issue, title, head, body, body_file = 42, "demo: add thing", None, None, None
+    try:
+        try:
+            skillpipe.verb_pr_open(inst, _PrArgs())
+            raise AssertionError("pr-open must out() (exit 0)")
+        except SystemExit as exc:
+            assert exc.code == 0, f"pr-open success must exit 0, got {exc.code}"
+        # the create went through gh with the minted role token
+        assert pr_calls["cmd"][:4] == ["gh", "pr", "create", "--head"], \
+            f"pr-open must call gh pr create --head, got {pr_calls['cmd'][:4]}"
+        assert pr_calls["token"] == "ghs_12345_test", \
+            f"pr-open must auth with the role token, got {pr_calls.get('token')!r}"
+        # and it recorded the PR URL into the state block (edit_issue)
+        assert "https://x/pull/42" in (edited["body"] or ""), \
+            "pr-open must write the PR URL into the issue state block"
+        # idempotency: a state that already has a PR must refuse a 2nd
+        state_withpr = dict(state_nopr, pr="https://x/pull/42")
+        skillpipe.issue_body = lambda inst, n: "# i\n\n" + skillpipe.state_block(state_withpr)
+        pr_calls.clear()
+        try:
+            skillpipe.verb_pr_open(inst, _PrArgs())
+            raise AssertionError("pr-open must refuse a second PR")
+        except SystemExit as exc:
+            assert exc.code == 1, "refusing a 2nd PR must exit 1"
+        assert "cmd" not in pr_calls, "no gh pr create on a 2nd-PR refusal"
+        # the no-Closes doctrine: a body auto-closing the issue is rejected
+        skillpipe.issue_body = lambda inst, n: "# i\n\n" + skillpipe.state_block(state_nopr)
+        class _PrArgsClose(_PrArgs):
+            body = "Fixes #42"
+        try:
+            skillpipe.verb_pr_open(inst, _PrArgsClose())
+            raise AssertionError("pr-open must reject a Closes #<n> body")
+        except SystemExit as exc:
+            assert exc.code == 1, "Closes-rejection must exit 1"
+    finally:
+        skillpipe.run = orig_run2
+        skillpipe.issue_body = orig_body
+        skillpipe.edit_issue = orig_edit
+        skillpipe._ROLE_TOKEN = None
+        os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+        os.environ.pop("GH_TOKEN", None)
+    pr_cases = 3
+
+    print(json.dumps({"ok": True, "cases": cases + desyncs + gh_cases + pr_cases,
                       "table": "all edges covered",
                       "desyncs": desyncs,
-                      "gh_actor": gh_cases}))
+                      "gh_actor": gh_cases,
+                      "pr_open": pr_cases}))
     sys.exit(0)
 
 

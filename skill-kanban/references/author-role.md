@@ -34,14 +34,20 @@ author. You do not approve your own work.
 ## Commit, push, and the pull request
 
 Commit your work on the branch (house commit style, from the house-repo
-skill), then push. Then:
+skill), then push. Then, **first round only (no PR yet)**, open the PR
+through the script — do NOT call `gh pr create` yourself. A direct `gh`
+in your shell authenticates as the operator (your HOME), not the author
+app; `pr-open` is the seam that opens it as the role bot and records the
+URL in the issue's state block:
 
-- **First round, no PR yet:** open it.
-  `gh pr create --head <branch> --title "<skill>: <imperative summary>"`
-  with a body that says what changed and which issue it serves. Do NOT
-  put `Closes #<n>` in the body — the script closes the issue at merge.
+  `python3 <script> --instance <instance> pr-open --issue <n> --title "<skill>: <imperative summary>"`
+
+Optionally add `--body "<what changed and which issue it serves>"`.
+Keep the body free of `Closes #<n>` — the script rejects it and closes
+the issue at merge.
+
 - **Rework round, PR exists:** your new commit just updates the existing
-  pull request. Do not open a second one.
+  pull request. Do not open a second one (`pr-open` refuses it).
 
 ## Hand off (exactly one script call)
 
