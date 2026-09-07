@@ -277,8 +277,10 @@ that, then unblock it — it retries itself.
 
 ## 5. Deliver
 
-Reports land in `~/.hermes/reports/rx-review/`. When `BRIEF.md` and `CRITIQUE.md` both exist,
-it is done. Send `CRITIQUE.md` first — what the final reviewer challenged — then `BRIEF.md`.
+Reports land in the run directory `~/.hermes/reports/rx-review/<YYYY-MM-DD-HHMMSS>-<patient-slug>/`.
+When the dated brief `<date>-<patient>-rx-review.md` and its critique
+`<date>-<patient>-critique.md` both exist, it is done. Send the critique first — what the final
+reviewer challenged — then the brief.
 
 Say plainly that this is evidence and questions for their prescriber or pharmacist to confirm,
 not medical advice: where the brief recommends a dose, a change, or a stop, that recommendation

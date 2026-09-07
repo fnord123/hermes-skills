@@ -1,84 +1,94 @@
-# rx-review — human notes
+# rx-review
 
-Reviews the user's medications and supplements against their blood tests and
-produces a discussion brief for their prescriber. The work is done by a kanban
-pipeline at `~/hermes-skills/rx-review/scripts/`; the skill is the human interface to it.
+Reviews a patient's medications and supplements against their blood-test history and
+produces a cited discussion brief for their prescriber. It is not a diagnosis and it is
+not a directive: it gathers evidence, adversarially verifies it, and hands it to the
+prescriber — with a recommendation where the surviving evidence supports one, for the
+prescriber to confirm.
 
-## Verb scope
+## Inputs
 
-SKILL.md used to open by listing all seven verbs the script accepts and then
-saying "You only ever need `regimen`, `intake`, and `status`. The rest are run
-BY the pipeline" — while two later sections told the model to run `verify-labs`
-and `confirm`. A small model resolves a contradiction like that by concluding
-every verb is fair game, which is the opposite of the intent.
+Two things, both provided by the patient:
 
-The tools table in SKILL.md now lists exactly the five verbs the model may run
-(`regimen`, `intake`, `status`, `verify-labs`, `confirm`) and says the rest
-belong to the pipeline, without enumerating them.
+- **Patient profile** carrying the patient's identifying information and their full
+  substance regimen (medications and supplements, with doses, schedules, and optionally
+  date initiated - useful for detecting if they are having the desired effect).  The profile
+  can be typed in chat or read from a source the agent resolves first (a Google Doc, a local file).
+  This document is the single source of truth for the patient: everything the pipeline
+  records about what the patient takes comes from it.  Currently the pipeline is run as a 
+  single pass analysis, so a change to the profile means a re-run.  Future versions may
+  add long term durable storage and incremental runs.
+- **A set of lab PDFs** — the patient's blood tests across time. The pipeline transcribes
+  every marker, value, and draw date out of them, which is what makes the before/after
+  and trend work below possible.  Labs may be uploaded all at once or in a series of uploads.
+  In either case the pipeline waits for the patient to confirm all labs are uploaded before
+  proceeding with transcription and analysis.
 
-For the same reason the `--force` mention was removed from the "Start the
-research stage is blocked" section. Naming a dangerous flag, even to forbid it,
-is how it gets used; the positive instruction (deal with the block reason, then
-unblock — it retries itself) is what remains.
+## What the pipeline does
 
-## Output
+Eight stages. The regimen branch (stages 2–3) and the labs branch (stages 4–5) run in
+parallel; each requires human review upon completion. Once both are complete, the 
+research, adversarial review, and conclusion stages execute in sequence.
 
-Reports land in `~/.hermes/reports/rx-review/`. The run is done when both
-`BRIEF.md` and `CRITIQUE.md` exist.
+1. **Ingest.** Stage the lab PDFs; split the patient document into two parts — the
+   regimen (what is taken) and the patient's identifying facts.
+2. **Regimen read.** Read the regimen and look up each substance's product label, so
+   doses and ingredients are pinned to a source rather than trusted from the document.
+3. **Regimen review** — the patient reviews the settled regimen and corrects it.
+   *Gate 1.* Nothing downstream may rely on a regimen the patient has not confirmed.
+4. **Lab transcription.** Extract every value, marker, and date from every PDF and check
+   the transcript against the source document, so a scan cannot quietly feed a wrong
+   number into the analysis.
+5. **Labs review** — the out-of-range values across the whole history are flagged in a
+   batch for the patient's review. *Gate 2.* Nothing downstream relies on an out of range
+   value until the patient confirms it.
+6. **Research.** Per substance, per marker, and per trend: what the literature says,
+   whether the substance plausibly moves the marker,
+   and what the patient's own before/after data shows around its start date. Whole-
+   regimen screens for interactions and schedule conflicts run alongside.
+7. **Adversarial verification.** Independent hostile reviewers — logic, counter-
+   evidence, overreach, status-quo — plus a citation audit that re-checks every quote
+   against its source. Each claim survives with its citation, or is narrowed or dropped.
+   Performed by agent instances that have entirely separate context and memory backends
+   so as to avoid self-dealing / confirmation bias.
+8. **Conclusion.** The surviving claims are reconciled into the dated brief, and a final
+   hostile reviewer attacks the finished brief and records what it finds.
 
-The brief is evidence and questions for a prescriber or pharmacist to confirm.
-It is not medical advice and nothing in it recommends a dose.
+## Outputs
 
-## FIB-4 (liver fibrosis risk)
+Everything lands in a per-run directory under `~/.hermes/reports/rx-review/<YYYY-MM-DD-HHMMSS>-<patient>`:
 
-`rx.py fib4` computes `(age * AST) / (platelets * sqrt(ALT))` and `labs-report`
-surfaces it under **Derived scores**. Implementation notes:
+- **`<date>-<patient>-rx-review.md`** — the brief: the regimen as settled, per-substance evidence,
+  interaction flags ranked by severity, the schedule as recorded with its conflicts,
+  the before/after efficacy comparison from the patient's own labs, lab observations
+  framed as hypotheses, and prioritized questions for the prescriber. Where the surviving
+  evidence supports it, it recommends a dose change, a new drug, or a stop — each traced
+  to a source that survived adversarial review. The patient takes the brief to their
+  prescriber; the prescriber decides.
+- **`<date>-<patient>-critique.md`** — the adversarial reviewers findings on the brief, so the 
+  patient can see what was challenged and what held.
 
-- **Age is a property of the person, carried in the one input document.** The user
-  keeps a single document — regimen lines plus a `Name:` / `Age:` / `DOB:` line.
-  `_write_patient_facts()` runs at `rx.py regimen` ingest (all three routes, including
-  the house JSON envelope) and materialises those fact lines into
-  `inputs/patient.md`; `patient_age()` reads that file and returns `0` when absent.
-  The document is the surface, the file is what the pipeline reads from — the same
-  split the regimen itself has (`regimen.txt`). A re-ingest *replaces* the file, and
-  it never *deletes*: a document that drops its fact lines leaves the last recorded
-  age in place, because a stale, visible age beats a silent score. FIB-4 refuses to
-  compute without an age rather than guess one — an invented age in a clinical score
-  is worse than no score. The stage-2 worker prompt marks fact lines as NOT products
-  so the transcriber cannot turn a `DOB:` line into a supplement row. The SKILL.md
-  "If something fails" guard whitelists `inputs/patient.md` alongside
-  `regimen.txt`/`CONFIRMED.txt` because a re-ingest of the document is the supported
-  way to change it.
-- **One draw only.** The score is computed from the newest draw that reports
-  AST, ALT and a platelet count *together*; it is never stitched across draws.
-  This is deliberately stricter than `DERIVED_MARKERS` (non-HDL), whose inputs
-  may come from separate draws: non-HDL is an exact identity, whereas FIB-4 is a
-  validated single-time-point ratio, and cross-draw inputs are a value the
-  formula was never validated on. When no draw has all three, it reports which
-  inputs are missing — the score is not invented.
-- **Band boundaries** follow the conventional cut points: `<1.30` low,
-  `1.30–3.27` indeterminate, `>3.27` high.
+## Architecture
 
-## Transaminase override in trend dispatch
+The pipeline is a kanban card DAG.  Wherever possible scripts are used to control and
+check execution, with LLM agents only being used where necessary.  Each card, on completing,
+creates the cards its result makes possible; barriers wait on their parents and release
+the next stage only when that stage's output is actually on disk. It advances itself —
+no step-running, no polling, no nudging — and it stops for a human at exactly the two
+gates above. Everything else either completes or errors out and says why; nothing waits
+silently.
 
-Stage 6c triages each trend and may judge it "ordinary variation", in which case
-the dispatch writes a skip report and stops. That is the exact dismissal that
-let ALT/SGPT 26 → 29 → 35 over five months go un-researched, so the regimen-driver
-question (a statin and a JAK inhibitor both move these) never ran.
+The work is split between scripts and language-model workers:
 
-`phase_trend_dispatch` now carries a deterministic gate: when the marker is a
-transaminase (`rx.is_transaminase`) and the triage verdict is `MEANINGFUL: no`,
-the dispatch **overrides** the verdict and deepens anyway — parts 2/3 and the
-synthesis are created as for a meaningful trend, and the intro carries a NOTE
-explaining the override so the cards don't re-justify a dismissal. Two invariants:
+- **Scripts** do the deterministic part — staging, extraction, transcription checks,
+  date and trend arithmetic, the gate wiring. Their output is reproducible and tested.
+- **Worker cards** do the research and review part — literature search, fetch, and
+  report writing. Every factual claim in a worker's report must cite a page fetched
+  during that run; a claim without a citation is dropped at the audit, so the brief can
+  only rest on what was actually read.
+- **Barriers** are the trust model: a stage is released by evidence of its outputs, not
+  by a card's word that it finished.
 
-- The gate is **marker-qualified**. A `no` on anything else (creatinine, sodium)
-  still writes the skip report and stops; only liver enzymes are force-deepened.
-- It is a **deterministic gate, not a prompt nudge**: an LLM triage that already
-  said "no" is the wrong second opinion, so the override is code, and it fires
-  on the parsed verdict file, not on re-reading the trend.
-
-`is_transaminase()` lives in `rx.py` next to `_norm_marker` — one normaliser, one
-answer — so fanout never re-derives the classification. It is tolerant of
-`ALT`/`AST`/`ALT/SGPT`/`AST/SGOT` vendor spellings; the bare `SGPT`/`SGOT` are
-*not* treated as transaminases on their own.
+The full specification — stages, cards, wiring, and the error model — is in
+`ARCHITECTURE.md`. The agent-facing operating manual is `SKILL.md`. The code lives in
+`scripts/`.

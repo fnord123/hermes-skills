@@ -133,10 +133,10 @@ Additional Begin, Worker, and Barrier cards needed within a stage are created wi
 - **Starts when:** the `Stage 7: Adversarial Complete` Barrier completes.
 - **Does:** `Stage 8: Conclusion` (invoking `rx.py analyze-conclude`) creates three Worker cards in fixed order — no data-dependent fan-out:
   - **Reconcile adversarial verdicts** (`rx-verify`) — reads the Stage 6 research reports (substance, marker, trend, screens, **and `efficacy-*.md`**) and Stage 7's four lens reports plus `CONTEXT-AUDIT.md`, resolves disagreements between lenses, and decides each claim's fate: a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or an un-narrowed `serious`) finding against it; the rest are dropped or narrowed. An efficacy report's "expected to move X" claims are audited like any claim; its observed pre/post values are arithmetic over the user's confirmed labs and stand or fall on the lab confirmation, not on a citation.
-  - **Assemble prescriber discussion brief** (`rx-verify`, parented on Reconcile) — writes the surviving, cited claims into `<date>-rx-review.md`, including a "what this review did not cover" section for anything excluded (from `coverage.md`) and a **Medication/Supplement efficacy** section from the surviving efficacy findings: for each dated substance, the before/after comparison of the markers its research says it moves, with the post-start draw count; "too early to tell" carried through verbatim.
-  - **Adversarial review of the brief** (`rx-devil`, parented on Assemble) — a final adversarial pass over the assembled brief. It **never blocks**: it flags each defect (`fatal`/`serious`/`minor`) **in place** in `<date>-rx-review.md` — a `> **[review: …]**` line inserted directly after the sentence it concerns — writes the full critique to `CRITIQUE.md`, and completes with the counts. The card is subscribed, so its completion and issue counts reach the user; the analysis always finishes.
+  - **Assemble prescriber discussion brief** (`rx-verify`, parented on Reconcile) — writes the surviving, cited claims into `<date>-<patient>-rx-review.md`, including a "what this review did not cover" section for anything excluded (from `coverage.md`) and a **Medication/Supplement efficacy** section from the surviving efficacy findings: for each dated substance, the before/after comparison of the markers its research says it moves, with the post-start draw count; "too early to tell" carried through verbatim.
+  - **Adversarial review of the brief** (`rx-devil`, parented on Assemble) — a final adversarial pass over the assembled brief. It **never blocks**: it flags each defect (`fatal`/`serious`/`minor`) **in place** in `<date>-<patient>-rx-review.md` — a `> **[review: …]**` line inserted directly after the sentence it concerns — writes the full critique to `<date>-<patient>-critique.md`, and completes with the counts. The card is subscribed, so its completion and issue counts reach the user; the analysis always finishes.
   The three run in sequence (each parented on the previous), and the last is a parent of the `Stage 8: Conclusion Complete` Barrier. The Stage 8: Conclusion Complete Barrier runs `check-output --stage 8` (the dated brief in reports/ satisfies it).
-- **Completion:** `<date>-rx-review.md` produced, containing all findings, evidence, and citations.
+- **Completion:** `<date>-<patient>-rx-review.md` produced, containing all findings, evidence, and citations.
 - **Exit:** none — the pipeline is complete.
 
 ---
@@ -526,7 +526,7 @@ Barriers, completes last and releases `Stage 7: Adversarial Review`.
      |
   STAGE 8  Stage 8: Conclusion (Begin)           `rx.py analyze-conclude`
      |       Reconcile adversarial verdicts   (rx-verify)   keep / narrow / drop each claim
-     |       Assemble prescriber discussion brief   (rx-verify)   <date>-rx-review.md
+     |       Assemble prescriber discussion brief   (rx-verify)   <date>-<patient>-rx-review.md
      |       Adversarial review of the brief   (rx-devil)    hostile review of the finished brief
      |     Stage 8: Conclusion Complete (Barrier)      the run is done
 ```
@@ -674,9 +674,9 @@ that run outside any card.
 | **`Stage 8: Conclusion`** (Begin) | Stage 8 spine. Creates the three conclusion cards in fixed order — no data-dependent fan-out | Released when `Stage 7: Adversarial Complete` completes | Reconcile → Assemble → Adversarial review of the brief |
 | ↳ `rx.py analyze-conclude` | Execs `fanout.py` to create the reconcile → assemble → devil chain | — | the three conclusion cards |
 | **`Reconcile adversarial verdicts`** (rx-verify) | Resolves disagreements between the lenses; a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or un-narrowed `serious`) finding. Ingests `efficacy-*.md` alongside the research reports — any "expected to move X" claim is audited like any other, while observed values stand on lab confirmation, not citation | The Stage 8 Begin | — |
-| **`Assemble prescriber discussion brief`** (rx-verify) | Writes `<date>-rx-review.md`, including what the review did **not** cover (from `coverage.md`): markers excluded by `--ignore`, items the user dropped at the regimen review, and a **Medication/Supplement efficacy** section carrying each dated substance's before/after findings — with any **"TOO EARLY TO TELL"** verdict verbatim | The reconciler | — |
+| **`Assemble prescriber discussion brief`** (rx-verify) | Writes `<date>-<patient>-rx-review.md`, including what the review did **not** cover (from `coverage.md`): markers excluded by `--ignore`, items the user dropped at the regimen review, and a **Medication/Supplement efficacy** section carrying each dated substance's before/after findings — with any **"TOO EARLY TO TELL"** verdict verbatim | The reconciler | — |
 | **`Adversarial review of the brief`** (rx-devil) | Final hostile pass over the finished product; a parent of `Stage 8: Conclusion Complete` | The assembler | — |
-| **`Stage 8: Conclusion Complete`** (Barrier) | Confirms `<date>-rx-review.md` produced, then completes — the run is done | The brief's adversarial review | — |
+| **`Stage 8: Conclusion Complete`** (Barrier) | Confirms `<date>-<patient>-rx-review.md` produced, then completes — the run is done | The brief's adversarial review | — |
 | **`rxkanban.py`** | Kanban mechanics: create, announce, subscribe. Library for `rx.py` and `fanout.py`. Every card is a separate `hermes kanban create` subprocess, so creations are PACED — `CREATE_DELAY_S`, 1s between them (`RX_CARD_CREATE_DELAY`, 0 disables). A burst of 86 unpaced creations tore the board's SQLite one page short of its own header on 2026-08-11; the cost is (N-1)x1s per fan-out | Imported | — |
 | **`terminal-pipeline-only.sh`** | Hook. Holds this board's `terminal` to an allowlist, scoped by `HERMES_KANBAN_DB` | Every terminal call on this board | — |
 | **`rx.py status` / `doctor` / `labs-report`** | `status` answers "what is happening, and what happens next" in ONE ranked headline from `pipeline_state()` — a card held for the user outranks everything and is never truncated away, and the headline names the verb that routes their reply; `--detail` adds the old inputs/cache/board/reports dump. `doctor` explains a held card by asking the board what is `blocked`, not by matching card titles. `labs-report` is the readable out-of-range list | the model on every "how is it going", and a person | — |
@@ -899,7 +899,7 @@ already exists — `gather-regimen-slugs` wrote it when it posted the review —
 has to complete the card.
 
 Dropping it must not be silent. `fanout.py` records what it skipped as it skips it and writes
-`inputs/coverage.md`; the assembler reproduces that as a section of `<date>-rx-review.md` headed
+`inputs/coverage.md`; the assembler reproduces that as a section of `<date>-<patient>-rx-review.md` headed
 *what this review did not cover*, and writes "Nothing was excluded" when the list is empty. A
 missing section and a section saying nothing look identical to a reader, and only one of them is
 true. The record is what was actually skipped, not a second derivation of what should have been —
@@ -1001,7 +1001,7 @@ detail beyond their canonical sections (*Pipeline Stages*, Stages 7–8).
 Everything under `inputs/` is the user's data or derived from it; everything a run produces goes to
 its own timestamped output directory.
 
-**Each invocation gets `~/.hermes/reports/rx-review/<YYYY-MM-DD-HHMMSS>/`.** `rx.py start`
+**Each invocation gets `~/.hermes/reports/rx-review/<YYYY-MM-DD-HHMMSS>-<patient-slug>/`;** the slug is the patient name from `inputs/patient.md` (lowercased, hyphenated, or absent when no name is recorded). `rx.py start`
 (`start_run()`) creates it at Stage 1 — the single writer, before any parallel card exists — and
 points a `current` symlink in the parent at it, swapped atomically. Every stage resolves its output
 dir (`REPORTS`) through `current`, so all eight stages' worker processes write into the SAME run
@@ -1038,7 +1038,7 @@ transcriptions) into `<run>/inputs/`, so each timestamped dir is a self-containe
 | `reports/interactions.md`, `reports/SCHEDULE.md` | the 6d whole-regimen screens (`SCHEDULE.md` only when the regimen records dose times) | lenses, audit, assembler | yes |
 | `reports/LOGIC.md`, `REFUTATION.md`, `OVERREACH.md`, `NULLHYP.md` | lens merges (Stage 7) | reconciler | yes |
 | `reports/CONTEXT-AUDIT.md` | the citation-audit merge (Stage 7) | reconciler | yes |
-| `reports/<date>-rx-review.md` | assembler | rx-devil, the user | **the output** — including what it did NOT cover: markers the user asked to ignore and items dropped at the regimen review |
+| `reports/<date>-<patient>-rx-review.md` | assembler | rx-devil, the user | **the output** — including what it did NOT cover: markers the user asked to ignore and items dropped at the regimen review |
 | `reports/inputs/` (regimen + transcriptions) | Stage 8 conclusion (`_snapshot_inputs`) | a person reading the run later | the run's input snapshot — makes the timestamped dir a self-contained record |
 
 ### labs-complete.md vs labs-succinct.md
