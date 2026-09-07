@@ -37,6 +37,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rx
 import rxkanban                                              # noqa: E402
 from rxkanban import announce, subscribe                    # noqa: E402,F401
 from rxkanban import discord_channel as _discord_channel    # noqa: E402,F401
@@ -414,7 +415,7 @@ delete it. A claim the audit discredited, or a recommendation built on one, is `
 do not remove it. "This brief is sound" is a valid verdict when it survives a real attempt to
 break it.
 
-Also write the full critique to {reports}/CRITIQUE.md.
+Also write the full critique to {reports}/{critique}.
 Then kanban_complete with metadata: {{"fatal": N, "serious": N, "minor": N}}
 """
 
@@ -707,7 +708,8 @@ def shard(args, label, name, slug, intro, parts, synth_q, out, fmt, priority, qf
     frags, ids = [], []
     for i, questions in enumerate(parts, 1):
         # PART- prefix, not a -part suffix. Four later stages glob reports/*.md flat and skip
-        # intermediates by PREFIX (lenses.py's own LENS-* files do exactly this). Named
+        # intermediates by PREFIX or SUFFIX (lenses.py's own LENS-* files do exactly this; the
+        # dated brief and critique by their -rx-review.md / -critique.md endings). Named
         # "marker-x-part1.md" these fragments were picked up as finished research reports by
         # the adversarial lenses, the citation audit AND the interactions card - so partial
         # answers would be judged as if complete, the same evidence reviewed twice, and the
@@ -808,15 +810,11 @@ _SUBSTAGE = {d["family"]: d for d in SUBSTAGES}
 
 
 def _brief_name():
-    """Canonical final-brief filename for the active run: <date>-rx-review.md, dated from the run
-    dir (the day the review started) so a review concluding past midnight keeps one name."""
-    try:
-        stamp = os.path.basename(os.path.realpath(os.path.expanduser(REPORTS)))
-        if len(stamp) >= 10 and stamp[4] == "-":
-            return "%s-rx-review.md" % stamp[:10]
-    except OSError:
-        pass
-    return "%s-rx-review.md" % time.strftime("%Y-%m-%d")
+    """Canonical final-brief filename for the active run: <date>-<patient>-rx-review.md, dated from
+    the run dir (the day the review started) so a review concluding past midnight keeps one name.
+    Delegates to rx.brief_name, the one definition — the card bodies must name the same file the
+    stage-8 barrier globs."""
+    return rx.brief_name()
 
 
 def _snapshot_inputs():
@@ -837,9 +835,17 @@ def _snapshot_inputs():
         pass
 
 
+def _critique_name():
+    """Canonical critique filename for the active run: <date>-<patient>-critique.md — the devil
+    card's full report, named like the brief beside it."""
+    base = rx.brief_name()
+    return base[:-len("rx-review.md")] + "critique.md"
+
+
 def _fmt():
     """The shared template fill for research card bodies."""
     return dict(inputs=INPUTS, reports=REPORTS, endnote_rule=ENDNOTE_RULE, brief=_brief_name(),
+                critique=_critique_name(),
                 common=COMMON.format(inputs=INPUTS,
                                      labs_line=LABS_LINE.format(inputs=INPUTS)))
 

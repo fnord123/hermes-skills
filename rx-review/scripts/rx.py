@@ -80,7 +80,8 @@ TILDE = "~/hermes-skills/rx-review/scripts/inputs"
 
 
 def start_run():
-    """Create a fresh timestamped run dir and point REPORTS_ROOT/current at it. Returns (dir, stamp).
+    """Create a fresh run dir, named <YYYY-MM-DD-HHMMSS> plus the patient slug when one is
+    recorded, and point REPORTS_ROOT/current at it. Returns (dir, name).
 
     Called once at Stage 1, before any parallel card exists, so it is the single writer of the
     pointer — the concurrency rule the whole pipeline lives by. The symlink swap is atomic (temp
@@ -88,7 +89,9 @@ def start_run():
     """
     os.makedirs(REPORTS_ROOT, exist_ok=True)
     stamp = time.strftime("%Y-%m-%d-%H%M%S")
-    run = os.path.join(REPORTS_ROOT, stamp)
+    slug = patient_slug()
+    name = "%s-%s" % (stamp, slug) if slug else stamp
+    run = os.path.join(REPORTS_ROOT, name)
     os.makedirs(run, exist_ok=True)
     # A real dir literally named `current` (e.g. a pre-symlink corpus) would block the swap; retire
     # it rather than delete, so no output is ever lost to this migration.
@@ -99,13 +102,13 @@ def start_run():
         os.remove(tmp)
     except OSError:
         pass
-    os.symlink(stamp, tmp)                                  # relative target → tree stays relocatable
+    os.symlink(name, tmp)                                   # relative target → tree stays relocatable
     os.replace(tmp, CURRENT_LINK)                           # atomic; replaces any existing symlink
-    return run, stamp
+    return run, name
 
 
 def run_stamp():
-    """The active run's stamp (dir basename), or '' if no run is current."""
+    """The active run's dir name (basename), or '' if no run is current."""
     try:
         return os.path.basename(os.path.realpath(REPORTS))
     except OSError:
@@ -113,11 +116,35 @@ def run_stamp():
 
 
 def brief_name():
-    """Canonical final-brief filename for the active run: <date>-rx-review.md. Dated from the run
-    dir so a review that concludes past midnight still names the brief by the day it started."""
+    """Canonical final-brief filename for the active run: <date>-<patient>-rx-review.md, dated from
+    the run dir so a review that concludes past midnight still names the brief by the day it
+    started. The slug is re-read from patient.md — identical to the one in the run dir — so a brief
+    reassembled after `reset` (inputs re-ingested) keeps the documented name."""
     stamp = run_stamp()
     day = stamp[:10] if len(stamp) >= 10 and stamp[4] == "-" else time.strftime("%Y-%m-%d")
-    return "%s-rx-review.md" % day
+    slug = patient_slug()
+    return "%s-%s-rx-review.md" % (day, slug) if slug else "%s-rx-review.md" % day
+
+
+def patient_slug():
+    """The patient name from inputs/patient.md, slugified for run-dir and deliverable names — or
+    "" when the file or a Name: line is absent. The NO PATIENT refusal only requires patient.md to
+    be NON-EMPTY, so a Name:-less document still starts a run; its dir and brief then carry no
+    slug, which is the documented no-name path (two same-day nameless runs are still apart by
+    their timestamps). Lowercased, non-alphanumeric runs → one hyphen, capped at 48 chars — the
+    same ceiling rxkanban.slugify uses for card slugs."""
+    path = os.path.join(INPUTS, "patient.md")
+    if not os.path.exists(path):
+        return ""
+    try:
+        txt = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
+    m = re.search(r"^\s*Name\s*[:=]\s*([^\n]+)", txt, re.I | re.M)
+    if not m:
+        return ""
+    s = re.sub(r"[^a-z0-9]+", "-", m.group(1).strip().lower()).strip("-")
+    return s[:48]
 
 
 def run_dirs():

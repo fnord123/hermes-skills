@@ -384,32 +384,54 @@ def main():
     shutil.rmtree(_vcache, ignore_errors=True)
 
 
-    print("\nper-run output dirs — each invocation writes into its own timestamped dir")
+    print("\nper-run output dirs — each invocation writes into its own dir, named with the patient")
     import tempfile as _tf                                     # noqa: PLC0415
     import time as _rt                                         # noqa: PLC0415
     _rroot = _tf.mkdtemp(prefix="rxrun-")
-    _saved = (rx.REPORTS_ROOT, rx.CURRENT_LINK, rx.REPORTS)
+    _sin = _tf.mkdtemp(prefix="rxin-")                         # controlled inputs: no live patient.md
+    _saved = (rx.REPORTS_ROOT, rx.CURRENT_LINK, rx.REPORTS, rx.INPUTS)
     rx.REPORTS_ROOT = _rroot
     rx.CURRENT_LINK = os.path.join(_rroot, "current")
     rx.REPORTS = rx.CURRENT_LINK
+    rx.INPUTS = _sin
     try:
+        check("patient_slug: no file → no slug", rx.patient_slug() == "",
+              True, "a Name:-less run is the documented no-name path")
+        open(os.path.join(_sin, "patient.md"), "w").write("Age: 55\n")
+        check("patient_slug: no Name line → no slug", rx.patient_slug() == "",
+              True, "a facts-only document still starts (NO PATIENT is non-empty)")
         d1, s1 = rx.start_run()
         check("start_run makes a YYYY-MM-DD-HHMMSS dir", os.path.isdir(d1) and len(s1) == 17,
-              True, "the run's home")
+              True, "no patient.md name → the bare timestamp")
         check("current symlink resolves to the run dir", os.path.realpath(rx.REPORTS) == d1,
               True, "every stage resolves REPORTS through it, so they agree")
         check("brief name is the canonical dated form", rx.brief_name() == s1[:10] + "-rx-review.md",
+              True, "no slug → the brief carries none either")
+        open(os.path.join(_sin, "patient.md"), "w").write("Name: David Putzolu\nDOB: 1970-09-13\n")
+        check("patient_slug: lowercased, hyphenated", rx.patient_slug() == "david-putzolu",
+              True, "the slug the run dir and deliverables carry")
+        _rt.sleep(1.1)                                         # second-resolution stamp
+        d2, s2 = rx.start_run()
+        check("a named patient appends the slug to the run dir",
+              d2.endswith("-david-putzolu") and len(s2) == 17 + 1 + len("david-putzolu"),
+              True, "a 17-char timestamp plus -slug; two same-day patients are never ambiguous")
+        check("the slug rides the current symlink target",
+              os.readlink(rx.CURRENT_LINK) == s2,
+              True, "run_stamp() reads the basename through it")
+        check("brief name carries the slug", rx.brief_name() == s2[:10] + "-david-putzolu-rx-review.md",
               True, "the doc-canonical name that unblocks stage 8")
         _rt.sleep(1.1)                                         # second-resolution stamp
-        d2, _s2 = rx.start_run()
-        check("a second invocation gets a fresh dir", d2 != d1 and os.path.realpath(rx.REPORTS) == d2,
+        d3, _s3 = rx.start_run()
+        check("a second invocation gets a fresh dir", d3 != d2 and os.path.realpath(rx.REPORTS) == d3,
               True, "no run overwrites another")
-        check("the prior run dir is kept", os.path.isdir(d1), True, "run dirs are the deliverables")
-        check("run_dirs lists the runs, not the current link", len(rx.run_dirs()) == 2,
+        check("the prior run dir is kept", os.path.isdir(d1) and os.path.isdir(d2),
+              True, "run dirs are the deliverables")
+        check("run_dirs lists the runs, not the current link", len(rx.run_dirs()) == 3,
               True, "history accumulates")
     finally:
         shutil.rmtree(_rroot, ignore_errors=True)
-        rx.REPORTS_ROOT, rx.CURRENT_LINK, rx.REPORTS = _saved
+        shutil.rmtree(_sin, ignore_errors=True)
+        rx.REPORTS_ROOT, rx.CURRENT_LINK, rx.REPORTS, rx.INPUTS = _saved
 
 
     print("\nclassify_lab_text — catch a mis-upload before a card is spent on it")

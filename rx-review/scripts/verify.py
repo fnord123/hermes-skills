@@ -264,7 +264,8 @@ def endnotes():
         name = os.path.basename(path)
         # PART-* are research FRAGMENTS, not reports: their endnotes are renumbered into
         # the synthesised report, so auditing both double-counts every citation.
-        if name in SKIP or name.startswith(("AUDIT-chunk", "PART-")) or name.endswith("-rx-review.md"):
+        if name in SKIP or name.startswith(("AUDIT-chunk", "PART-")) or name.endswith(
+                ("-rx-review.md", "-critique.md")):
             continue
         for line in open(path, encoding="utf-8", errors="ignore"):
             t = line.strip()

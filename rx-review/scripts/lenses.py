@@ -177,7 +177,8 @@ def report_files():
     for path in sorted(glob.glob(os.path.join(REPORTS, "*.md"))):
         name = os.path.basename(path)
         if name in SKIP or name.startswith(("AUDIT-chunk", "CONTEXT-", "LENS-", "CRITIQUE-",
-                                            "PART-")):
+                                            "PART-")) or name.endswith(("-rx-review.md",
+                                                                       "-critique.md")):
             continue
         if any(name == v["out"] for v in LENSES.values()):
             continue
