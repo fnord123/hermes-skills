@@ -1,6 +1,6 @@
 # skillpipe GitHub Apps
 
-The [skill review pipeline](../../skill-kanban/) runs one GitHub App per
+The [skill review pipeline](../../skill-foundry/) runs one GitHub App per
 review role so every artifact in the trail is attributed to the role that
 produced it — the pull request the author opened, the verdict the audit
 posted, the merge the commit role performed — instead of all showing the

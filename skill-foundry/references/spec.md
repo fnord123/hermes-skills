@@ -1,4 +1,4 @@
-# skill-kanban spec — the PR-based pipeline (authoritative reference)
+# skill-foundry spec — the PR-based pipeline (authoritative reference)
 
 This is the reference for the pipeline: the graph, the state machine, the
 labels, the state block, the worktree strategy, and the invariants. The

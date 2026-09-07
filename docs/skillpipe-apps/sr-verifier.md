@@ -1,7 +1,7 @@
 # sr-verifier
 
 **Verifier role** for the [skill review
-pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-kanban).
+pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-foundry).
 
 Runs the test matrix and the style checks against a finished skill
 proposal, locally in the pipeline worktree. Never edits the skill; posts

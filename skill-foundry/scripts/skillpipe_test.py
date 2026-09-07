@@ -6,7 +6,7 @@ Runs the pure `decide()` through every edge of the graph: happy path
 detection, and resume counter resets. No network, no git, no gh —
 decide() is the whole pipeline in code and is tested here exactly.
 
-Run: python3 tools/../../../skill-kanban/scripts/test_skillpipe.py
+Run: python3 tools/../../../skill-foundry/scripts/skillpipe_test.py
 House contract: one JSON object on stdout.
 """
 

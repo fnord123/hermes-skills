@@ -1,4 +1,4 @@
-# skill-kanban — the skill-maintenance pipeline
+# skill-foundry — the skill-maintenance pipeline
 
 A request to create or change a skill in a house skill repo does not get
 hand-edited into the tree. It goes through a tracked, multi-role review that
