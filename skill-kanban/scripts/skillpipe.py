@@ -1125,9 +1125,20 @@ def verb_abandon(inst: dict, args) -> None:
         git(inst, ["worktree", "remove", state["worktree"], "--force"],
             check=False)
     git(inst, ["branch", "-D", state["branch"]], check=False)
+    # The branch was PUSHED by the author role, so removing it is a remote
+    # operation too; a local-only delete leaks the remote ref and the old
+    # code reported branch_removed anyway (lie). Delete + verify on origin.
+    branch_removed = True
+    probe = git(inst, ["ls-remote", "--heads", "origin", state["branch"]],
+                check=False)
+    if probe.stdout.strip():
+        git(inst, ["push", "origin", "--delete", state["branch"]], check=False)
+        probe = git(inst, ["ls-remote", "--heads", "origin", state["branch"]],
+                    check=False)
+        branch_removed = not probe.stdout.strip()
     out({"issue": n, "was": cur, "closed": True,
          "worktree_removed": not os.path.isdir(state.get("worktree", "")),
-         "branch_removed": True})
+         "branch_removed": branch_removed})
 
 
 # ---------------------------------------------------------------- main
