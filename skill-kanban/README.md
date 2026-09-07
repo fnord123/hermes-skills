@@ -1,80 +1,77 @@
-# skill-kanban — the skill-maintenance pipeline (host-neutral doctrine)
+# skill-kanban — the skill-maintenance pipeline
 
-A kanban pipeline that creates, audits, writes, verifies, commits, and
-propagation-checks skills in a house skill repo, one card per stage, so that no
-draft is trusted on self-report and no failure vanishes silently.
+A request to create or change a skill in a house skill repo does not get
+hand-edited into the tree. It goes through a tracked, multi-role review that
+lands **only through a pull request**, so every change has a pull request
+that reads top to bottom as the whole record: the author's proposal, then
+the auditor's comment, then the writing auditor's, then the verifier's, then
+the merge.
 
-This directory is **host-neutral**: it carries the *doctrine* (the board
-design, the card work orders, the substrate rules) with the instance values
-pulled out as `{{placeholder}}` tokens. It is reusable by any Hermes install
-that wants this pipeline. What a given install must supply — the bot that
-runs the cards, the repo checkout path, the model tiers, the skill names —
-is documented in `PROFILE.example`.
+This is a Hermes skill (`SKILL.md` + `scripts/`). It is **host-neutral**:
+the repo carries the doctrine — the script, the role playbooks, this doc —
+with the instance values (repo path, GitHub slug, board, role profiles)
+pulled out into a filled instance file that lives host-side and is never
+committed. `templates/PROFILE.example` names every key.
+
+## How it works
+
+One GitHub **issue** per skill request is the state + work order. Its label
+is the current stage; a fenced state block at the bottom of its body carries
+the round counters and the pull-request / branch / worktree pointers. One
+long-lived GitHub **pull request** per pipeline is the artifact trail —
+every role verdict is posted to it as a comment by the script. A **kanban
+card** is dumb dispatch: it wakes one role profile and tells it to read its
+playbook and the issue.
+
+`scripts/skillpipe.py` is the **single writer** of all of it: the labels,
+the state block, the comments, and the dispatch cards. The roles do their
+stage work and make exactly one script call to hand off. Because the script
+— not the models — owns the transitions, the whole pipeline is a testable
+state machine: `scripts/skillpipe_test.py` exercises every edge (happy
+path, every fail loop, every cap → park, resume, label/state desync) and is
+run by CI and the pre-push hook.
+
+## The graph
+
+```
+intake ──author-ready-1──▶ author ──▶ audit ──▶ ste100 ──▶ scripter ──▶ verifier ──▶ commit-ready
+        (N preserved)      (N)        (M)         (K)        (K)          │
+                                  ▲            │          │          │     └▶ parked-commit (pre-flight)
+        audit FAIL (N→N+1) ─────────┘ FAIL(N)───┘ FAIL(K)───┘ FAIL(K→K+1)
+        caps: author/audit 5 · ste100 3 · scripter/verifier 3 · commit (parked-commit)
+        script-less skills: audit/ste100 route straight to commit-ready
+```
+
+The label's number is how many times that role has been assigned the skill.
+author and audit share a counter (a review round, N preserved across the
+handoff); scripter and verifier share one (K); ste100 keeps its own (M). A
+cap hit parks the issue with a per-cap label; the owner resumes it to any
+ready stage (or abandons it). The full transition table, with the exact
+label each edge produces, is in `references/spec.md` and — authoritatively —
+in `skillpipe.py:decide()`.
 
 ## Layout
 
-- `board.md` — the operating reference: goal of the board, the flow (one
-  diagram, every retry loop drawn), one section per card, the loop caps,
-  substrate facts, the decisions-as-patterns table, and re-census keys.
-  **Read this first.**
-- `spec.md` — the card spec: the graph, the R1–R8 binding rules, each card's
-  input/work/output/verdict contract, the loop budgets, and the board-level
-  mechanics (how a worker hands off, the parentage gate, the 8 KB body cap).
-- `cards/` — the seven card bodies as **templates**, one per stage, with
-  `{{placeholders}}`. These are the literal bodies a card is created with
-  (after token substitution + the run's `__PIPELINE_INPUT__` substitution).
-- `known-pitfalls.md` — distilled, id-free list of the failure classes this
-  pipeline has actually hit and the rule that closes each.
-- `PROFILE.example` — the token reference card: every `{{placeholder}}`,
-  what it means, and the value to fill it with for your install.
+- `SKILL.md` — the operator skill: what to do when the user asks to create
+  or review skills, and the intake routing (one call per skill).
+- `scripts/skillpipe.py` — the state machine and single writer.
+- `scripts/skillpipe_test.py` — the white-box tests for the transition
+  table (run by CI + pre-push).
+- `references/` — the six role playbooks (`<role>-role.md`) that each
+  dispatch card points its worker to, plus `spec.md` (the graph, the state
+  machine, the labels, the worktree strategy) and `known-pitfalls.md`.
+- `templates/PROFILE.example` — the instance-file key reference.
 
-## How to adopt this pipeline
+## Invariants
 
-1. Read `board.md` end to end. It is the single source of truth for *what
-   the board is*; `spec.md` is the source of truth for *what each card does*.
-2. Fill in a `PROFILE` from `PROFILE.example` for your install. The six
-   tokens, and where they appear:
-
-   | Token | Meaning | Appears in |
-   |-------|---------|------------|
-   | `{{ASSIGNEE}}` | the profile(s) that run the cards (`--assignee`); one profile name, or a `role=profile` map for role-isolated installs | every card's handoff args + kickoff |
-   | `{{REPO_DIR}}` | absolute path to your house skill repo checkout (the `--workspace dir:` target) | every card |
-   | `{{CARDS_DIR}}` | absolute dir holding these card bodies (for "read the sibling canonical" work-order lines) | Audit, STE100, Verifier, Commit |
-   | `{{MID_MODEL}}` | the mid-tier model id for grunt-work cards (Author, Scripter, and their retry cards; the STE100 card itself runs on the operator default) | Author, Scripter, Verifier, STE100 |
-   | `{{HOUSE_SKILL}}` | the house-repo skill name force-loaded on most cards | Author, Audit, Scripter, Verifier, Commit, Fleet |
-   | `{{STD_SKILL}}` | the writing-standard (ASD-STE100) skill name force-loaded on the STE100 card | Audit, STE100 |
-
-   Judgment cards (Audit, Verifier, Commit, Propagation-Check) carry **no**
-   `--model` — they run on the profile's default (your high tier). Only the
-   grunt-work cards are pinned to `{{MID_MODEL}}`.
-
-3. Copy `cards/` to a location your install loads from (e.g. a profile's
-   `future-work/skill-kanban-cards/`), substitute your `{{...}}` tokens, and
-   keep the `__PIPELINE_INPUT__` / `__CHANGESSET_MANIFEST__` tokens in place
-   — those are substituted per run by the creating card, not at install time.
-4. Create the board: `hermes kanban boards create skills` (the subcommand is
-   `boards create`; there is no `boards add`).
-5. Kick off a run from chat (see `board.md` §6 for the exact recipe). The
-   kickoff command creates card 1 (Author) with `--parent` absent only for
-   the very first card; every later card is created by its parent with a
-   `parents` list.
-
-## What stays host-local (do NOT commit this into a shared repo)
-
-This directory is deliberately instance-free. A *running* install keeps its
-own local state outside this tree and out of the shared repo: the live
-`PROFILE` values, the per-run `__PIPELINE_INPUT__` substitutions, the board
-SQLite DB (`~/.hermes/kanban/boards/skills/kanban.db`), the run history and
-card ids, and any profile-specific census. Those are *your* fleet's record,
-not doctrine others reuse.
-
-## Conventions
-
-- ASCII only (the linter and the transport both prefer it).
-- No absolute machine paths, no profile names, no model ids, no card ids, no
-  census counts as facts — those are the `{{placeholders}}` and the
-  "re-census, don't trust" notes.
-- The pipeline diagram appears in **two** files (`board.md` and `spec.md`).
-  Add or remove a card and update BOTH, checking every edge — especially the
-  retry loops — against the spec's branch tables one-for-one. The two
-  diagrams drift independently if you only touch one.
+- **The repo never gets direct edits.** The main checkout stays on `main`,
+  clean; every pipeline works in its own worktree on `sr/<skill>` and lands
+  only via a squash merge. `intake` and `merge` both refuse to proceed if
+  the target skill dir is dirty on `main`.
+- **The script is the only writer.** Roles never touch labels, issue
+  bodies, or kanban cards by hand — that is what keeps the record
+  consistent and the state machine enforceable in code.
+- **One pipeline per skill in flight** (different skills run in parallel).
+- **A park is a first-class state**, not a failure: the board stops,
+  nothing is committed, the owner gets the evidence and a `resume` or
+  `abandon` decision.
