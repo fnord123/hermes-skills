@@ -2078,6 +2078,7 @@ def main():
                 rx.DOC_CACHE = os.path.join(_td, "no-cache")   # absent -> nothing unstaged
                 open(os.path.join(rx.RAW, "lab.pdf"), "wb").write(b"one lab pdf")
                 open(os.path.join(_td, "regimen.txt"), "w").write("Magnesium 200mg evening\n")
+                open(os.path.join(_td, "patient.md"), "w").write("Name: David Putzolu\nAge: 55\n")
 
                 def _create_card(title, assignee, body, inputs, parents=(), runtime="20m",
                                  priority=0, key=None, dry=False):
@@ -2198,7 +2199,7 @@ def main():
                "correct-item-slug-request", "correct-item-slug-response", "regimen-accept",
                "marker-review", "labs-accept",
                "intake-labs", "review_labs",
-               "analyze-research", "analyze-adversarial", "analyze-conclude"):
+               "analyze-research", "analyze-adversarial", "analyze-conclude", "patient"):
         check("`%s` is a registered verb" % _v, _verb_registered(_v), True,
               "the card bodies name it; an unregistered verb fails the worker mid-run")
 
@@ -2290,6 +2291,7 @@ def main():
         open(os.path.join(td, "regimen.txt"), "w").write(
             "Thorne Super EPA, 1 pill in the morning\n"
             "Magnesium Glycinate 200mg at night\n")
+        open(os.path.join(td, "patient.md"), "w").write("Name: David Putzolu\nAge: 55\n")
         # Stage 1 lays the whole spine down first, so the Barriers the workers parent exist.
         _run_as_card(board, td, rx.cmd_start, "t_root")
         check("stage 1 laid the spine on the fake board",
@@ -2681,6 +2683,7 @@ def main():
         os.makedirs(os.path.join(td, "raw"))
         open(os.path.join(td, "raw", "lab.pdf"), "wb").write(b"one lab pdf")
         open(os.path.join(td, "regimen.txt"), "w").write("Magnesium 200mg evening\n")
+        open(os.path.join(td, "patient.md"), "w").write("Name: David Putzolu\nAge: 55\n")
         _run_as_card(board, td, rx.cmd_start, "t_root")
         open(os.path.join(td, "labs-draft.md"), "w", encoding="utf-8").write(_DRAFT_LABS)
         _run_as_card(board, td, rx.cmd_review_labs,
@@ -3523,16 +3526,28 @@ def main():
                   "the regimen is a doc or a file, never an attachment staging could have seen")
 
             open(os.path.join(_td, "regimen.txt"), "w").write("Magnesium 200mg evening\n")
-            # The regimen is resolved but the user has not said the labs are complete, so `start`
-            # still refuses — the last gate before any card exists.
+            # The regimen is resolved but the patient information was not ingested, so `start`
+            # still refuses — the mirror of the regimen refusal, and the reason it is checked
+            # before the go-signal rather than left to a late FIB-4 refusal.
             _buf2 = io.StringIO()
             with contextlib.redirect_stdout(_buf2):
+                _rcu = rx.cmd_start(_A())
+            check("start refuses while the patient information is uningested", (_rcu, _made), (1, []),
+                  "a run with no patient facts would finish and only then find no score computable")
+            check("...and names the verb that materialises it",
+                  "rx.py patient" in _buf2.getvalue(), True,
+                  "the refusal is where the model actually learns the step")
+            open(os.path.join(_td, "patient.md"), "w").write("Name: David Putzolu\nAge: 55\n")
+            # The patient information is ingested but the user has not said the labs are complete,
+            # so `start` still refuses — the last gate before any card exists.
+            _buf3 = io.StringIO()
+            with contextlib.redirect_stdout(_buf3):
                 _rcu = rx.cmd_start(_A())
             check("start refuses until the user says the labs are complete", (_rcu, _made), (1, []),
                   "started 23s after the first of twelve attachments on 2026-08-10; prose in the "
                   "skill is advice a small model can race, a refusal is not")
             check("...and names the verb that records the confirmation",
-                  "uploads-done" in _buf2.getvalue(), True,
+                  "uploads-done" in _buf3.getvalue(), True,
                   "the refusal is where the model actually learns the step")
             with contextlib.redirect_stdout(io.StringIO()):
                 rx.cmd_uploads_done(_A())
@@ -3549,13 +3564,13 @@ def main():
             # confirmation stale rather than standing in for one the user never gave.
             _made.clear()
             open(os.path.join(rx.RAW, "afterthought.pdf"), "w").write("one more lab")
-            _buf3 = io.StringIO()
-            with contextlib.redirect_stdout(_buf3):
+            _buf4 = io.StringIO()
+            with contextlib.redirect_stdout(_buf4):
                 _rcs = rx.cmd_start(_A())
             check("a lab that arrives AFTER the confirmation makes it stale", _rcs, 1,
                   "otherwise the late one is transcribed or missed depending on timing alone")
             check("...and the refusal names the document that arrived",
-                  "afterthought.pdf" in _buf3.getvalue(), True,
+                  "afterthought.pdf" in _buf4.getvalue(), True,
                   "the user has to recognise what it is asking about")
             with contextlib.redirect_stdout(io.StringIO()):
                 rx.cmd_uploads_done(_A())
@@ -3859,32 +3874,44 @@ def main():
               "Name, Age, DOB", "")
         check("materialize: after refresh, the explicit Age: line is the one read",
               _spa(), 55, "")
-        # a document with no fact line changes nothing and says nothing
+        # a document with no fact lines at all leaves no file at all
         os.remove(pmd)
         check("ingest with no fact line: no file created, no report",
               (rx._write_patient_facts("MORNING\n\u2022 Thorne Creatine - 5g\n"),
                os.path.exists(pmd)),
               (None, False),
               "nothing to write is nothing written")
-        # ...and it never deletes: a doc that drops its facts leaves the last recorded ones
+        # ...and it DELETES: a doc that drops its facts removes the last recorded ones, so
+        # nothing stale survives into a score
         rx._write_patient_facts(doc)
-        check("ingest with no fact line: a prior patient.md is NOT deleted",
+        check("ingest with no fact line: a prior patient.md IS deleted",
               (rx._write_patient_facts("MORNING\n\u2022 Thorne Creatine - 5g\n"),
                os.path.exists(pmd)),
-              (None, True),
-              "a stale, visible age beats a silent score computed from nothing")
-        # the verb itself: `rx.py regimen --from <doc>` is where the materialisation happens
+              (None, False),
+              "the document is the single source of truth; a stale file is a fact it no longer carries")
+        # the verbs are the two parts of the same document: `regimen` writes the regimen part
+        # and nothing else, `patient` writes the patient part and nothing else
         class _AIngest:
             stdin = False
             from_gdoc = None
             source = os.path.join(tmp, "patient-doc.txt")
         open(_AIngest.source, "w", encoding="utf-8").write(doc)
-        check("regimen verb: ingesting the document writes regimen.txt AND patient.md",
-              (rx.cmd_regimen(_AIngest), os.path.exists(pmd), os.path.exists(
-                  os.path.join(tmp, "regimen.txt"))),
-              (0, True, True), "one document, two materialisations, same verb")
+        rx.cmd_regimen(_AIngest)
+        check("regimen verb: ingesting the document writes regimen.txt and NOTHING else",
+              (os.path.exists(os.path.join(tmp, "regimen.txt")), os.path.exists(pmd)),
+              (True, False), "the patient part is the `patient` verb's job")
+        check("patient verb: ingesting the same document writes patient.md",
+              (rx.cmd_patient(_AIngest), os.path.exists(pmd)),
+              (0, True), "the document is the surface, patient.md is what the pipeline reads from")
+        open(os.path.join(tmp, "no-facts.txt"), "w", encoding="utf-8").write(
+            "MORNING\n\u2022 Thorne Creatine - 5g\n")
+        check("patient verb: a document with no fact lines leaves no file",
+              (rx.cmd_patient(type("P", (), dict(stdin=False, from_gdoc=None,
+                                                 source=os.path.join(tmp, "no-facts.txt")))()),
+               os.path.exists(pmd)),
+              (0, False), "regimen lines are not fact lines; the file is what the pipeline reads")
     finally:
-        for f in ("patient.md", "patient-doc.txt", "regimen.txt"):
+        for f in ("patient.md", "patient-doc.txt", "regimen.txt", "no-facts.txt"):
             try:
                 os.remove(os.path.join(tmp, f))
             except OSError:

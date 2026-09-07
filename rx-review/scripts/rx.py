@@ -2585,49 +2585,42 @@ def _gdocs_script():
     return None
 
 
-def cmd_regimen(args):
-    """Ingest the regimen from a pointer the caller resolved.
+def _ingest_document_text(args):
+    """Resolve the ingest source args to (text, origin) or (None, None) on a refusal.
 
-    The document is the patient's ONE input: in addition to the regimen lines it may carry a
-    `Name:`, `Age:` or `DOB:` line, which is materialised to inputs/patient.md here - the same
-    "the document is the surface, the file is what the pipeline reads from" shape the regimen
-    itself has (regimen.txt). A document with no fact line changes nothing and says nothing.
-
-    Sources: a Google Doc by id (--from-gdoc), a local file (--from), or stdin. --from-gdoc
-    exists because the two-command alternative (docs.py read --out, then --from) kept being
-    "optimised" into `docs.py … | rx.py regimen --stdin` by the agent — python3 piped into
-    python3, which the security scanner flags as pipe-to-interpreter and holds for manual
-    approval (2026-07-30, and prior). A single verb leaves nothing to pipe: this runs the
-    google-docs reader itself and ingests the result.
+    `regimen` and `patient` take the SAME source flags and the SAME one document — the
+    document is the patient's single input, and each verb materialises its own part of it.
+    Sharing the resolution here is what keeps the two verbs from drifting apart on a
+    refused source.
     """
     if getattr(args, "from_gdoc", None):
         docs = _gdocs_script()
         if docs is None:
             print("Cannot find the google-docs skill (docs.py). Set RX_GDOCS_SCRIPT to its "
                   "path, or install the google-docs skill.")
-            return 1
+            return None, None
         import tempfile
-        fd, tmp = tempfile.mkstemp(prefix="regimen-gdoc-", suffix=".txt")
+        fd, tmp = tempfile.mkstemp(prefix="ingest-gdoc-", suffix=".txt")
         os.close(fd)
         try:
             out = sh([sys.executable, docs, "read", args.from_gdoc, "--out", tmp])
             if out.returncode != 0:
                 print("Reading the Google Doc failed: %s"
                       % (out.stderr or out.stdout).strip()[:300])
-                return 1
+                return None, None
             text = open(tmp, encoding="utf-8", errors="replace").read()
         finally:
             os.unlink(tmp)
         origin = "google doc %s" % args.from_gdoc
-    elif args.stdin:
+    elif getattr(args, "stdin", False):
         text = sys.stdin.read()
         origin = "stdin"
         # Accept the house JSON envelope directly, so a document can be piped straight in:
-        #     docs.py read <id> | rx.py regimen --stdin
+        #     docs.py read <id> | rx.py <verb> --stdin
         # Without this the agent has to unwrap the envelope itself, and the only tool it has
         # for that is an inline `python3 -c`, which makes the pipeline `python3 | python3` and
-        # trips the security scanner's pipe-to-interpreter rule. The user then gets an approval
-        # prompt for what is really just "read my regimen doc". One less step, one less gate.
+        # trips the security scanner's pipe-to-interpreter rule. The user then gets an
+        # approval prompt for what is really just "read my document". One less step.
         stripped = text.lstrip()
         if stripped.startswith("{"):
             try:
@@ -2637,27 +2630,47 @@ def cmd_regimen(args):
             if isinstance(obj, dict):
                 if obj.get("ok") is False:
                     print("The source reported an error: %s" % obj.get("error", "(no detail)"))
-                    return 1
+                    return None, None
                 for key in ("text", "body", "content"):
                     if isinstance(obj.get(key), str) and obj[key].strip():
                         text = obj[key]
                         origin = "stdin (%s)" % (obj.get("title") or "document")
                         break
-    elif args.source:
+    elif getattr(args, "source", None):
         src = os.path.expanduser(args.source)
         if not os.path.exists(src):
             print("No such file: %s" % src)
             print("Pass a path this machine can read, or use --from-gdoc <doc-id> for a "
                   "Google Doc.")
-            return 1
+            return None, None
         text = open(src, encoding="utf-8", errors="replace").read()
         origin = src
     else:
         print("Give a source: --from-gdoc <doc-id>, --from <path>, or --stdin.")
-        return 1
-
+        return None, None
     if not text.strip():
         print("That source is empty — nothing to record.")
+        return None, None
+    return text, origin
+
+
+def cmd_regimen(args):
+    """Ingest the regimen part of the patient document.
+
+    The document is the patient's ONE input; this verb writes its REGIMEN part — and
+    nothing else — to inputs/regimen.txt. The patient fact lines (`Name:`, `Age:`, `DOB:`)
+    are the `patient` verb's part; run it on the same document. Both output files are the
+    input to the remainder of the pipeline.
+
+    Sources: a Google Doc by id (--from-gdoc), a local file (--from), or stdin. --from-gdoc
+    exists because the two-command alternative (docs.py read --out, then --from) kept being
+    "optimised" into `docs.py … | rx.py regimen --stdin` by the agent — python3 piped into
+    python3, which the security scanner flags as pipe-to-interpreter and holds for manual
+    approval (2026-07-30, and prior). A single verb leaves nothing to pipe: this runs the
+    google-docs reader itself and ingests the result.
+    """
+    text, origin = _ingest_document_text(args)
+    if text is None:
         return 1
 
     os.makedirs(INPUTS, exist_ok=True)
@@ -2666,9 +2679,36 @@ def cmd_regimen(args):
         fh.write(text if text.endswith("\n") else text + "\n")
     lines = [l for l in text.splitlines() if l.strip()]
     print("Recorded %d line(s) from %s" % (len(lines), origin))
+    print("The patient part of the same document is the `patient` verb's job:")
+    print("   python3 ~/hermes-skills/rx-review/scripts/rx.py patient --from-gdoc <doc-id>")
+    print("   python3 ~/hermes-skills/rx-review/scripts/rx.py patient --from <path>")
+    print("   python3 ~/hermes-skills/rx-review/scripts/rx.py patient --stdin")
+    print("Then:  python3 ~/hermes-skills/rx-review/scripts/rx.py stage")
+    return 0
+
+
+def cmd_patient(args):
+    """Ingest the patient part of the patient document.
+
+    Takes the same document `regimen` takes and materialises the recognised fact lines —
+    `Name:`, `Age:` and `DOB:` — to inputs/patient.md, and nothing else. The same source
+    flags, the same one document; the regimen part is the `regimen` verb's job.
+
+    The document is the surface and this file is what the pipeline reads from. A re-ingest
+    REPLACES the file, so a fact the document no longer carries is gone from the file, and
+    a document with no fact lines at all leaves no file at all — the document stays the
+    single source of truth and no stale fact survives into a score.
+    """
+    text, origin = _ingest_document_text(args)
+    if text is None:
+        return 1
+
+    os.makedirs(INPUTS, exist_ok=True)
     facts = _write_patient_facts(text)
     if facts:
-        print("Patient facts: %s -> inputs/patient.md" % facts)
+        print("Patient facts: %s -> inputs/patient.md (from %s)" % (facts, origin))
+    else:
+        print("No fact lines in that document — inputs/patient.md is not written.")
     print("Now run:  python3 ~/hermes-skills/rx-review/scripts/rx.py stage")
     return 0
 
@@ -3394,13 +3434,14 @@ def trends(min_points=MIN_TREND_POINTS):
 def _write_patient_facts(text):
     """Write inputs/patient.md from `Name:` / `Age:` / `DOB:` lines of the patient document.
 
-    The patient's Google Doc is the ONE input document: regimen and patient facts arrive
-    together, so the facts are materialised at ingest the same way the regimen text is -
-    extracted here, written to patient.md, read from there. Only lines the patient_age() reader
-    understands are copied, in a fixed order (Name, Age, DOB), and a re-ingest REPLACES the file,
-    so the document stays the single source of truth. It never DELETES: a document that drops its
-    fact lines leaves the last recorded facts in place - a stale, visible age beats a silent
-    score computed from nothing, and nothing else in the pipeline writes this file.
+    The document is the patient's ONE input: this verb materialises the patient part the same
+    way `regimen` materialises the regimen part - extracted from the document, written to
+    patient.md, read from there. Only lines the patient_age() reader understands are copied,
+    in a fixed order (Name, Age, DOB), and a re-ingest REPLACES the file, so the document
+    stays the single source of truth: a fact the document no longer carries is gone from the
+    file, and a document with no fact lines at all leaves no file at all. A fact that
+    survives only because the materialiser keeps an old file would be one the document does
+    not carry - exactly the stale data the document exists to prevent.
     """
     facts = []
     m = re.search(r"^\s*Name\s*[:=]\s*(\S.*?)\s*$", text, re.I | re.M)
@@ -3412,14 +3453,19 @@ def _write_patient_facts(text):
     m = re.search(r"^\s*(?:DOB|Date of birth)\s*[:=]\s*([^\s(]+)", text, re.I | re.M)
     if m and _norm_date(m.group(1)):
         facts.append(("DOB", m.group(1)))
+    path = os.path.join(INPUTS, "patient.md")
     if not facts:
+        # A document with no fact lines at all leaves no file at all: the document is the
+        # single source of truth, and a stale file is a fact the document no longer carries.
+        if os.path.exists(path):
+            os.remove(path)
         return None
     lines = [
-        "# Patient facts - materialised from the patient document by `rx.py regimen`.",
+        "# Patient facts - materialised from the patient document by `rx.py patient`.",
         "# The document is the single input; this file is what the pipeline reads from.",
     ]
     lines += ["%s: %s" % (label, value) for label, value in facts]
-    with open(os.path.join(INPUTS, "patient.md"), "w", encoding="utf-8") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     return ", ".join(label for label, _ in facts)
 
@@ -3427,7 +3473,7 @@ def _write_patient_facts(text):
 def patient_age():
     """The user's age, from inputs/patient.md - an explicit `Age:` line, else computed from `DOB:`.
 
-    patient.md is materialised from the patient's single input document at `regimen` ingest
+    patient.md is materialised from the patient's single input document by the `patient` verb
     (see _write_patient_facts), which is why the reader reads a file rather than the document:
     the document is the surface, the file is what the pipeline works from. FIB-4 (and any
     age-weighted score) is the first pipeline need for the user's age, which the pipeline has
@@ -5016,6 +5062,20 @@ def cmd_start(args):
         print("review with only one of the two halves is not a shorter review.")
         return 1
 
+    # THE PATIENT INFORMATION HAS TO BE INGESTED TOO — the mirror of the regimen refusal.
+    # inputs/patient.md is what the age-weighted scores read; without it the review would run
+    # to the end and only then find that FIB-4 (and any later age-weighted score) cannot be
+    # computed, and the missing half would be a whole run, not a step.
+    if not os.path.exists(os.path.join(INPUTS, "patient.md")) or not open(
+            os.path.join(INPUTS, "patient.md"), encoding="utf-8").read().strip():
+        print("NO PATIENT — the labs are staged and the regimen is resolved, but the patient")
+        print("information was not ingested, so nothing age-weighted can be scored.")
+        print("\nRun the patient verb on the same document that supplied the regimen:")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py patient --from-gdoc <doc-id>")
+        print("   python3 ~/hermes-skills/rx-review/scripts/rx.py patient --from <path>")
+        print("\nThen start again.")
+        return 1
+
     # THE USER HAS TO SAY THE LABS ARE COMPLETE — the LAST gate, because it is the go signal
     # rather than a missing input: staging and the regimen are things to go and fix, this is
     # simply "are you finished sending?". Staging proves everything Hermes RECEIVED is copied;
@@ -6079,6 +6139,8 @@ def main():
         ("analyze-conclude", cmd_analyze_conclude,
          "stage 8 of 8 — reconcile the verdicts and assemble the brief"),
         ("regimen", cmd_regimen, "record the regimen from a file or stdin"),
+        ("patient", cmd_patient,
+         "materialise the patient fact lines (Name/Age/DOB) from the same document"),
         ("check-reports", cmd_check_reports,
          "confirm every report a card was told to write reached the reports directory"),
         ("prune-unsourced", cmd_prune_unsourced,
@@ -6200,14 +6262,14 @@ def main():
         if name == "prune-unsourced":
             p.add_argument("--confirm", action="store_true",
                            help="required — confirms the deletion")
-        if name == "regimen":
+        if name in ("regimen", "patient"):
             p.add_argument("--from-gdoc", dest="from_gdoc", metavar="DOC_ID",
-                           help="read the regimen straight from a Google Doc "
+                           help="read the document straight from a Google Doc "
                                 "(runs the google-docs skill's reader itself)")
             p.add_argument("--from", dest="source", metavar="PATH",
-                           help="a local file holding the regimen text")
+                           help="a local file holding the document")
             p.add_argument("--stdin", action="store_true",
-                           help="read the regimen text from stdin instead")
+                           help="read the document from stdin instead")
         p.set_defaults(func=fn, force=False, autosettle=(name in _AUTO_SETTLE))
     args = ap.parse_args()
     rc = args.func(args) or 0
