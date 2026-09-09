@@ -40,7 +40,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rx
 import rxkanban                                              # noqa: E402
 from rxkanban import announce, subscribe                    # noqa: E402,F401
-from rxkanban import discord_channel as _discord_channel    # noqa: E402,F401
 import sys
 
 BOARD = os.environ.get("RX_BOARD", "rx-review")
