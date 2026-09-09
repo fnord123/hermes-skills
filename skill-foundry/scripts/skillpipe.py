@@ -105,7 +105,7 @@ def run(cmd: list, cwd: str = None, check: bool = True) -> subprocess.CompletedP
 
 
 def gh(inst: dict, args: list, check: bool = True) -> subprocess.CompletedProcess:
-    if os.environ.get("SKILLPIPE_GH_APP_ID", "").strip():
+    if os.environ.get("GH_APP_ID", "").strip():
         os.environ["GH_TOKEN"] = _role_token()
     return run(["gh", *args, "--repo", inst["REPO"]], check=check)
 
@@ -118,10 +118,10 @@ _ROLE_TOKEN = None
 def _role_token() -> str:
     """Mint the calling role's installation token for `gh` to authenticate as.
 
-    Called only when the role context is present — SKILLPIPE_GH_APP_ID in
+    Called only when the role context is present — GH_APP_ID in
     the environment, i.e. the worker's own profile .env is loaded. That
     presence is the ONLY switch: an operator run (intake, resume, status
-    from chat) carries no SKILLPIPE_* vars, so `gh` is left exactly as
+    from chat) carries no GH_APP_* vars, so `gh` is left exactly as
     found (the operator's own auth, deliberately — starting a pipeline is
     a human decision and the issue/worktree origin is meant to be the
     owner's). Fail-closed: a mint failure exits the script via
@@ -130,7 +130,7 @@ def _role_token() -> str:
     """
     global _ROLE_TOKEN
     if _ROLE_TOKEN is None:
-        helper = os.environ.get("SKILLPIPE_AUTH_HELPER") or os.path.normpath(
+        helper = os.environ.get("GH_AUTH_HELPER") or os.path.normpath(
             os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "..", "..", "tools", "skillpipe-auth.py"))
         proc = run([sys.executable, helper, "token"])

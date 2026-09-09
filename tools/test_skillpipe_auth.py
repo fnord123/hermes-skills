@@ -18,7 +18,7 @@ CASES.
    username=git and a token; the patched mint saw the right app+install ids.
 2. (subprocess) non-github host -> fail-closed: nonzero exit, one JSON
    object, no token on stdout.
-3. (subprocess) missing SKILLPIPE_* env -> fail-closed naming the var.
+3. (subprocess) missing GH_APP_* env -> fail-closed naming the var.
 4. (subprocess) key file world-readable -> fail-closed (the chmod-600 rule).
 5. (in-process, needs PyJWT) the on-disk key signs a JWT that verifies
    against the public half. Skipped loudly if the wheel is absent, per the
@@ -70,12 +70,17 @@ def run_verb(verb, stdin, env):
 
 
 def base_env(tmp, key_path):
+    # strip the vars the helper reads (by exact name) so an ambient
+    # worker env cannot leak role context into the hermetic subprocess,
+    # plus any git config the host may carry.
+    strip = {"GH_APP_ID", "GH_APP_INSTALLATION_ID", "GH_APP_KEY_FILE",
+             "GH_TOKEN_CACHE", "GH_PROBE_REPO", "GH_AUTH_HELPER"}
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("SKILLPIPE_", "GIT_CONFIG_"))}
-    env["SKILLPIPE_GH_APP_ID"] = "9990001"
-    env["SKILLPIPE_GH_APP_INSTALLATION_ID"] = "9990002"
-    env["SKILLPIPE_GH_APP_KEY_FILE"] = str(key_path)
-    env["SKILLPIPE_TOKEN_CACHE"] = str(Path(tmp) / "tokcache")
+           if k not in strip and not k.startswith("GIT_CONFIG_")}
+    env["GH_APP_ID"] = "9990001"
+    env["GH_APP_INSTALLATION_ID"] = "9990002"
+    env["GH_APP_KEY_FILE"] = str(key_path)
+    env["GH_TOKEN_CACHE"] = str(Path(tmp) / "tokcache")
     return env
 
 
@@ -126,8 +131,8 @@ def main():
 
     mod.mint_token = fake_mint
     saved = {k: os.environ.get(k) for k in
-             ("SKILLPIPE_GH_APP_ID", "SKILLPIPE_GH_APP_INSTALLATION_ID",
-              "SKILLPIPE_GH_APP_KEY_FILE", "SKILLPIPE_TOKEN_CACHE")}
+             ("GH_APP_ID", "GH_APP_INSTALLATION_ID",
+              "GH_APP_KEY_FILE", "GH_TOKEN_CACHE")}
     os.environ.update(env)
     saved_argv = sys.argv
     sys.argv = ["skillpipe-auth.py", "git-cred"]
@@ -168,11 +173,11 @@ def main():
            f"exit={p.returncode} stdout={p.stdout!r}")
 
     # 3. fail-closed: missing env names the var.
-    broken = {k: v for k, v in env.items() if k != "SKILLPIPE_GH_APP_ID"}
+    broken = {k: v for k, v in env.items() if k != "GH_APP_ID"}
     p = run_verb("git-cred", "protocol=https\nhost=github.com\n\n", broken)
     obj = as_json(p.stdout.strip())
     record("missing env fails closed and names the var",
-           p.returncode != 0 and "SKILLPIPE_GH_APP_ID" in str(obj.get("error")),
+           p.returncode != 0 and "GH_APP_ID" in str(obj.get("error")),
            f"exit={p.returncode} stdout={p.stdout!r}")
 
     # 4. fail-closed: key not mode 600.
@@ -199,8 +204,8 @@ def main():
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo)
         saved5 = {k: os.environ.get(k) for k in
-                  ("SKILLPIPE_GH_APP_ID", "SKILLPIPE_GH_APP_INSTALLATION_ID",
-                   "SKILLPIPE_GH_APP_KEY_FILE", "SKILLPIPE_TOKEN_CACHE")}
+                  ("GH_APP_ID", "GH_APP_INSTALLATION_ID",
+                   "GH_APP_KEY_FILE", "GH_TOKEN_CACHE")}
         os.environ.update(env)
         try:
             _app, _inst, pem = mod.load_env()

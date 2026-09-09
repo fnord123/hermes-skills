@@ -51,8 +51,8 @@ All apps: **Metadata: Read only** (default, required). **No webhooks.**
   point at `/dev/null` so the operator's `gh`-PAT helper can't answer
   first). The API layer: `skillpipe.py` sets `GH_TOKEN` from
   `skillpipe-auth token` whenever the role context is present
-  (`SKILLPIPE_GH_APP_ID` in the environment) — fail-closed, it never
-  falls back to the operator's PAT. Operator runs (no `SKILLPIPE_*`
+  (`GH_APP_ID` in the environment) — fail-closed, it never
+  falls back to the operator's PAT. Operator runs (no `GH_APP_*`
   vars: `intake`, `resume`, `status` from chat) leave `gh` untouched,
   so the issue/worktree origin stays the owner's identity by design.
 
