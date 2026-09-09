@@ -106,7 +106,6 @@ import rxfetch                                              # noqa: E402,F401
 import rxkanban                                             # noqa: E402
 import rxverdict                                            # noqa: E402
 from rxkanban import announce, subscribe                    # noqa: E402,F401
-from rxkanban import discord_channel as _discord_channel    # noqa: E402,F401
 from rxfetch import (fetch, fetch_text, looks_unusable,     # noqa: E402,F401
                      cache_path as _cache_path,
                      MIN_USABLE_CHARS)

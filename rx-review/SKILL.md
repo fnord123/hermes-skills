@@ -291,6 +291,14 @@ traces to a source that survived adversarial review, and the prescriber is the o
 When asked how it is going, run `rx.py status` and describe it plainly: finished, running,
 waiting. Do not run anything else to "help it along".
 
+## Clearing the board
+
+When the user asks to clear the review — board, cards, inputs — run:
+
+    python3 ~/hermes-skills/rx-review/scripts/rx.py reset --confirm --clear-documents
+
+**Always include `--clear-documents` on a user-requested clear** (standing instruction from the user, 2026-09-07): without it, the uploaded PDFs/zip survive in Hermes' document cache and the next `stage` re-stages them, so the floor is never actually clean. `--dry-run` first to show the user exactly what will go. The other flags stay opt-in and are added only when the user names them: `--clear-cache` (transcription cache), `--clear-web-cache` (fetch cache), `--clear-reports` (past run deliverables — default KEEP, they are the output of earlier reviews).
+
 ## Adding labs later
 
 Run `rx.py stage` to copy them in and `rx.py staged` to confirm what arrived, then

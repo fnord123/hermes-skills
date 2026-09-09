@@ -22,7 +22,19 @@ import time
 
 HERMES = os.path.expanduser("~/.local/bin/hermes")
 BOARD = os.environ.get("RX_BOARD", "rx-review")
-CONFIG = os.path.expanduser("~/.hermes/config.yaml")
+# The DEFAULT profile's config: the Discord fallback channel lives in the gateway that delivers
+# it. HERMES_REAL_HOME is the user's home (profile homes nest under it), so the profile-aware
+# fallback resolves to the same file the old hardcoded path meant; a profile-less CLI run has no
+# HERMES_REAL_HOME and ~ is the same place.
+_REAL_HOME = os.path.expanduser(os.environ.get("HERMES_REAL_HOME") or os.path.expanduser("~"))
+CONFIG = os.path.join(_REAL_HOME, ".hermes", "config.yaml")
+# Per-run output dirs: the reports root, with the same env override rx.py applies, so a test
+# that repoints RX_REPORTS_ROOT sees its origin file where it looks for it.
+REPORTS_ROOT = os.path.expanduser(os.environ.get("RX_REPORTS_ROOT", "~/.hermes/reports/rx-review"))
+ORIGIN_REL = "run-origin"
+# A run is recorded against a MESSAGING chat only. Anything else (cli, api, tui, no session
+# at all) is not a delivery target, so the run falls back to the Discord default channel.
+GATEWAY_PLATFORMS = {"discord", "matrix", "telegram", "slack", "signal", "whatsapp"}
 
 TASK_ID_RE = re.compile(r"\bt_[0-9a-f]{6,}\b")
 
@@ -41,19 +53,53 @@ def slugify(text, limit=None):
     return slug[:limit] if limit else slug
 
 
-def discord_channel():
-    """The Discord channel card notifications go to, or "" when none is configured.
+def record_origin(run_dir):
+    """Record the chat this run was started from into the run dir. Returns the target dict or None.
 
-    Env var first so a test run can redirect itself; otherwise the gateway's own
-    free_response_channels. This used to be reimplemented in three other modules and stubbed
-    to None in a fourth - where the stub meant every chunk card was created without a
-    subscription, so chunk 15 timed out twice, tripped the circuit breaker and stalled the
-    whole tail with nobody notified. A pipeline that fails quietly is worse than one that
-    fails loudly.
+    Called ONCE by `start`, the same call that creates the run dir — so every later card and
+    notification, spawned by worker profiles that carry no session of their own, resolves the
+    delivery target FROM THE RUN DIR instead of from whatever process happens to be posting.
+    A run started from a messaging gateway (Matrix, Discord, ...) is recorded against THAT chat;
+    a run started from the CLI or any non-gateway surface records nothing and keeps the Discord
+    fallback that predates this file.
     """
-    env = os.environ.get("RX_DISCORD_CHANNEL")
-    if env:
-        return env.strip()
+    platform = os.environ.get("HERMES_SESSION_PLATFORM", "").strip().lower()
+    chat_id = os.path.expanduser(os.environ.get("HERMES_SESSION_CHAT_ID", "")).strip()
+    if platform not in GATEWAY_PLATFORMS or not chat_id:
+        return None
+    profile = os.environ.get("HERMES_SESSION_PROFILE", "").strip()
+    if not profile:
+        try:
+            profile = os.path.basename(os.environ.get("HERMES_HOME", "").rstrip("/"))
+        except Exception:                                   # noqa: BLE001
+            profile = ""
+    target = {"platform": platform, "chat_id": chat_id, "profile": profile}
+    try:
+        with open(os.path.join(run_dir, ORIGIN_REL), "w", encoding="utf-8") as fh:
+            json.dump(target, fh)
+    except OSError as exc:
+        print("  ! could not record run origin (%s) — notifications fall back to Discord" % exc)
+    return target
+
+
+def _origin_target():
+    """The active run's recorded origin, or None. The `current` symlink is the single reader —
+    workers never hardcode a run name, they follow the pointer `start` swapped."""
+    try:
+        with open(os.path.join(os.path.realpath(REPORTS_ROOT), "current", ORIGIN_REL),
+                  encoding="utf-8") as fh:
+            t = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    platform = (t.get("platform") or "").strip().lower()
+    chat_id = (t.get("chat_id") or "").strip()
+    if platform not in GATEWAY_PLATFORMS or not chat_id:
+        return None
+    return {"platform": platform, "chat_id": chat_id, "profile": (t.get("profile") or "").strip()}
+
+
+def _discord_fallback():
+    """The pre-existing default: the gateway's first Discord free_response_channel, or ''."""
     try:
         cfg = open(CONFIG, encoding="utf-8").read()
         m = re.search(r"^discord:.*?^\s*free_response_channels:\s*'?\"?([0-9,]+)",
@@ -65,47 +111,88 @@ def discord_channel():
     return ""
 
 
+def notify_target():
+    """Where this run's card notifications go: (platform, chat_id, notifier_profile), or ("", "", "").
+
+    Resolution order, first hit wins:
+    1. RX_NOTIFY_PLATFORM / RX_NOTIFY_CHAT_ID — an explicit override so a test run can redirect
+       itself (the role RX_DISCORD_CHANNEL always played; the legacy env var still works).
+    2. The run's origin file — the chat the run was STARTED from. This is the whole fix: a run
+       begun in a Matrix DM gets its gates in that DM, even though every card that posts them
+       runs under a worker profile with no session of its own.
+    3. The Discord free_response_channels default, unchanged.
+
+    notifier_profile is the gateway that owns the adapter for that platform: the origin's
+    profile when it has one, otherwise the RX_NOTIFIER_PROFILE default (the profile whose
+    gateway delivers card notifications today).
+    """
+    env_platform = os.environ.get("RX_NOTIFY_PLATFORM", "").strip().lower()
+    env_chat = os.environ.get("RX_NOTIFY_CHAT_ID", "").strip()
+    if env_platform and env_chat:
+        return (env_platform, env_chat, os.environ.get("RX_NOTIFIER_PROFILE", "default"))
+    legacy = os.environ.get("RX_DISCORD_CHANNEL", "").strip()
+    if legacy:
+        return ("discord", legacy, os.environ.get("RX_NOTIFIER_PROFILE", "default"))
+    t = _origin_target()
+    if t:
+        return (t["platform"], t["chat_id"], t["profile"] or os.environ.get("RX_NOTIFIER_PROFILE", "default"))
+    chan = _discord_fallback()
+    return ("discord", chan, os.environ.get("RX_NOTIFIER_PROFILE", "default"))
+
+
+def discord_channel():
+    """Backward-compatible view of notify_target(): the Discord chat id, or "" for another platform."""
+    platform, chan, _profile = notify_target()
+    return chan if platform == "discord" else ""
+
+
 def announce(message):
-    """Post a phase-level message to Discord. Never raises.
+    """Post a phase-level message to the run's notification chat. Never raises.
 
     Per-card notifications turn a run into narration of its own bookkeeping; phases are the
     unit a person cares about. Uses `hermes send`, which posts with the gateway's own
     credentials - no LLM, no agent loop.
+
+    The target is where the run was STARTED (see notify_target()): a run begun in a Matrix DM
+    announces into that DM, a run begun in Discord into Discord, a CLI run into the Discord
+    default. Before the origin file existed every message here went to Discord no matter who
+    started the run - which is how a Matrix review's gate questions landed in a Discord DM.
 
     A notification is cosmetic and the work it describes has already happened. Letting this
     raise once cost a completed run: 22 audit cards were created and linked, the announcement
     raised, the script exited 1, and the card blocked as though the audit had failed.
     """
     try:
-        chan = discord_channel()
-        if not chan or not message.strip():
+        platform, chan, _profile = notify_target()
+        if not platform or not chan or not message.strip():
             return False
-        return subprocess.run([HERMES, "send", "-t", "discord:%s" % chan, "-q", message],
+        return subprocess.run([HERMES, "send", "-t", "%s:%s" % (platform, chan), "-q", message],
                               capture_output=True, text=True).returncode == 0
     except Exception as exc:                                   # noqa: BLE001
-        print("  ! could not announce to discord (%s)" % exc)
+        print("  ! could not announce to %s:%s (%s)" % (*notify_target()[:2], exc))
         return False
 
 
 def subscribe(task_id):
-    """Push a card's terminal events to Discord. Never raises.
+    """Push a card's terminal events to the run's notification chat. Never raises.
 
     Subscribe the cards a human waits on. Without this the whole analysis stage - including
     the final brief - completes silently.
 
     --notifier-profile is load-bearing: without it the subscription is owned by the creating
     profile, and the notifier SKIPS any subscription whose owner has no running gateway, so
-    every one of them was silently dropped.
+    every one of them was silently dropped. The origin's profile is the gateway that holds the
+    adapter for the chat we are notifying into - that is what the delivery check needs.
     """
     try:
-        chan = discord_channel()
-        if not chan or not task_id or task_id.startswith("DRY"):
+        platform, chan, profile = notify_target()
+        if not platform or not chan or not task_id or task_id.startswith("DRY"):
             return False
-        subprocess.run(
-            [HERMES, "kanban", "--board", BOARD, "notify-subscribe", task_id,
-             "--platform", "discord", "--chat-id", chan,
-             "--notifier-profile", os.environ.get("RX_NOTIFIER_PROFILE", "default")],
-            capture_output=True, text=True)
+        cmd = [HERMES, "kanban", "--board", BOARD, "notify-subscribe", task_id,
+               "--platform", platform, "--chat-id", chan]
+        if profile:
+            cmd += ["--notifier-profile", profile]
+        subprocess.run(cmd, capture_output=True, text=True)
         return True
     except Exception as exc:                                   # noqa: BLE001
         print("  ! could not subscribe %s (%s)" % (task_id, exc))

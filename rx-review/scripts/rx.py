@@ -36,7 +36,6 @@ import rxcache
 import rxsplit                                               # noqa: E402
 import rxkanban                                              # noqa: E402
 from rxkanban import announce, subscribe                    # noqa: E402,F401
-from rxkanban import discord_channel as _discord_channel    # noqa: E402,F401
 import sys
 import time
 
@@ -86,6 +85,11 @@ def start_run():
     Called once at Stage 1, before any parallel card exists, so it is the single writer of the
     pointer — the concurrency rule the whole pipeline lives by. The symlink swap is atomic (temp
     link + os.replace), so a crash mid-swap never leaves `current` dangling.
+
+    Also records WHERE the run was started (see rxkanban.record_origin): a run begun in a
+    messaging chat gets its gate questions and card notifications in THAT chat, even though the
+    cards that post them run under worker profiles with no session of their own. A run begun
+    from the CLI records nothing and keeps the Discord default.
     """
     os.makedirs(REPORTS_ROOT, exist_ok=True)
     stamp = time.strftime("%Y-%m-%d-%H%M%S")
@@ -104,6 +108,9 @@ def start_run():
         pass
     os.symlink(name, tmp)                                   # relative target → tree stays relocatable
     os.replace(tmp, CURRENT_LINK)                           # atomic; replaces any existing symlink
+    target = rxkanban.record_origin(run)
+    if target:
+        print("Run %s — notifications go to %s:%s" % (name, target["platform"], target["chat_id"]))
     return run, name
 
 
@@ -198,17 +205,20 @@ def sh(cmd):
 
 
 def send_detail(text):
-    """Send the FULL text to Discord as a real message.
+    """Send the FULL text to the run's notification chat as a real message.
 
     Card notifications go through gateway/kanban_watchers.py, which truncates a block reason
     to 160 chars — enough to say something is waiting, nowhere near enough to act on. `hermes
     send` posts a normal message using the gateway's own credentials (no LLM, no agent loop),
-    and the Discord adapter chunks it properly at 2000 chars.
+    and the adapters chunk it properly (Discord at 2000 chars).
+
+    The target is the run's origin (see rxkanban.notify_target): a run started in a Matrix DM
+    posts its regimen review into that DM, not into Discord.
     """
-    chan = _discord_channel()
-    if not chan or not text.strip():
+    platform, chan = rxkanban.notify_target()[:2]
+    if not platform or not chan or not text.strip():
         return False
-    out = sh([HERMES, "send", "-t", "discord:%s" % chan, "-q", text])
+    out = sh([HERMES, "send", "-t", "%s:%s" % (platform, chan), "-q", text])
     return out.returncode == 0
 
 
