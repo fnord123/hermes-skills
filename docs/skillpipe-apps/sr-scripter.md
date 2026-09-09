@@ -1,7 +1,7 @@
 # sr-scripter
 
 **Scripter role** for the [skill review
-pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-kanban).
+pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-foundry).
 
 Implements the script contract an approved skill declares, on the
 pipeline branch. Pushes its own script commits and updates the open pull

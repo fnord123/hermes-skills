@@ -1,7 +1,7 @@
 # sr-commit
 
 **Commit role** for the [skill review
-pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-kanban).
+pipeline](https://github.com/fnord123/hermes-skills/tree/main/skill-foundry).
 
 The only role that lands work: merges an approved pull request (after the
 pre-flight) and closes the tracking issue. Does not push feature

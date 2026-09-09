@@ -30,7 +30,7 @@ WORKTREE_ROOT=/abs/path/to/hermes-skills-worktrees
 
 # The directory holding the six role playbooks (<role>-role.md). The
 # script asserts the playbook exists before it dispatches a role.
-CARDS_DIR=/abs/path/to/skill-kanban/references
+CARDS_DIR=/abs/path/to/skill-foundry/references
 
 # Who runs the cards. Single-runner install: one profile name (every role
 # runs as it). Role-isolated install: a role=profile map — one profile +
@@ -82,7 +82,7 @@ REPO_DIR=/home/user/hermes-skills
 REPO=user/hermes-skills
 BOARD=skills
 WORKTREE_ROOT=/home/user/hermes-skills-worktrees
-CARDS_DIR=/home/user/hermes-skills/skill-kanban/references
+CARDS_DIR=/home/user/hermes-skills/skill-foundry/references
 ASSIGNEE=author=sr-author, audit=sr-audit, ste100=sr-ste100, \
   scripter=sr-scripter, verifier=sr-verifier, commit=sr-commit, fleet=sr-fleet
 MID_MODEL=<your-mid-tier-model-id>

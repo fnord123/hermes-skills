@@ -1,5 +1,5 @@
 ---
-name: skill-kanban
+name: skill-foundry
 description: >
   Operate the skill-maintenance pipeline for a house skill repo — the
   machinery that turns "make a new skill" or "improve these skills" into a
@@ -26,7 +26,7 @@ metadata:
     requires_toolsets: [terminal]
 ---
 
-# skill-kanban — the skill-maintenance pipeline
+# skill-foundry — the skill-maintenance pipeline
 
 A request to create or change a skill does not get hand-edited into the
 repo. It goes through a tracked review: one issue per skill carries the

@@ -1,4 +1,4 @@
-# skill-kanban — known pitfalls
+# skill-foundry — known pitfalls
 
 Distilled, host-neutral list of the failure classes the PR-based pipeline
 can hit, and the rule or check that closes each. No run ids, no machine
