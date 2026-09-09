@@ -173,7 +173,7 @@ def main() -> None:
         assert f"{role}-1" not in all_labels, \
             f"stray role-name label {role}-1 in all_state_labels()"
 
-    # -- gh actor auth: the SKILLPIPE_GH_APP_ID presence is the only switch
+    # -- gh actor auth: the GH_APP_ID presence is the only switch
     # gh() is the single seam every gh call funnels through. Only the
     # subprocess boundary (skillpipe.run) is faked, so the real _role_token
     # — including its once-per-process cache — is what gets tested.
@@ -194,13 +194,13 @@ def main() -> None:
         return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
     skillpipe.run = op_run
     os.environ.pop("GH_TOKEN", None)
-    os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+    os.environ.pop("GH_APP_ID", None)
     skillpipe.gh(inst, ["issue", "list"])
     assert captured["cmd"][:1] == ["gh"], captured["cmd"]
     assert "GH_TOKEN" not in os.environ, \
         "operator run must not invent a GH_TOKEN"
 
-    # role context: SKILLPIPE_GH_APP_ID present -> the real _role_token
+    # role context: GH_APP_ID present -> the real _role_token
     # mints once (fake subprocess) and gh() publishes it as GH_TOKEN; a
     # second gh call in the same process must NOT re-mint.
     mints = {"n": 0}
@@ -213,7 +213,7 @@ def main() -> None:
         return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
     skillpipe.run = role_run
     skillpipe._ROLE_TOKEN = None
-    os.environ["SKILLPIPE_GH_APP_ID"] = "12345"
+    os.environ["GH_APP_ID"] = "12345"
     os.environ["GH_TOKEN"] = "stale-should-be-replaced"
     skillpipe.gh(inst, ["issue", "comment", "1", "--body", "x"])
     assert os.environ["GH_TOKEN"] == "ghs_12345_test", \
@@ -239,7 +239,7 @@ def main() -> None:
     finally:
         skillpipe.run = orig_run
         skillpipe._ROLE_TOKEN = None
-        os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+        os.environ.pop("GH_APP_ID", None)
         os.environ.pop("GH_TOKEN", None)
     gh_cases = 3
 
@@ -277,7 +277,7 @@ def main() -> None:
     skillpipe.issue_body = lambda inst, n: body_nopr
     skillpipe.edit_issue = lambda inst, n, body, **k: edited.__setitem__("body", body)
     skillpipe._ROLE_TOKEN = None
-    os.environ["SKILLPIPE_GH_APP_ID"] = "12345"
+    os.environ["GH_APP_ID"] = "12345"
     os.environ.pop("GH_TOKEN", None)
 
     class _PrArgs:
@@ -320,7 +320,7 @@ def main() -> None:
         skillpipe.issue_body = orig_body
         skillpipe.edit_issue = orig_edit
         skillpipe._ROLE_TOKEN = None
-        os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+        os.environ.pop("GH_APP_ID", None)
         os.environ.pop("GH_TOKEN", None)
     pr_cases = 3
 
@@ -373,7 +373,7 @@ def main() -> None:
     orig_run3 = skillpipe.run
     orig_ib3 = skillpipe.issue_body
     orig_lt3 = skillpipe.issue_labels
-    os.environ["SKILLPIPE_GH_APP_ID"] = "12345"
+    os.environ["GH_APP_ID"] = "12345"
     os.environ.pop("GH_TOKEN", None)
 
     class _AbArgs:
@@ -418,7 +418,7 @@ def main() -> None:
         skillpipe.issue_body = orig_ib3
         skillpipe.issue_labels = orig_lt3
         skillpipe._ROLE_TOKEN = None
-        os.environ.pop("SKILLPIPE_GH_APP_ID", None)
+        os.environ.pop("GH_APP_ID", None)
         os.environ.pop("GH_TOKEN", None)
         _sh.rmtree(wt_dir, ignore_errors=True)
     ab_cases = 2

@@ -4,11 +4,11 @@
 Host-neutral: every input comes from the environment, set in the role's
 profile .env:
 
-  SKILLPIPE_GH_APP_ID              numeric app id (JWT iss claim)
-  SKILLPIPE_GH_APP_INSTALLATION_ID numeric installation id
-  SKILLPIPE_GH_APP_KEY_FILE        path to the app's private key PEM (600)
+  GH_APP_ID              numeric app id (JWT iss claim)
+  GH_APP_INSTALLATION_ID numeric installation id
+  GH_APP_KEY_FILE        path to the app's private key PEM (600)
 
-Tokens are cached under $SKILLPIPE_TOKEN_CACHE (default
+Tokens are cached under $GH_TOKEN_CACHE (default
 ~/.cache/skillpipe) with a 55-minute TTL (GitHub tokens live 60).
 Fail-closed: one JSON object on stdout, nonzero exit on any error.
 
@@ -35,13 +35,13 @@ def fail(msg: str) -> "NoReturn":  # noqa: F821 - typing.NoReturn on 3.8+
 
 
 def load_env(require_inst: bool = True):
-    app_id = os.environ.get("SKILLPIPE_GH_APP_ID", "").strip()
-    inst_id = os.environ.get("SKILLPIPE_GH_APP_INSTALLATION_ID", "").strip()
-    key_file = os.environ.get("SKILLPIPE_GH_APP_KEY_FILE", "").strip()
-    missing = [n for n, v in (("SKILLPIPE_GH_APP_ID", app_id),
-                              ("SKILLPIPE_GH_APP_KEY_FILE", key_file)) if not v]
+    app_id = os.environ.get("GH_APP_ID", "").strip()
+    inst_id = os.environ.get("GH_APP_INSTALLATION_ID", "").strip()
+    key_file = os.environ.get("GH_APP_KEY_FILE", "").strip()
+    missing = [n for n, v in (("GH_APP_ID", app_id),
+                              ("GH_APP_KEY_FILE", key_file)) if not v]
     if require_inst and not inst_id:
-        missing.append("SKILLPIPE_GH_APP_INSTALLATION_ID")
+        missing.append("GH_APP_INSTALLATION_ID")
     if missing:
         fail("missing in environment: " + ", ".join(missing))
     if not app_id.isdigit() or (inst_id and not inst_id.isdigit()):
@@ -56,7 +56,7 @@ def load_env(require_inst: bool = True):
 
 
 def _cache_path(app_id: str) -> Path:
-    cache_dir = Path(os.environ.get("SKILLPIPE_TOKEN_CACHE",
+    cache_dir = Path(os.environ.get("GH_TOKEN_CACHE",
                                     "~/.cache/skillpipe")).expanduser()
     cache_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
     return cache_dir / f"token-{app_id}.json"
@@ -179,7 +179,7 @@ def whoami() -> None:
     # app id is baked into the token: ghs_<app_id>_<payload>
     app_id_from_tok = token.split("_", 2)[1] if token.startswith("ghs_") else "?"
     # prove repo access on the installed repo (the one the app was installed on)
-    repo = os.environ.get("SKILLPIPE_PROBE_REPO", "fnord123/hermes-skills")
+    repo = os.environ.get("GH_PROBE_REPO", "fnord123/hermes-skills")
     try:
         r = http_get(f"https://api.github.com/repos/{repo}", token)
         probe = {"repo": r.get("full_name"),
