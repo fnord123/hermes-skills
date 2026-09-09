@@ -146,6 +146,28 @@ def discord_channel():
     return chan if platform == "discord" else ""
 
 
+def send_cmd(message, quiet=True):
+    """The `hermes send` argv for the run's notification chat.
+
+    -p <notifier profile> is load-bearing: hermes send signs in with the
+    CALLING process's bot token, but the run's chat belongs to the origin
+    profile's bot. A #house-md gate posted by an rx-* worker's credentials
+    (the default gateway's bot) was refused by Discord - the review never
+    reached chat and the Stage 3 card blocked on silence (2026-09-09).
+    The profile recorded in run-origin owns that bot, the same way
+    --notifier-profile does for subscribe(). Returns (cmd, profile).
+    """
+    platform, chan, profile = notify_target()
+    cmd = [HERMES]
+    if profile:
+        cmd += ["-p", profile]
+    cmd += ["send", "-t", "%s:%s" % (platform, chan)]
+    if quiet:
+        cmd.append("-q")
+    cmd.append(message)
+    return cmd, profile
+
+
 def announce(message):
     """Post a phase-level message to the run's notification chat. Never raises.
 
@@ -166,8 +188,11 @@ def announce(message):
         platform, chan, _profile = notify_target()
         if not platform or not chan or not message.strip():
             return False
-        return subprocess.run([HERMES, "send", "-t", "%s:%s" % (platform, chan), "-q", message],
-                              capture_output=True, text=True).returncode == 0
+        out = subprocess.run(send_cmd(message)[0], capture_output=True, text=True)
+        if out.returncode != 0:
+            print("  ! announce to %s:%s failed (exit %d): %s"
+                  % (platform, chan, out.returncode, (out.stderr or out.stdout).strip()[:300]))
+        return out.returncode == 0
     except Exception as exc:                                   # noqa: BLE001
         print("  ! could not announce to %s:%s (%s)" % (*notify_target()[:2], exc))
         return False

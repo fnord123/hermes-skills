@@ -213,12 +213,18 @@ def send_detail(text):
     and the adapters chunk it properly (Discord at 2000 chars).
 
     The target is the run's origin (see rxkanban.notify_target): a run started in a Matrix DM
-    posts its regimen review into that DM, not into Discord.
+    posts its regimen review into that DM, not into Discord. The credentials follow the origin
+    too (send_cmd's -p): hermes send signs in as the CALLING worker's bot, but this run's chat
+    belongs to the origin profile's bot - a #house-md gate posted by an rx-* worker's default-
+    gateway bot was refused by Discord and the barrier blocked on silence (2026-09-09, #21).
     """
-    platform, chan = rxkanban.notify_target()[:2]
+    platform, chan, _profile = rxkanban.notify_target()
     if not platform or not chan or not text.strip():
         return False
-    out = sh([HERMES, "send", "-t", "%s:%s" % (platform, chan), "-q", text])
+    out = sh(rxkanban.send_cmd(text)[0])
+    if out.returncode != 0:
+        print("  ! send to %s:%s failed (exit %d): %s"
+              % (platform, chan, out.returncode, (out.stderr or out.stdout).strip()[:300]))
     return out.returncode == 0
 
 
