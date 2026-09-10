@@ -4062,6 +4062,111 @@ def main():
         (fan.read_trends, fan.create, fan.rxkanban, fan._complete_self, fan.REPORTS) = _tfs
         shutil.rmtree(_treports, ignore_errors=True)
 
+    # ── #21: a notification posts with the ORIGIN profile's credentials, not the worker's ──
+    #
+    #  2026-09-09, #house-md run (2026-09-09-145447-david-putzolu): the Stage 3 gate never
+    #  reached chat. The origin file was right (discord:1542210219252383896, profile house),
+    #  but send_detail/announce ran a BARE `hermes send`, which signs in as the CALLING
+    #  worker's bot (every rx-* profile carries the default gateway's token) — not the bot
+    #  that owns #house-md (the house profile's). Discord refused it, and the failure left
+    #  no trace because stderr was swallowed. The fix threads the profile through as
+    #  `-p <profile>`, the same way subscribe() already threads --notifier-profile.
+    _n21_root = tempfile.mkdtemp(prefix="rx-notif-")
+    _n21_inputs = os.path.join(_n21_root, "inputs")
+    os.makedirs(_n21_inputs)
+    _n21mod = load_rx(_n21_inputs)
+    _n21_rk = _n21mod.rxkanban
+    _n21_orig_root = _n21_rk.REPORTS_ROOT
+    _n21_orig_sub = _n21_rk.subprocess
+    _n21_env_keys = ("RX_NOTIFY_PLATFORM", "RX_NOTIFY_CHAT_ID", "RX_DISCORD_CHANNEL",
+                     "RX_NOTIFIER_PROFILE")
+    _n21_saved_env = {k: os.environ.get(k) for k in _n21_env_keys}
+    for _n21_k in _n21_env_keys:
+        os.environ.pop(_n21_k, None)
+
+    class _N21Proc:
+        def __init__(self, rc=0, stderr="", stdout=""):
+            self.returncode, self.stderr, self.stdout = rc, stderr, stdout
+
+    class _N21Sub:
+        def __init__(self):
+            self.cmds = []
+        def run(self, cmd, **kw):
+            self.cmds.append(cmd)
+            return _N21Proc()
+
+    _n21_sub = _N21Sub()
+    _n21_rk.subprocess = _n21_sub
+    _n21_reports = os.path.join(_n21_root, "reports")
+    _n21_current = os.path.join(_n21_reports, "current")
+    os.makedirs(_n21_current)
+    _n21_orig_sh = _n21mod.sh
+    try:
+        # a #house-md run, as the origin file records it
+        with open(os.path.join(_n21_current, "run-origin"), "w") as fh:
+            json.dump({"platform": "discord", "chat_id": "1542210219252383896",
+                       "profile": "house"}, fh)
+        _n21_rk.REPORTS_ROOT = _n21_reports
+
+        _n21_cmd, _n21_profile = _n21_rk.send_cmd("gate question")
+        check("send_cmd carries the origin profile as -p", _n21_profile, "house",
+              "#house-md belongs to the house bot; a worker's bare send signed in as the wrong one")
+        check("send_cmd targets the origin's platform:chat",
+              _n21_cmd[-4:-1], ["-t", "discord:1542210219252383896", "-q"],
+              "the address is the run's origin, not the executing worker's home channel")
+        check("send_cmd places -p before the send verb",
+              _n21_cmd[:3], [_n21_rk.HERMES, "-p", "house"],
+              "hermes pre-parses -p from argv before any import; the flag must survive to argv")
+
+        _n21_sent = []
+        _n21mod.sh = lambda cmd: (_n21_sent.append(cmd) or _N21Proc())
+        _n21_out = io.StringIO()
+        with contextlib.redirect_stdout(_n21_out):
+            _n21_ok = _n21mod.send_detail("the regimen review")
+        check("send_detail posts through send_cmd", _n21_ok, True, "")
+        check("send_detail's command carries the origin's -p",
+              _n21_sent and _n21_sent[0], _n21_rk.send_cmd("the regimen review")[0],
+              "this is the 2026-09-09 fault: no -p meant the worker's bot, not the origin's")
+
+        # a refused send must leave a line in the log, not a silent missing message
+        _n21_sent.clear()
+        _n21mod.sh = lambda cmd: (_n21_sent.append(cmd) or _N21Proc(
+            rc=1, stderr="Missing Access to channel 1542210219252383896"))
+        _n21_out = io.StringIO()
+        with contextlib.redirect_stdout(_n21_out):
+            _n21_ok = _n21mod.send_detail("the regimen review")
+        check("a refused send returns False", _n21_ok, False, "")
+        check("a refused send logs the channel and the Discord error",
+              ("1542210219252383896" in _n21_out.getvalue()
+               and "Missing Access" in _n21_out.getvalue()), True,
+              "send_detail used to swallow the child's stderr; 2026-09-09 left no trace at all")
+
+        # announce goes through the same door
+        _n21_sub.cmds.clear()
+        _n21_ok = _n21_rk.announce("phase complete")
+        check("announce posts", _n21_ok, True, "")
+        check("announce's command carries the origin's -p",
+              _n21_sub.cmds and "-p" in _n21_sub.cmds[0] and "house" in _n21_sub.cmds[0], True,
+              "phase announcements hit the same wrong-bot wall as the gate")
+
+        # a CLI run records no origin: the pre-existing behaviour, byte for byte
+        os.remove(os.path.join(_n21_current, "run-origin"))
+        _n21_cmd2, _n21_profile2 = _n21_rk.send_cmd("note")
+        check("no origin keeps the pre-existing Discord fallback",
+              _n21_cmd2, [_n21_rk.HERMES, "-p", _n21_profile2, "send",
+                          "-t", "discord:%s" % _n21_rk._discord_fallback(), "-q", "note"],
+              "CLI runs must behave exactly as before #21")
+    finally:
+        _n21mod.sh = _n21_orig_sh
+        _n21_rk.REPORTS_ROOT = _n21_orig_root
+        _n21_rk.subprocess = _n21_orig_sub
+        for _n21_k, _n21_v in _n21_saved_env.items():
+            if _n21_v is None:
+                os.environ.pop(_n21_k, None)
+            else:
+                os.environ[_n21_k] = _n21_v
+        shutil.rmtree(_n21_root, ignore_errors=True)
+
     print("\n%s" % ("-" * 64))
     if FAILURES:
         print("%d FAILED\n" % len(FAILURES))
