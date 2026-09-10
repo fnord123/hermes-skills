@@ -24,13 +24,13 @@ import argparse
 import base64
 import json
 import os
+from pathlib import Path
 import re
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from skill_json import fail, guard, ok  # noqa: E402
@@ -61,7 +61,8 @@ def _app_config():
     if not key.is_file():
         fail(f"app private key file not found: {key_file}")
     if key.stat().st_mode & 0o077:
-        fail(f"app private key file must not be group/world readable: {key_file}")
+        fail(f"app private key file must not be "
+             f"group/world readable: {key_file}")
     return app_id, inst_id, key.read_text()
 
 
@@ -88,7 +89,8 @@ def _jwt_sign(app_id: str, key_pem: str) -> str:
     header = _b64url_json({"alg": "RS256", "typ": "JWT"})
     payload = _b64url_json({"iat": now - 60, "exp": now + 600, "iss": app_id})
     sig = _rsa_sign(f"{header}.{payload}".encode(), key_pem)
-    return f"{header}.{payload}.{base64.urlsafe_b64encode(sig).rstrip(b'=').decode()}"
+    token = base64.urlsafe_b64encode(sig).rstrip(b"=").decode()
+    return f"{header}.{payload}.{token}"
 
 
 def _http(method: str, url: str, token: str, body=None):
@@ -198,7 +200,8 @@ def _ref_tip(repo: str, ref: str, token: str) -> str:
     if ref.startswith("refs/heads/"):
         ref = ref[len("refs/heads/"):]
     data = _get_json(f"{API}/repos/{repo}/git/ref/heads/{ref}", token)
-    sha = (data.get("object") or {}).get("sha") if isinstance(data, dict) else None
+    obj = data.get("object") if isinstance(data, dict) else None
+    sha = obj.get("sha") if isinstance(obj, dict) else None
     if not sha:
         fail(f"branch {ref!r} was not found on the remote")
     return sha
@@ -229,7 +232,8 @@ def v_issue(args):
         fail("issue was not created")
     actor = _whoami(token) if as_bot else None
     ok(repo=args.repo, issue=data["number"], url=data["html_url"],
-       title=data["title"], as_bot=as_bot, **({"actor": actor} if actor else {}))
+       title=data["title"], as_bot=as_bot,
+       **({"actor": actor} if actor else {}))
 
 
 def v_comment(args):
@@ -279,9 +283,9 @@ def v_pr(args):
     if not data.get("html_url"):
         fail("pull request was not created")
     actor = _whoami(token) if as_bot else None
-    ok(repo=args.repo, pr=data["number"], url=data["html_url"], title=data["title"],
-       issue=args.issue, head=branch, base=base, as_bot=as_bot,
-       **({"actor": actor} if actor else {}))
+    ok(repo=args.repo, pr=data["number"], url=data["html_url"],
+       title=data["title"], issue=args.issue, head=branch, base=base,
+       as_bot=as_bot, **({"actor": actor} if actor else {}))
 
 
 # ------------------------------------------------------------------- main
