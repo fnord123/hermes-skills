@@ -4167,6 +4167,79 @@ def main():
                 os.environ[_n21_k] = _n21_v
         shutil.rmtree(_n21_root, ignore_errors=True)
 
+    # ── #23: the document cache follows HERMES_HOME, so a profile's own uploads are visible ──
+    #
+    #  2026-09-09, #house-md run (2026-09-09-145447-david-putzolu): the lab zip was cached by
+    #  the house gateway under ~/.hermes/profiles/house/cache/documents/, but stage read a
+    #  hardcoded ~/.hermes/cache/documents and printed NOTHING TO STAGE. The fix resolves the
+    #  cache from HERMES_HOME (real home for a CLI/default run, profile home inside a profile
+    #  session) with the old default path as the fallback and RX_DOC_CACHE as the test hook.
+    #
+    #  DOC_CACHE is a module constant frozen at import, so the resolver is tested DIRECTLY
+    #  (env-driven, no re-import); the constant itself is captured once and compared against
+    #  the resolver evaluated in the SAME env, so a formula/constant drift fails loudly.
+    _n23_prof = tempfile.mkdtemp(prefix="rx-doc-cache-")
+    _n23_inputs = os.path.join(_n23_prof, "inputs")
+    os.makedirs(_n23_inputs)
+    _n23mod = load_rx(_n23_inputs)
+    _n23_home_key = "HERMES_HOME"
+    _n23_override_key = "RX_DOC_CACHE"
+    _n23_saved_home = os.environ.get(_n23_home_key)
+    _n23_saved_override = os.environ.get(_n23_override_key)
+    try:
+        # the constant agrees with the resolver in the env it was imported under (before any
+        # mutation below) - if the formula and the constant drift, stage reads the wrong dir.
+        _n23_const = _n23mod.DOC_CACHE
+        _n23_recomputed = os.path.expanduser(
+            os.environ.get(_n23_override_key)
+            or os.path.join(_n23mod._doc_cache_home(), "cache", "documents"))
+        check("the DOC_CACHE constant matches the resolver", _n23_const, _n23_recomputed,
+              "the constant and the resolver must compute the same path or stage reads the wrong dir")
+
+        # default / CLI context: no profile home -> the old default-profile path, unchanged
+        os.environ.pop(_n23_home_key, None)
+        os.environ.pop(_n23_override_key, None)
+        check("no HERMES_HOME keeps the default-profile cache",
+              _n23mod._doc_cache_home(), os.path.expanduser("~/.hermes"),
+              "a CLI or default-gateway run must keep reading today's cache, byte for byte")
+        check("the no-home cache path is today's default cache",
+              os.path.expanduser(os.path.join(_n23mod._doc_cache_home(), "cache", "documents")),
+              os.path.expanduser("~/.hermes/cache/documents"), "")
+        os.environ[_n23_home_key] = ""
+        check("empty-string HERMES_HOME is treated as unset",
+              _n23mod._doc_cache_home(), os.path.expanduser("~/.hermes"),
+              "a blank var must not become a bogus <empty>/cache/documents")
+
+        # a profile session: the cache is the profile's own home
+        _n23_profile_home = os.path.join(_n23_prof, "profiles", "house")
+        os.makedirs(os.path.join(_n23_profile_home, "cache", "documents"))
+        os.environ[_n23_home_key] = _n23_profile_home
+        check("a profile session resolves its own home",
+              _n23mod._doc_cache_home(), _n23_profile_home,
+              "the upload landed here; stage must read here")
+        check("the profile cache path is <profile home>/cache/documents",
+              os.path.expanduser(os.path.join(_n23mod._doc_cache_home(), "cache", "documents")),
+              os.path.join(_n23_profile_home, "cache", "documents"), "")
+
+        # RX_DOC_CACHE redirects ahead of both, per the RX_INPUTS/RX_REPORTS_ROOT convention
+        _n23_override = os.path.join(_n23_prof, "redirected-cache")
+        os.makedirs(_n23_override)
+        os.environ[_n23_override_key] = _n23_override
+        check("RX_DOC_CACHE wins over the profile home",
+              os.path.expanduser(
+                  os.environ.get(_n23_override_key)
+                  or os.path.join(_n23mod._doc_cache_home(), "cache", "documents")),
+              _n23_override,
+              "a test run must be able to point the cache at its own tempdir")
+    finally:
+        for _n23_k, _n23_v in ((_n23_home_key, _n23_saved_home),
+                               (_n23_override_key, _n23_saved_override)):
+            if _n23_v is None:
+                os.environ.pop(_n23_k, None)
+            else:
+                os.environ[_n23_k] = _n23_v
+        shutil.rmtree(_n23_prof, ignore_errors=True)
+
     print("\n%s" % ("-" * 64))
     if FAILURES:
         print("%d FAILED\n" % len(FAILURES))
