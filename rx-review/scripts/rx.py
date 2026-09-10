@@ -2800,7 +2800,21 @@ def derived_state():
     return [p for p in paths if os.path.exists(p)]
 
 
-DOC_CACHE = os.path.expanduser("~/.hermes/cache/documents")
+def _doc_cache_home():
+    """The HERMES_HOME this process runs under: the real home (~/.hermes) for a CLI or
+    default-gateway run, a profile home (~/.hermes/profiles/<name>) inside a profile
+    session. Every Hermes process exports it (verified 2026-09-10), and Hermes caches an
+    upload in the cache of the profile that RECEIVED it - so a zip sent to #house-md sits
+    under the house profile's home, not the default one. Before this, stage read a
+    hardcoded default-profile path and saw NOTHING (2026-09-09, #23).
+    """
+    h = os.environ.get("HERMES_HOME", "").strip()
+    return os.path.expanduser(h) if h else os.path.expanduser("~/.hermes")
+
+
+# RX_DOC_CACHE redirects it for a test run, per the RX_INPUTS/RX_REPORTS_ROOT convention.
+DOC_CACHE = os.path.expanduser(
+    os.environ.get("RX_DOC_CACHE") or os.path.join(_doc_cache_home(), "cache", "documents"))
 # The two web-access caches, treated as one unit: the fetcher's page-text cache and the search
 # result cache. Both are shared, reused run-to-run on purpose, and expensive to refill, so reset
 # ALWAYS leaves them alone unless --clear-web-cache is passed. (Standing rule, 2026-08-07.)
@@ -2827,10 +2841,11 @@ def web_cache_entries():
 def cached_documents():
     """Lab PDFs still sitting in Hermes' upload cache after a reset.
 
-    Every document sent to Hermes is cached under ~/.hermes/cache/documents and kept
-    indefinitely. reset empties inputs/ but has never touched that cache, so a "clean" reset
-    left every lab ever uploaded on disk - 239 of them when this was found - and the same
-    document can be pulled back into a later run. That is the opposite of what reset promises.
+    Every document sent to Hermes is cached under the receiving profile's
+    <HERMES_HOME>/cache/documents and kept indefinitely. reset empties inputs/ but has never
+    touched that cache, so a "clean" reset left every lab ever uploaded on disk - 239 of them
+    when this was found - and the same document can be pulled back into a later run. That is
+    the opposite of what reset promises.
 
     NOT deleted automatically. The cache is Hermes-wide: it holds documents from every skill
     and conversation, not just this one, and there is no marker saying which came from a lab
@@ -6316,8 +6331,9 @@ def main():
             # the same document.
             p.add_argument("--clear-cache", action="store_true",
                            help="also discard the verified transcription cache")
-            # Off by default: ~/.hermes/cache/documents is Hermes-wide and holds uploads from
-            # every skill, so deleting it is the user's call, not a side effect of reset.
+            # Off by default: the upload cache is Hermes-wide within the receiving profile and
+            # holds uploads from every skill, so deleting it is the user's call, not a side
+            # effect of reset.
             p.add_argument("--clear-documents", action="store_true",
                            help="also delete PDFs from Hermes' upload cache, which otherwise "
                                 "survive reset and can re-enter a later run")
