@@ -1,0 +1,3 @@
+# Third-party packages the issue_pr script imports.
+# Install with: python3 -m pip install -r requirements.txt
+cryptography
