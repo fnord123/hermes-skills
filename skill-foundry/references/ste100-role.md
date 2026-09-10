@@ -16,12 +16,12 @@ paste-able change list. You never edit the skill.
 
 ## Scope (keep it to the writing)
 
-- **STRICT** on: the description, the verb/flag documentation, and the
-  error strings. **STE-flavored** on: explanatory prose.
-- **PROTECTED — never a finding:** the PREFER clause, the eight-section
-  order, the quoted trigger phrases, the profile-path-token paths, and any
-  code span or code fence. A house-format violation is the Audit's
-  finding, not yours.
+- **STRICT** on: the description (trigger phrases and PREFER clause
+  included), the verb/flag documentation, and the error strings.
+  **STE-flavored** on: explanatory prose.
+- **PROTECTED — never a finding:** the eight-section order, the
+  profile-path-token paths, and any code span or code fence. A
+  house-format violation is the Audit's finding, not yours.
 - **GATING vs ADVISORY:** GATING = sentence over ~25 words, passive voice,
   phrasal verb, hedging, one word with more than one meaning,
   off-standard jargon/abbreviation, redundancy. ADVISORY = lexical choice;
