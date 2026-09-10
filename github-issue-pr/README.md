@@ -1,13 +1,14 @@
 # github-issue-pr
 
-File a GitHub issue and then open a pull request against that issue, with
-the issue and the pull request attributed to the app's **bot identity**
-rather than the logged-in account.
+File a GitHub issue and then open a pull request against that issue. This
+skill attributes both to the app's **bot identity**, not to the
+logged-in account.
 
 ## What this is for
 
-Agents working in a repo want their tracked work to read as coming from the
-agent's bot, not from whoever's personal account happens to be on the box.
+Agents working in a repo want their tracked work to read as the agent's
+bot's work. It must not read as the personal account that happens to be
+on the box.
 The human-in-the-loop shape:
 
 1. *Open an issue* describing the work.
@@ -15,11 +16,11 @@ The human-in-the-loop shape:
    does not touch git.
 3. *Open the pull request* against that issue.
 
-All three of the GitHub-facing posts (issue, comment, pull request) go
-through one small CLI that authenticates as the app, so the `author` field
-on the issue and the `author` field on the pull request are the bot
-(`app-<id>[bot]` / the app's login), and the response JSON carries
-`"as_bot": true` so the agent can report it honestly.
+The three GitHub-facing posts (issue, comment, pull request) all go
+through one small CLI. It authenticates as the app, so the `author` field
+on the issue and the pull request is the bot (`app-<id>[bot]` / the app's
+login). The response JSON carries `"as_bot": true`. The agent can report
+that honestly.
 
 ## What this is NOT for
 
@@ -44,23 +45,24 @@ When the three app variables are set, the script:
 
 **Fail-closed on attribution.** If the app variables are set but the token
 mint fails (bad key, revoked installation, no network), the script exits 1
-with an error. It never falls back to an ambient `GH_TOKEN` in that case:
-a silent fallback would post the issue under the operator's account and
-report `"as_bot": true` - a misattribution, not a retry.
+with an error. It never uses an ambient `GH_TOKEN` in that case. A silent
+fallback would post the issue under the operator's account and report
+`"as_bot": true` - a misattribution, not a retry.
 
 Without the app variables, the script uses the ambient `GH_TOKEN`
 (logged-in account) and every response carries `"as_bot": false` so the
 agent says so.
 
-The JWT is signed RS256 with the app's private key via the `cryptography`
-package (declared in `scripts/requirements.txt`; a stock host lacks it, so
-the install step in Setup matters).
+The script signs the JWT RS256 with the app's private key. It uses the
+`cryptography` package, which `scripts/requirements.txt` declares. A stock
+host lacks that package, so the Setup install step matters.
 
 ## Setup
 
 1. Create a GitHub App with these repository permissions: **Issues:
-   read/write**, **Pull requests: read/write**, **Contents: read** (refs
-   are read to verify the branch exists and to resolve the default branch).
+   read/write**, **Pull requests: read/write**, **Contents: read**. The
+   script reads refs to verify the branch exists and to resolve the
+   default branch.
 2. Install it on the target repository.
 3. Export the three variables (in the agent's profile `.env` or the
    environment the script runs in):
@@ -71,8 +73,8 @@ the install step in Setup matters).
    export GH_APP_KEY_FILE=/path/to/app-private-key.pem   # chmod 600
    ```
 
-   The key file is refused if it is group- or world-readable, so a sloppy
-   `chmod` fails loudly instead of leaking the key.
+   The key file must not be group- or world-readable. The script refuses
+   it. A sloppy `chmod` then fails loudly instead of leaking the key.
 4. Install the signer dependency:
 
    ```sh
@@ -93,11 +95,11 @@ the installation's access to the repo.
 
 The skill posts issue → (user's normal git work: branch, commit, push) →
 skill posts the pull request. When the user says "add the PR" without
-naming a branch, the tool looks for the repository's `issue-pr/…` branch
-(singular → used; several → names them and asks; none → error). So the
-convention when you want auto-detection is to name the branch
-`issue-pr/<slug>`; any explicit `--branch <name>` works regardless of
-prefix.
+naming a branch, the tool looks for the repository's `issue-pr/…`
+branches. It uses one when only one exists. It names them and asks when
+several exist. It reports an error when none exists. So name the branch
+`issue-pr/<slug>` when you want auto-detection. An explicit `--branch
+<name>` works regardless of prefix.
 
 The pull request body must not contain an auto-close line (`Closes #42`,
 `Fixes #42`, `Resolves #42`) - the tool refuses it. GitHub closes the
@@ -107,8 +109,8 @@ fire before the review the owner wanted.
 ## Why one CLI instead of raw API calls
 
 A small model given raw HTTP access to api.github.com will invent field
-names, forget the accept header, and - worst case - post with the
-operator's credential when the app's was meant. One CLI with three verbs
-and a stable `{"ok": ...}` envelope removes all of that: the model picks a
-verb and relays the result, and the attribution decision (app vs ambient,
-fail-closed) lives in code where it can be tested instead of in prompts.
+names. It will forget the accept header. In the worst case, it posts with
+the operator's credential instead of the app's. One CLI with three verbs
+and a stable `{"ok": ...}` envelope removes all of that. The model picks a
+verb and relays the result. The attribution decision (app vs ambient,
+fail-closed) then lives in code, where a test can check it, not in prompts.

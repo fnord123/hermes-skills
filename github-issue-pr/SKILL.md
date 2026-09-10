@@ -25,9 +25,9 @@ metadata:
 # github-issue-pr — file an issue, then a pull request against it
 
 Open an issue to describe the work, then open a pull request against that
-issue. Both are posted as the app's bot identity when the app credential is
-configured, so the issue and the pull request carry the bot as their author
-instead of whoever happens to be logged in. You work entirely through the
+issue. When the app credential is configured, the tool posts both as the
+app's bot identity. The issue and the pull request then carry the bot as
+their author, not the logged-in account. You work entirely through the
 verbs below; the tool posts everything, so you never build request bodies
 yourself.
 
@@ -44,13 +44,13 @@ Activate when the user wants to:
 ## When NOT to use
 
 - **Merging, reviewing, or closing** a pull request. This skill opens them;
-  it does not finish them. If the user wants a merge, say that is not
-  handled here.
+  it does not finish them. If the user wants a merge, say that this skill
+  does not handle it.
 - **Plain git work with no issue involved** (committing, pushing a branch,
   checking status). The user's normal git workflow covers that; this skill
   only posts the issue, the comments, and the pull request.
-- **Repositories the app is not installed on.** If the tool reports that the
-  repository cannot be accessed, the app does not have it - tell the user
+- **Repositories the app is not installed on.** If the tool reports that it
+  cannot access the repository, the app does not have it - tell the user
   and stop.
 
 ## The tool
@@ -70,8 +70,8 @@ with exit 1).
 
 `--body` / `--text` accept long text directly, or `--body-file` / `--file`
 for a file path. The pull request body must not contain a line like
-`Closes #42` - the tool refuses it, because the issue closes itself when
-the pull request is merged.
+`Closes #42`. The tool refuses it. GitHub closes the issue when the
+pull request is merged.
 
 ## Turning the user's words into calls
 
@@ -91,8 +91,8 @@ Parsing notes:
 - **A pull request title is an imperative summary** of what the branch
   changes ("Fix the export crash"), not the issue's title.
 - **The code path sits between the two calls.** After `issue` returns, the
-  user (or you, when asked) does the normal git work on a branch and pushes
-  it; only then does `pr` run. Never call `pr` before the branch is pushed.
+  user does the normal git work on a branch, or you do it when asked. Push
+  the branch first. Never call `pr` before the branch is pushed.
 
 ## Output shape
 
@@ -106,8 +106,8 @@ Parsing notes:
 identity that posted.
 
 Always echo the confirmation back so a mis-scoped post is caught
-immediately - the issue number and URL after `issue`, the pull request
-number and URL after `pr` - e.g. "Opened issue #42
+immediately. After `issue`, echo the issue number and URL. After `pr`,
+echo the pull request number and URL. e.g. "Opened issue #42
 (https://github.com/owner/name/issues/42) as the bot, and pull request
 #43 from fix/export against it."
 
@@ -148,5 +148,5 @@ Always ask the user for guidance when there is an error; do not proactively try 
 ## Empty results
 
 `issue --list` with an empty `issues` array means the repository has no
-open issues - say so plainly ("no open issues in that repository yet");
-don't re-check or speculate.
+open issues. Say so plainly: "no open issues in that repository yet".
+Do not re-check or speculate.
