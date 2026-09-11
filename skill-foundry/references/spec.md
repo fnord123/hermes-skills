@@ -233,7 +233,10 @@ the park reason) plus a decision.
 The dispatch card body is small (well under the 8 KB cap) and carries: the
 issue number, the state label, the playbook path, the worktree, and the
 instance + script paths. It carries **no** work-order content — the issue
-and the PR are the work order.
+and the PR are the work order — but it does state the rule that the new
+issue body is the only work order (prior runs of the skill are out of
+scope), because a re-intake can anchor the role to an earlier request
+the model still holds in its own memory.
 
 ## 10. Verification of a role's handoff (R6, for the operator)
 
