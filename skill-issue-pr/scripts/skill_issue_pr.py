@@ -440,9 +440,12 @@ def find_open_skill_pr(repo: str, token: str, skill_name: str):
 def open_pr_on_branch(repo: str, token: str, branch: str):
     """The open pull request whose head is the named branch, or None.
     The pulls API reads the branch directly, so a pull request made
-    moments ago is already visible (the issues index lags it)."""
+    moments ago is already visible (the issues index lags it). The head
+    filter is owner-login + ":" + branch (the owner part of the repo,
+    not the full repo name)."""
+    owner = repo.split("/", 1)[0]
     q = urllib.parse.urlencode(
-        {"state": "open", "head": repo + ":" + branch, "per_page": "100"})
+        {"state": "open", "head": owner + ":" + branch, "per_page": "100"})
     data = _http_get(f"{API_V3}/repos/{repo}/pulls?{q}", token)
     if isinstance(data, list) and data:
         item = data[0]
@@ -472,8 +475,8 @@ def v_propose(args):
         ("Proposed skill folder: " + skill_name)
 
     branch = f"sr/{skill_name}-{date.today().isoformat()}"
-    open_pr = (find_open_skill_pr(repo, token, skill_name)
-               or open_pr_on_branch(repo, token, branch))
+    open_pr = (open_pr_on_branch(repo, token, branch)
+               or find_open_skill_pr(repo, token, skill_name))
     if open_pr:
         ok(skill=skill_name,
            warning=f"a pull request for '{skill_name}' is already open "
