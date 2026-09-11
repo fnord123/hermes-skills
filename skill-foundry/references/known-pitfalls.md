@@ -22,10 +22,11 @@ paths — the doctrine must stay reusable.
   so N is in the state block, not the label (the label during ste100 only
   says `ste100-ready-1`). This is why the counters are script-owned in the
   body.
-- **script-less routing is decided by the branch, not a role.** Audit and
-  ste100 route to `commit-ready` when the branch has no `<skill>/scripts/`.
+- **The scripter entry is decided by the branch, not a role.** STE100
+  routes to `commit-ready` when the branch has no `<skill>/scripts/`.
   The script inspects the branch (`git ls-tree` on `origin/<branch>`), so a
-  role that "thinks" the skill has scripts cannot misroute it.
+  role that "thinks" the skill has scripts cannot misroute it. Audit's
+  routing is unconditional: a PASS always goes to STE100.
 - **A change to a cap or an edge must change `decide()` and the test
   together.** The test is the pin; a cap that is only in prose is folklore.
 

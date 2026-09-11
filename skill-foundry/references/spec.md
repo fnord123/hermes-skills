@@ -54,9 +54,12 @@ Routing notes:
   the current stage, not N).
 - **scripter and verifier share one counter (K)**; a verifier FAIL bumps K
   and re-enters at the scripter.
-- **script-less skills** (the branch has no `<skill>/scripts/`): audit and
-  ste100 route straight to `commit-ready` — no scripter/verifier. The
-  script decides this by inspecting the branch, not by a role's self-report.
+- **audit ALWAYS routes a PASS to ste100** — every skill gets the writing
+  audit, script-less included. The script-less split happens one stage
+  later: ste100 PASS routes to the scripter when the branch has
+  `<skill>/scripts/`, and straight to `commit-ready` when it has none. The
+  script decides this by inspecting the branch, not by a role's
+  self-report.
 - **commit-ready** merges (no loop); a failed pre-flight is `parked-commit`.
 - **fleet** is a report-only card created after the merge; it has no
   successor and simply completes.
@@ -64,7 +67,7 @@ Routing notes:
 ## 2. The state machine (decide())
 
 Input: the issue's **current** state label (role + N), the state block,
-whether the branch has scripts (only audit and ste100 use it), and the role
+whether the branch has scripts (only ste100 uses it), and the role
 verdict (pass/fail). Output: the next label (or `MERGED`). The table below
 is `decide()` line for line; `skillpipe_test.py` covers every row.
 
@@ -72,8 +75,7 @@ is `decide()` line for line; `skillpipe_test.py` covers every row.
 |---|---|---|---|---|
 | author-ready-N | PASS | – | audit-ready-N | – |
 | author-ready-N | FAIL | – | parked-author-5 | – (request infeasible) |
-| audit-ready-N | PASS | yes | ste100-ready-(M+1) | M+=1 (park if M would exceed 3) |
-| audit-ready-N | PASS | no | commit-ready | – |
+| audit-ready-N | PASS | – | ste100-ready-(M+1) | M+=1 (park if M would exceed 3) |
 | audit-ready-N | FAIL | – | author-ready-(N+1) | N+=1 (park-audit-5 if N>5) |
 | ste100-ready-M | PASS | yes | scripter-ready-(K+1) | K+=1 (park-verifier-3 if K>3) |
 | ste100-ready-M | PASS | no | commit-ready | – |

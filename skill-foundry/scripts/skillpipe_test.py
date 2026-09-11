@@ -65,10 +65,11 @@ def main() -> None:
          "commit-ready")
     step("commit", 0, state(ste100=1, scripter=1), scripted, True, "MERGED")
 
-    # -- happy path, scriptless skill (audit/ste100 route straight to
-    #    commit; author/audit N preserved through the loop) -------------
+    # -- happy path, scriptless skill (audit always routes to ste100;
+    #    ste100 routes straight to commit; author/audit N preserved) ----
     step("author", 2, state(author=2), scriptless, True, "audit-ready-2")
-    step("audit", 2, state(author=2), scriptless, True, "commit-ready")
+    step("audit", 2, state(author=2), scriptless, True, "ste100-ready-1",
+         want_state={"ste100_round": 1})
     step("ste100", 1, state(ste100=1), scriptless, True, "commit-ready")
 
     # -- audit FAIL loop: N preserved on PASS, bumped on FAIL -----------

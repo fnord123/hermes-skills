@@ -72,8 +72,8 @@ author ─▶ audit ─▶ ste100 ─▶ (scripter ─▶ verifier) ─▶ commi
 Each stage can send the work **back** to an earlier stage with a concrete fix
 list — a *rework round*. Rework is **bounded**: a stage that keeps failing
 parks the issue with a per-cap label instead of spinning forever, and the
-owner resumes or abandons it. Scriptless skills skip the code stages and go
-straight to commit.
+owner resumes or abandons it. Scriptless skills skip scripter and
+verifier, but every skill goes through ste100.
 
 ## The graph
 
@@ -83,7 +83,7 @@ intake ──author-ready-1──▶ author ──▶ audit ──▶ ste100 ─
                                   ▲            │          │          │     └▶ parked-commit (pre-flight)
         audit FAIL (N→N+1) ─────────┘ FAIL(N)───┘ FAIL(K)───┘ FAIL(K→K+1)
         caps: author/audit 5 · ste100 3 · scripter/verifier 3 · commit (parked-commit)
-        script-less skills: audit/ste100 route straight to commit-ready
+        audit ALWAYS routes to ste100; script-less skills: ste100 -> commit-ready
 ```
 
 The label's number is how many times that role has been assigned the skill.

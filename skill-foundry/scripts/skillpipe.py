@@ -423,7 +423,7 @@ def decide(role: str, N: int, state: dict,
 
     role/N = the issue's CURRENT state label (author-ready-3 -> author/3).
     state  = the state block (mutated: counters).
-    has_scripts = branch has skill/scripts/ (only audit and ste100 use it).
+    has_scripts = branch has skill/scripts/ (only ste100 uses it).
     Returns (target, detail) where target is a ready/park label or the
     sentinel "MERGED". detail is the one-line summary for the issue note.
     """
@@ -453,15 +453,13 @@ def decide(role: str, N: int, state: dict,
             return (author_target(),
                     f"FAIL round {N} — findings posted; author_round -> "
                     f"{state['author_round']}")
-        if has_scripts:
-            state["ste100_round"] += 1
-            if state["ste100_round"] > caps["ste100"]:
-                return ("parked-ste100-3",
-                        "STE100 round budget exhausted on entry")
-            return (f"ste100-ready-{state['ste100_round']}",
-                    f"PASS — route STE100 (round "
-                    f"{state['ste100_round']}/{caps['ste100']})")
-        return ("commit-ready", "PASS — script-less, route commit")
+        state["ste100_round"] += 1
+        if state["ste100_round"] > caps["ste100"]:
+            return ("parked-ste100-3",
+                    "STE100 round budget exhausted on entry")
+        return (f"ste100-ready-{state['ste100_round']}",
+                f"PASS — route STE100 (round "
+                f"{state['ste100_round']}/{caps['ste100']})")
 
     if role == "ste100":
         if state["ste100_round"] != N:
@@ -928,7 +926,7 @@ def verb_transition(inst: dict, args) -> None:
     if role in ("author", "scripter") and args.pass_ and not state.get("pr"):
         fail("PASS requires a PR (pass --pr URL the first time)")
     has_scripts = (branch_has_scripts(inst, state["branch"], state["skill"])
-                   if role in ("audit", "ste100") else None)
+                   if role == "ste100" else None)
     target, detail = decide(role, N, state, has_scripts, args.pass_)
     if target == "MERGED":
         result = do_merge(inst, n, state, state["pr"])
