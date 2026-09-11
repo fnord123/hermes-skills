@@ -209,7 +209,8 @@ def _cache_path(app_id: str) -> Path:
     return d / f"token-{app_id}.json"
 
 
-def _http(method: str, url: str, token: str, body=None) -> dict:
+def _http(method: str, url: str, token: str, body=None,
+          not_found_message=None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
         "Authorization": f"Bearer {token}",
@@ -228,8 +229,11 @@ def _http(method: str, url: str, token: str, body=None) -> dict:
             detail = json.loads(e.read().decode()).get("message", "")
         except Exception:  # noqa: BLE001
             pass
-        error = f"GitHub rejected the request ({e.code}): " \
-            f"{detail or e.reason}"
+        if e.code == 404 and not_found_message:
+            error = not_found_message
+        else:
+            error = f"GitHub rejected the request ({e.code}): " \
+                f"{detail or e.reason}"
     except urllib.error.URLError as e:
         error = f"could not reach GitHub: {e.reason}"
     if error is not None:
@@ -237,8 +241,8 @@ def _http(method: str, url: str, token: str, body=None) -> dict:
     return parsed
 
 
-def _http_get(url: str, token: str):
-    return _http("GET", url, token)
+def _http_get(url: str, token: str, not_found_message=None):
+    return _http("GET", url, token, not_found_message=not_found_message)
 
 
 def _actor_login(token: str):
@@ -433,6 +437,21 @@ def find_open_skill_pr(repo: str, token: str, skill_name: str):
     return None
 
 
+def open_pr_on_branch(repo: str, token: str, branch: str):
+    """The open pull request whose head is the named branch, or None.
+    The pulls API reads the branch directly, so a pull request made
+    moments ago is already visible (the issues index lags it)."""
+    q = urllib.parse.urlencode(
+        {"state": "open", "head": repo + ":" + branch, "per_page": "100"})
+    data = _http_get(f"{API_V3}/repos/{repo}/pulls?{q}", token)
+    if isinstance(data, list) and data:
+        item = data[0]
+        if isinstance(item, dict) and item.get("number") is not None:
+            return {"pr": item["number"],
+                    "pr_url": (item.get("html_url") or "")}
+    return None
+
+
 def _default_branch(repo: str, token: str) -> str:
     data = _http_get(f"{API_V3}/repos/{repo}", token)
     return data.get("default_branch", "main") if isinstance(data, dict) \
@@ -452,7 +471,9 @@ def v_propose(args):
     body = (args.body or "").strip() or \
         ("Proposed skill folder: " + skill_name)
 
-    open_pr = find_open_skill_pr(repo, token, skill_name)
+    branch = f"sr/{skill_name}-{date.today().isoformat()}"
+    open_pr = (find_open_skill_pr(repo, token, skill_name)
+               or open_pr_on_branch(repo, token, branch))
     if open_pr:
         ok(skill=skill_name,
            warning=f"a pull request for '{skill_name}' is already open "
@@ -466,7 +487,6 @@ def v_propose(args):
         fail("the issue was not created")
     issue_number = issue["number"]
 
-    branch = f"sr/{skill_name}-{date.today().isoformat()}"
     base = _default_branch(repo, token)
     note(f"cloning {repo} at {base} ...")
     clone_dir = _clone(repo, base, token)
@@ -503,7 +523,10 @@ def v_update(args):
     token = get_token(bool(args.as_bot))
     actor = (bot_login() or _actor_login(token)) if args.as_bot else \
         _actor_login(token)
-    pr_data = _http_get(f"{API_V3}/repos/{repo}/pulls/{args.pr}", token)
+    pr_data = _http_get(f"{API_V3}/repos/{repo}/pulls/{args.pr}", token,
+                        not_found_message=(
+                            f"pull request {args.pr} was not found in "
+                            f"{repo} (or is not open there)"))
     if not isinstance(pr_data, dict) or not pr_data.get("number"):
         fail(f"pull request {args.pr} was not found in {repo} (or is not "
              "open there)")
