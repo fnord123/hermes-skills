@@ -83,7 +83,8 @@ intake ──author-ready-1──▶ author ──▶ audit ──▶ ste100 ─
                                   ▲            │          │          │     └▶ parked-commit (pre-flight)
         audit FAIL (N→N+1) ─────────┘ FAIL(N)───┘ FAIL(K)───┘ FAIL(K→K+1)
         caps: author/audit 5 · ste100 3 · scripter/verifier 3 · commit (parked-commit)
-        audit ALWAYS routes to ste100; script-less skills: ste100 -> commit-ready
+        audit ALWAYS routes to ste100; route-to-scripter signal unset (no
+        scripts on the branch AND no author-declared contract): ste100 -> commit-ready
 ```
 
 The label's number is how many times that role has been assigned the skill.

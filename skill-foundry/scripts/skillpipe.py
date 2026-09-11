@@ -306,6 +306,19 @@ def branch_has_scripts(inst: dict, branch: str, skill: str) -> bool:
     return bool(proc.stdout.strip())
 
 
+def effective_has_scripts(inst: dict, branch: str, skill: str,
+                          declares: bool) -> bool:
+    """Route-to-scripter signal: the branch carries the skill's scripts,
+    OR the author declared a script contract.
+
+    The OR covers both modes: an update-mode branch already carries
+    scripts/ (detected), while a create-mode skill declares its contract
+    in SKILL.md and the Scripter implements it (declared). A create-mode
+    branch without the flag is genuinely script-less.
+    """
+    return declares or branch_has_scripts(inst, branch, skill)
+
+
 def post_pr_comment(inst: dict, pr_url: str, markdown: str) -> None:
     path = write_tmp(markdown)
     try:
@@ -915,6 +928,13 @@ def verb_transition(inst: dict, args) -> None:
     if args.pass_ == args.fail:
         fail("exactly one of --pass / --fail is required")
     state = parse_state(issue_body(inst, n))
+    if args.declares_scripts and role != "author":
+        fail("--declares-scripts is an author transition flag (the "
+             "author alone declares the script contract)")
+    if args.declares_scripts and not args.pass_:
+        fail("--declares-scripts applies to a PASS")
+    if args.declares_scripts:
+        state["declares_scripts"] = True
     if args.pr:
         state["pr"] = args.pr
     findings = None
@@ -925,7 +945,12 @@ def verb_transition(inst: dict, args) -> None:
             fail("--fail requires --findings-file or --findings-text")
     if role in ("author", "scripter") and args.pass_ and not state.get("pr"):
         fail("PASS requires a PR (pass --pr URL the first time)")
-    has_scripts = (branch_has_scripts(inst, state["branch"], state["skill"])
+    # The route-to-scripter signal: branch has scripts (update mode)
+    # OR the author declared a contract (create mode, implemented by
+    # the Scripter).
+    has_scripts = (effective_has_scripts(inst, state["branch"],
+                                         state["skill"],
+                                         bool(state.get("declares_scripts")))
                    if role == "ste100" else None)
     target, detail = decide(role, N, state, has_scripts, args.pass_)
     if target == "MERGED":
@@ -1192,6 +1217,11 @@ def guard_main() -> None:
     group.add_argument("--fail", action="store_true")
     p.add_argument("--pr", default=None,
                    help="PR URL (required for author/scripter PASS)")
+    p.add_argument("--declares-scripts", dest="declares_scripts",
+                   action="store_true",
+                   help="author PASS only: SKILL.md declares a script "
+                        "contract the Scripter implements (the run's "
+                        "routing signal to the scripter stage)")
     p.add_argument("--findings-file", default=None)
     p.add_argument("--findings-text", default=None)
 

@@ -56,10 +56,14 @@ Routing notes:
   and re-enters at the scripter.
 - **audit ALWAYS routes a PASS to ste100** — every skill gets the writing
   audit, script-less included. The script-less split happens one stage
-  later: ste100 PASS routes to the scripter when the branch has
-  `<skill>/scripts/`, and straight to `commit-ready` when it has none. The
-  script decides this by inspecting the branch, not by a role's
-  self-report.
+  later: ste100 PASS routes to the scripter when the run's
+  **route-to-scripter signal** is set — the branch has
+  `<skill>/scripts/` (update mode) OR the author declared the script
+  contract in SKILL.md via `transition --pass --declares-scripts`
+  (create mode — the author proposes the contract, never the
+  implementation; the Audit rejects `scripts/` in the author's diff) —
+  and straight to `commit-ready` when neither holds. The script decides
+  this from its own state and the branch, not by a role's self-report.
 - **commit-ready** merges (no loop); a failed pre-flight is `parked-commit`.
 - **fleet** is a report-only card created after the merge; it has no
   successor and simply completes.
@@ -67,11 +71,12 @@ Routing notes:
 ## 2. The state machine (decide())
 
 Input: the issue's **current** state label (role + N), the state block,
-whether the branch has scripts (only ste100 uses it), and the role
-verdict (pass/fail). Output: the next label (or `MERGED`). The table below
-is `decide()` line for line; `skillpipe_test.py` covers every row.
+the route-to-scripter signal (branch has scripts OR the author declared
+a contract — only ste100 uses it), and the role verdict (pass/fail).
+Output: the next label (or `MERGED`). The table below is `decide()` line
+for line; `skillpipe_test.py` covers every row.
 
-| current label | verdict | has scripts | next label | counter moved |
+| current label | verdict | route-to-scripter signal | next label | counter moved |
 |---|---|---|---|---|
 | author-ready-N | PASS | – | audit-ready-N | – |
 | author-ready-N | FAIL | – | parked-author-5 | – (request infeasible) |
@@ -137,8 +142,12 @@ pipeline-state -->
 
 Only the script writes it: it parses it, bumps the counter `decide()`
 named, and rewrites it atomically on the same issue edit that moves the
-label. The round notes section (above the block) is appended per round so
-the issue body is itself a running log.
+label. It also carries `declares_scripts` (true when the author's
+`transition --pass --declares-scripts` ran) — the create-mode half of
+the route-to-scripter signal, since a create-mode branch legitimately
+has no `scripts/` until the Scripter implements the contract. The round
+notes section (above the block) is appended per round so the issue body
+is itself a running log.
 
 ## 5. The worktree strategy
 

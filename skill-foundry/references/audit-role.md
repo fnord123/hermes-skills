@@ -28,6 +28,14 @@ on or send it back with an exact fix list. You never edit the skill.
 - **Verify factual claims** in the SKILL.md (output shapes, flags,
   behavior) against the actual scripts. The linter checks mechanics, not
   truth — this is the truth check.
+- **Script-authorship boundary (create mode, mechanical):** the Author
+  declares the script contract in SKILL.md and never touches
+  `scripts/`. Any `<skill>/scripts/` path in the author's PR diff is a
+  true positive — FAIL it as "outside the author's scope" with the
+  required fix "declare the contract in SKILL.md; let the Scripter
+  implement it." The reverse is also a true positive: the work order
+  needs scripts and the SKILL.md declares no contract — the Scripter
+  would have nothing to implement.
 - **Trigger re-check (updates):** recount the quoted trigger phrases in the
   description before and after, and against the committed baseline. A
   silent drop is a true positive even if the linter did not fire.

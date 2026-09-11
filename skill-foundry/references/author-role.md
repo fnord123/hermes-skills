@@ -22,6 +22,14 @@ author. You do not approve your own work.
   `CONVENTIONS.md`. Survey 2-3 sibling skills in the same domain; prefer
   extending an existing skill over a near-duplicate. Write the new skill
   in the worktree.
+- **You never write the scripts (create mode).** A skill with a script
+  is proposed as **SKILL.md declaring the script contract**: every verb,
+  its flags, its output shape, its error behavior, and the
+  `scripts/<name>.py` references — exactly the surface the Scripter
+  implements (see `scripter-role.md`). You do not create or edit files
+  under the skill's `scripts/`; the Audit rejects them as outside your
+  scope. If the skill genuinely has no scripts, say so (no contract) and
+  your transition carries no `--declares-scripts`.
 - **Update mode:** read the existing skill first. If this run is a
   rework (round > 1), the round notes and the review comments on the
   pull request list exactly what to fix — fix exactly those, no scope
@@ -59,6 +67,10 @@ the issue at merge.
 
 - Work done, PR pushed →
   `python3 <script> --instance <instance> transition --issue <n> --role author --pass --pr <PR URL>`
+  With the run's script contract declared in SKILL.md (create mode),
+  add `--declares-scripts` — it is the routing signal that sends the run
+  to the Scripter after STE100, and the script records it in the state
+  block. Omit it only when the skill has no scripts.
 - The request itself is infeasible (you cannot produce a proposal that
   meets the rubric) →
   `python3 <script> --instance <instance> transition --issue <n> --role author --fail --findings-text "<why it is infeasible>"`
