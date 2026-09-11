@@ -395,6 +395,9 @@ WORK ORDER (binding):
 2. The work order for THIS run is the body of GitHub issue #{n} on
    {inst['REPO']} (request text + round notes; state block at the bottom
    carries the PR URL, branch, and round counters). Read it before acting.
+   The new issue body is the ONLY work order: prior runs of this skill
+   are out of scope — if your memory holds an earlier request for this
+   skill, this issue supersedes it.
 3. Do the stage work on the PR/branch named in the state block.
 4. Finish with EXACTLY ONE script call (the playbook names it):
    python3 {script_path} --instance {instance_path} <verb> ...

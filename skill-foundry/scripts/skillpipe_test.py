@@ -492,15 +492,56 @@ def main() -> None:
         "declares_scripts must round-trip through the state block"
     rt_cases = 1
 
+    # -- dispatch card carries the work-order-supremacy rule ----------
+    # The card is the text the worker reads first; the binding rule
+    # must render in it (regression for the abandoned-run anchor).
+    import subprocess as _sp4
+    cb_cases = 0
+    inst2 = dict(inst)
+    inst2["ASSIGNEE"] = "author=worker-x"
+    inst2["WORKTREE_ROOT"] = "/wts"
+    import tempfile as _tf
+    _cards = _tf.mkdtemp()
+    open(os.path.join(_cards, "author-role.md"), "w").write("stub")
+    inst2["CARDS_DIR"] = _cards
+    captured = {}
+
+    def _cap(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return _sp4.CompletedProcess(cmd, 0,
+                                     stdout=json.dumps({"id": "t_cb"}),
+                                     stderr="")
+
+    orig_run2 = skillpipe.run
+    skillpipe.run = _cap
+    try:
+        skillpipe.kanban_create(inst2, "author", 33, "author-ready-1",
+                                "github-issue-pr", "/wt", "sr-github-issue-pr-i33")
+    finally:
+        skillpipe.run = orig_run2
+    body_path = None
+    for i, tok in enumerate(captured.get("cmd", [])):
+        if tok == "--body" and i + 1 < len(captured["cmd"]):
+            body_path = captured["cmd"][i + 1]
+    if body_path is None:
+        raise AssertionError("kanban_create did not pass --body")
+    cb = " ".join(body_path.split())
+    assert "The new issue body is the ONLY work order: prior runs " \
+           "of this skill are out of scope" in cb, \
+        "dispatch card body must carry the work-order-supremacy rule"
+    assert f"GitHub issue #33" in cb and "author-ready-1" in cb
+    cb_cases = 1
+
     print(json.dumps({"ok": True,
                       "cases": (cases + desyncs + gh_cases + pr_cases
-                                + ab_cases + ehs_cases + rt_cases),
+                                + ab_cases + ehs_cases + rt_cases + cb_cases),
                       "table": "all edges covered",
                       "desyncs": desyncs,
                       "gh_actor": gh_cases,
                       "pr_open": pr_cases,
                       "abandon": ab_cases,
-                      "declares_scripts": ehs_cases + rt_cases}))
+                      "declares_scripts": ehs_cases + rt_cases,
+                      "card_body": cb_cases}))
     sys.exit(0)
 
 
