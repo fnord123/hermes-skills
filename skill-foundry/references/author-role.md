@@ -28,8 +28,14 @@ author. You do not approve your own work.
   expansion.
 - **Reworking after a FAIL:** the FAIL findings are a pull request
   comment (or an issue comment if no PR existed). Address every finding.
-  For a STE100 rework, keep the protected surface (the PREFER clause, the
-  trigger phrases, code spans) byte-identical.
+  For a STE100 rework, keep the protected surface (the section order, the
+  profile-path-token paths, code spans) byte-identical. Treat each STE100
+  proposal as a structure, not a paste: attempt to correct the relevant
+  text while retaining the sentence structure it proposes, so the
+  technical meaning of the original is unchanged. On a proposal to drop,
+  merge, or reword a trigger phrase or PREFER clause, you are free to
+  agree or disagree: if you disagree, keep the original and note your
+  reason in your transition.
 
 ## Commit, push, and the pull request
 
