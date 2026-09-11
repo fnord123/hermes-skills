@@ -447,8 +447,8 @@ WORK ORDER (binding):
     card_id = task.get("id")
     superseded = None
     # Idempotency hit on a BLOCKED card: the key returns an existing card
-    # regardless of its status, and a blocked card is never re-armed (it
-    # was parked for a reason and may point at a deleted worktree).
+    # regardless of its status. A blocked card is never re-armed: it was
+    # parked for a reason and may point at a deleted worktree.
     # Supersede, don't unblock: keep the dead card as a record, mark it
     # superseded, and create the live card under a fresh key.
     if kanban_status(inst, card_id) == "blocked":
@@ -459,9 +459,9 @@ WORK ORDER (binding):
              "at park. A fresh card carries the dispatch (see the "
              "issue); this card is left blocked as a record."],
             check=False)
-        # A card id is a valid key (the key space is free-form text the
-        # substrate only dedups on), so the fresh key is derived from the
-        # superseded card — never free-text, always distinct.
+        # A card id is a valid key. The key space is free-form text, and
+        # the substrate only dedups on it. The fresh key derives from the
+        # superseded card: never free-text, always distinct.
         cmd[cmd.index("--idempotency-key") + 1] = f"{idem}-{card_id}"
         proc = run(cmd)
         try:
@@ -965,7 +965,7 @@ def do_merge(inst: dict, n: int, state: dict, pr: str) -> dict:
     _merge_cleanup(inst, state)
     # Terminal reconciliation: a card still in `blocked` (a parked
     # commit, a superseded-then-parked role) finished its work outside
-    # its own card path — the merge just deleted the worktree it may
+    # its own card path. The merge just deleted the worktree it may
     # point at. Completing it with the owner note is reconciliation,
     # not unblocking: no run is re-armed.
     note = (f"owner-completed: issue #{n} merged (PR {pr}, {sha}); the "

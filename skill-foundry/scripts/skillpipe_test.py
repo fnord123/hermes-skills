@@ -638,12 +638,12 @@ def main() -> None:
     sp_cases += 1
 
     # -- operator merge reconciles the run's blocked cards -------------
-    # A card blocked at park is never re-armed by anything, so an
-    # operator merge (which finishes the work outside the role's card
-    # path) must COMPLETE those cards with an owner-completion note —
+    # A card blocked at park is never re-armed by anything. An operator
+    # merge finishes the work outside the role's card path. It must
+    # COMPLETE those cards with an owner-completion note —
     # reconciliation, not unblocking (issue #38, instance 2: a
-    # parked-commit merge left the commit card blocked forever, pointing
-    # at a deleted worktree).
+    # parked-commit merge left the commit card blocked, pointing at a
+    # deleted worktree).
     import subprocess as _sp6
     rc_cases = 0
     rc_state = {"skill": "demo", "mode": "update", "branch": "sr/demo",
