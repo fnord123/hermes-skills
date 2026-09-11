@@ -98,9 +98,9 @@ Always echo the confirmation back — issue link, pull request link, and
 branch — so the user can open both immediately.
 
 **A `propose` response may include a `warning` field** (a pull request for
-that skill folder is already open). Relay it verbatim: the issue and pull
-request were NOT created; the tool points at the open pull request, and
-the right move is `update` on it.
+that skill folder is already open). Relay it verbatim: the tool did NOT
+create the issue and pull request; the tool points at the open pull
+request, and the right move is `update` on it.
 
 ## A typical session
 
