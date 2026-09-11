@@ -532,16 +532,60 @@ def main() -> None:
     assert f"GitHub issue #33" in cb and "author-ready-1" in cb
     cb_cases = 1
 
+    # -- merge preflight: the rev-list count is TAB-separated -----------
+    # git emits "0\t0" (verified via od -c); a raw comparison to the
+    # string "0 0" can never hold, so every merge parked as a false
+    # positive (issue #35, parked-commit). The preflight must accept
+    # the real git output and still catch a true divergence.
+    import subprocess as _sp5
+    pf_cases = 0
+    orig_git5 = skillpipe.git
+    inst3 = {"REPO_DIR": "/tmp"}
+    try:
+        for count, want_clean in [
+            ("0\t0\n", True),    # in sync — git's real tab-separated form
+            ("0 0\n", True),     # in sync — spaced form tolerated too
+            ("1\t0\n", False),   # main ahead of origin/main
+            ("0\t1\n", False),   # main behind origin/main
+        ]:
+            def pf_git(inst, args, check=True, **_kw):
+                if args[:1] == ["status"]:
+                    return _sp5.CompletedProcess(args, 0, stdout="",
+                                                 stderr="")
+                if args[:1] == ["branch"]:
+                    return _sp5.CompletedProcess(args, 0, stdout="main\n",
+                                                 stderr="")
+                if args[:1] == ["rev-list"]:
+                    return _sp5.CompletedProcess(args, 0, stdout=count,
+                                                 stderr="")
+                return _sp5.CompletedProcess(args, 0, stdout="", stderr="")
+
+            skillpipe.git = pf_git
+            reason = skillpipe._merge_preflight(inst3, {"skill": "demo"})
+            if want_clean:
+                assert reason == "", (
+                    f"_merge_preflight(count={count!r}) -> {reason!r}, "
+                    "want clean (a false positive parks every merge)")
+            else:
+                assert "diverged" in reason, (
+                    f"_merge_preflight(count={count!r}) -> {reason!r}, "
+                    "want a divergence reason")
+            pf_cases += 1
+    finally:
+        skillpipe.git = orig_git5
+
     print(json.dumps({"ok": True,
                       "cases": (cases + desyncs + gh_cases + pr_cases
-                                + ab_cases + ehs_cases + rt_cases + cb_cases),
+                                + ab_cases + ehs_cases + rt_cases + cb_cases
+                                + pf_cases),
                       "table": "all edges covered",
                       "desyncs": desyncs,
                       "gh_actor": gh_cases,
                       "pr_open": pr_cases,
                       "abandon": ab_cases,
                       "declares_scripts": ehs_cases + rt_cases,
-                      "card_body": cb_cases}))
+                      "card_body": cb_cases,
+                      "merge_preflight": pf_cases}))
     sys.exit(0)
 
 
