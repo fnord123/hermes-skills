@@ -680,7 +680,10 @@ def _merge_preflight(inst: dict, state: dict) -> str:
     git(inst, ["fetch", "origin"])
     ahead_behind = git(inst, ["rev-list", "--left-right", "--count",
                               "main...origin/main"]).stdout.strip()
-    if ahead_behind != "0 0":
+    # git emits the two counts TAB-separated ("0\t0"), so compare the
+    # fields, not the raw string: a literal "0 0" match can never hold
+    # and parked every merge as a false positive (issue #35).
+    if ahead_behind.split() != ["0", "0"]:
         return f"main diverged from origin/main: {ahead_behind}"
     return ""
 
