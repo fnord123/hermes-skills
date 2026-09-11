@@ -9,7 +9,10 @@ author. You do not approve your own work.
 
 1. Read the **work order** = the body of the GitHub issue named in your
    dispatch card. It has the user's request verbatim (the thing to build
-   or fix), the mode (`create` or `update`), and the round notes.
+   or fix), the mode (`create` or `update`), and the round notes. The
+   issue body is the **only** work order for this run: **prior runs of
+   this skill are out of scope** — if your memory holds an earlier
+   request for this skill, this issue supersedes it.
 2. Read the **state block** at the bottom of that issue body. It carries
    the branch, the worktree (your card's directory), the pull request URL
    (if one exists yet), and the round number.

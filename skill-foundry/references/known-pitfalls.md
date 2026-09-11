@@ -141,3 +141,11 @@ paths — the doctrine must stay reusable.
   that runs the tool and then fails to read the tool is worse than no
   checker — every new parser gets a one-line "does it actually see the
   finding" probe before it ships.
+- **The issue body is the only work order; the author's memory is not.**
+  A re-intake of a skill whose prior run was abandoned can anchor the
+  Author to the old request — the model holds an earlier work order for
+  the same skill in its own memory and treats this issue as a revision of
+  it. The observed symptom: the author diffed the new request against the
+  dead one ("the old request: … the new request adds …") and would have
+  built to a blend. The playbook states the rule at the top of the Author
+  stage: the issue body supersedes any earlier request for this skill.
