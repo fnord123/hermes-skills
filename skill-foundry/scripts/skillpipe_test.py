@@ -651,11 +651,14 @@ def main() -> None:
                 "author_round": 1, "ste100_round": 1, "scripter_round": 1,
                 "infeasible": 0,
                 "cards": {"commit": ["t_commit_blocked"],
+                          "verifier": ["t_verifier_blocked"],
                           "fleet": ["t_fleet1"]}}
-    rc_body = "# i\n\n" + skillpipe.state_block(rc_state)
 
-    def make_rc_run(statuses, view_json):
-        rc_create = {"create": None, "complete": None, "unblock": 0,
+    def make_rc_run(statuses, view_json, cards=rc_state["cards"]):
+        rc_body = "# i\n\n" + skillpipe.state_block(dict(rc_state,
+                                                         cards=cards))
+        skillpipe.issue_body = lambda inst, n: rc_body
+        rc_create = {"create": None, "complete": [], "unblock": 0,
                      "shows": [], "pr_views": 0}
 
         def rc_run(cmd, cwd=None, check=True):
@@ -681,7 +684,7 @@ def main() -> None:
                                                  stdout=json.dumps(payload),
                                                  stderr="")
                 if "complete" in cmd:
-                    rc_create["complete"] = cmd
+                    rc_create["complete"].append(cmd)
                     return _sp6.CompletedProcess(cmd, 0, stdout="",
                                                  stderr="")
                 return _sp6.CompletedProcess(cmd, 0, stdout="",
@@ -723,14 +726,16 @@ def main() -> None:
 
     try:
         skillpipe.git = mg_git
-        skillpipe.issue_body = lambda inst, n: rc_body
         # case 1: a blocked commit card + a ready fleet card -> complete
-        # the blocked one ONLY, with the owner-completion note
+        # the blocked one ONLY, with the owner-completion note, per id
+        # (the CLI takes --summary per task; a multi-id complete with
+        # --summary exits 2)
         os.environ["GH_APP_ID"] = "12345"
         os.environ.pop("GH_TOKEN", None)
         run1, calls1 = make_rc_run(
             {"t_commit_blocked": "blocked", "t_fleet2": "ready"},
-            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}))
+            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}),
+            cards={"commit": ["t_commit_blocked"], "fleet": ["t_fleet1"]})
         skillpipe.run = run1
         try:
             skillpipe.verb_merge(inst3b, _MgArgs())
@@ -738,14 +743,18 @@ def main() -> None:
         except SystemExit as exc:
             assert exc.code == 0
         complete = calls1["complete"]
-        assert complete is not None, \
-            "a merge with a blocked card must complete it (reconciliation)"
-        assert "t_commit_blocked" in complete, \
-            f"the blocked card must be completed, got {complete}"
-        assert "t_fleet2" not in complete, \
+        assert len(complete) == 1, \
+            f"one blocked card means exactly one complete call, " \
+            f"got {len(complete)}"
+        cmd1 = complete[0]
+        ids_in_cmd = [c for c in cmd1 if c.startswith("t_")]
+        assert ids_in_cmd == ["t_commit_blocked"], \
+            f"the complete call must carry ONLY the blocked card id, " \
+            f"got {ids_in_cmd}"
+        assert "t_fleet2" not in cmd1, \
             "the ready fleet card is not a blocked card and must not " \
             "be completed"
-        joined = " ".join(complete)
+        joined = " ".join(cmd1)
         assert "owner-completed" in joined and "issue #7" in joined, \
             f"the completion must carry the owner note (what, via what), " \
             f"got {joined}"
@@ -756,32 +765,71 @@ def main() -> None:
             f"the fleet dispatch must still happen, key " \
             f"{calls1['create']!r}"
         rc_cases += 1
-        # case 2: no blocked cards -> no complete call at all
-        run2, calls2 = make_rc_run({},
-                                   json.dumps({"state": "OPEN",
-                                               "mergeStateStatus": "CLEAN"}))
-        skillpipe.run = run2
+        # case 2 (the round-1 FAIL finding): >=2 blocked cards -> one
+        # complete call PER ID, each with --summary. A single multi-id
+        # call is what the live CLI refuses (exit 2), and the swallowed
+        # refusal was the bug: every card stayed blocked while the merge
+        # result reported them reconciled.
+        run2b, calls2b = make_rc_run(
+            {"t_commit_blocked": "blocked", "t_verifier_blocked": "blocked",
+             "t_fleet2": "ready"},
+            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}),
+            cards={"commit": ["t_commit_blocked"],
+                   "verifier": ["t_verifier_blocked"],
+                   "fleet": ["t_fleet1"]})
+        skillpipe.run = run2b
         try:
             skillpipe.verb_merge(inst3b, _MgArgs())
             raise AssertionError("merge must out()")
         except SystemExit as exc:
             assert exc.code == 0
-        assert calls2["complete"] is None, \
-            "with no blocked cards the merge must not complete any"
-        assert calls2["unblock"] == 0
+        complete = calls2b["complete"]
+        assert len(complete) == 2, \
+            f"two blocked cards mean two per-id complete calls, " \
+            f"got {len(complete)}"
+        for cmd in complete:
+            ids_in_cmd = [c for c in cmd if c.startswith("t_")]
+            assert len(ids_in_cmd) == 1, \
+                f"each complete call must carry exactly one id, " \
+                f"got {ids_in_cmd}"
+            assert "--summary" in cmd, \
+                f"each complete call must carry the owner note, " \
+                f"got {cmd}"
+            assert "owner-completed" in " ".join(cmd)
+        completed = sorted(set(x for c in complete for x in c
+                                if x.startswith("t_")))
+        assert completed == ["t_commit_blocked", "t_verifier_blocked"], \
+            f"both blocked cards must be completed, got {completed}"
+        assert calls2b["unblock"] == 0, \
+            "reconciliation must NOT unblock (no re-armed run)"
         rc_cases += 1
-        # case 3: a status probe failure is best-effort — the merge
-        # still lands, no card is touched (we do not know it was blocked)
-        run3, calls3 = make_rc_run(
-            {"*": "error"},
-            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}))
+        # case 3: no blocked cards -> no complete call at all
+        run3, calls3 = make_rc_run({},
+                                   json.dumps({"state": "OPEN",
+                                               "mergeStateStatus": "CLEAN"}),
+                                   cards={"fleet": ["t_fleet1"]})
         skillpipe.run = run3
         try:
             skillpipe.verb_merge(inst3b, _MgArgs())
             raise AssertionError("merge must out()")
         except SystemExit as exc:
             assert exc.code == 0
-        assert calls3["complete"] is None, \
+        assert calls3["complete"] == [], \
+            "with no blocked cards the merge must not complete any"
+        assert calls3["unblock"] == 0
+        rc_cases += 1
+        # case 4: a status probe failure is best-effort — the merge
+        # still lands, no card is touched (we do not know it was blocked)
+        run4, calls4 = make_rc_run(
+            {"*": "error"},
+            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}))
+        skillpipe.run = run4
+        try:
+            skillpipe.verb_merge(inst3b, _MgArgs())
+            raise AssertionError("merge must out()")
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert calls4["complete"] == [], \
             "a failed probe must not complete cards we could not read"
         rc_cases += 1
     finally:

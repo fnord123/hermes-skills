@@ -1236,14 +1236,18 @@ def reconcile_blocked_cards(inst: dict, state: dict, note: str) -> list:
 
     Completion is reconciliation, not unblocking: it records what
     happened (what, via what) on the closing run and leaves no armed
-    dispatch behind. check=False: reconciliation must not fail the merge
-    because one card vanished.
+    dispatch behind. The CLI takes --summary only per task (multi-id
+    complete with --summary exits 2 — a single swallowed refusal would
+    leave every card blocked while the merge result reported them
+    reconciled), so each card gets its own complete call. check=False:
+    reconciliation must not fail the merge because one card vanished.
     """
     ids = blocked_cards(inst, state)
     if not ids:
         return []
-    run(["hermes", "kanban", "--board", inst["BOARD"], "complete", *ids,
-         "--summary", note], check=False)
+    for cid in ids:
+        run(["hermes", "kanban", "--board", inst["BOARD"], "complete",
+             cid, "--summary", note], check=False)
     return ids
 
 
