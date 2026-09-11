@@ -1,0 +1,4 @@
+# Third-party packages skill_issue_pr.py imports.
+# Install with: python3 -m pip install -r requirements.txt
+# (only the --as-bot path needs it; the person path is dependency-free)
+cryptography
