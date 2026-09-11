@@ -442,13 +442,65 @@ def main() -> None:
         _sh.rmtree(wt_dir, ignore_errors=True)
     ab_cases = 2
 
+    # -- effective_has_scripts: the route-to-scripter OR --------------
+    # declares OR branch. (declares, branch) -> expected; the git seam
+    # is mocked per-case so each row is isolated. The ls-tree probe runs
+    # only when declares is falsy (the `or` short-circuits on True).
+    import subprocess as _sp3
+    ehs_cases = 0
+    orig_git3 = skillpipe.git
+    try:
+        for declares, branch, expected, want_git in [
+            (False, False, False, True),   # create, no contract: probe -> none
+            (True, False, True, False),    # create + contract: short-circuit,
+                                           # no git call at all
+            (False, True, True, True),     # update mode: probe finds scripts
+            (True, True, True, False),     # both: short-circuit (already True)
+        ]:
+            calls = {"git": 0}
+
+            def ehs_git(inst, args, check=True, **_kw):
+                if args[:1] == ["fetch"]:
+                    return _sp3.CompletedProcess(
+                        args, 0, stdout="", stderr="")
+                calls["git"] += 1
+                so = "demo/scripts/x.py\n" if branch else ""
+                return _sp3.CompletedProcess(
+                    args, 0, stdout=so, stderr="")
+
+            skillpipe.git = ehs_git
+            got = skillpipe.effective_has_scripts(
+                {"REPO_DIR": "/tmp"}, "sr/demo", "demo", declares)
+            assert got == expected, (
+                f"effective_has_scripts(declares={declares}, "
+                f"branch={branch}) -> {got}, want {expected}")
+            assert (calls["git"] > 0) == want_git, (
+                f"git seam called={calls['git'] > 0}, want {want_git} "
+                f"(declares={declares})")
+            ehs_cases += 1
+    finally:
+        skillpipe.git = orig_git3
+
+    # -- state round-trip: the flag is carried by the issue block -----
+    rt_state = {"skill": "demo", "mode": "create", "branch": "sr/demo",
+                "author_round": 1, "ste100_round": 0,
+                "scripter_round": 0, "infeasible": 0,
+                "cards": {}, "declares_scripts": True}
+    rt_body = "# i\n\n" + skillpipe.state_block(rt_state)
+    rt_parsed = skillpipe.parse_state(rt_body)
+    assert rt_parsed.get("declares_scripts") is True, \
+        "declares_scripts must round-trip through the state block"
+    rt_cases = 1
+
     print(json.dumps({"ok": True,
-                      "cases": cases + desyncs + gh_cases + pr_cases + ab_cases,
+                      "cases": (cases + desyncs + gh_cases + pr_cases
+                                + ab_cases + ehs_cases + rt_cases),
                       "table": "all edges covered",
                       "desyncs": desyncs,
                       "gh_actor": gh_cases,
                       "pr_open": pr_cases,
-                      "abandon": ab_cases}))
+                      "abandon": ab_cases,
+                      "declares_scripts": ehs_cases + rt_cases}))
     sys.exit(0)
 
 

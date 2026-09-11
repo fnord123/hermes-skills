@@ -22,11 +22,21 @@ paths — the doctrine must stay reusable.
   so N is in the state block, not the label (the label during ste100 only
   says `ste100-ready-1`). This is why the counters are script-owned in the
   body.
-- **The scripter entry is decided by the branch, not a role.** STE100
-  routes to `commit-ready` when the branch has no `<skill>/scripts/`.
-  The script inspects the branch (`git ls-tree` on `origin/<branch>`), so a
-  role that "thinks" the skill has scripts cannot misroute it. Audit's
-  routing is unconditional: a PASS always goes to STE100.
+- **The scripter entry is decided by the script, not a role.** STE100
+  routes to `commit-ready` when the route-to-scripter signal is unset:
+  the branch has no `<skill>/scripts/` (the script inspects it with
+  `git ls-tree` on `origin/<branch>`) AND the state block carries no
+  `declares_scripts` from the author. A role that "thinks" the skill has
+  scripts cannot misroute it. Audit's routing is unconditional: a PASS
+  always goes to STE100.
+- **The author proposes the contract, the Scripter implements it.** In
+  create mode the author's PR must contain SKILL.md declaring the script
+  contract (verbs, flags, output, errors, `scripts/<name>.py`
+  references) — never the scripts themselves. `scripts/` in the
+  author's diff is a true positive at Audit; the pairing of the
+  `--declares-scripts` transition flag with the branch inspection is
+  what keeps a create-mode scripted skill from being misrouted to
+  `commit-ready` (and thereby skipping the Scripter and the Verifier).
 - **A change to a cap or an edge must change `decide()` and the test
   together.** The test is the pin; a cap that is only in prose is folklore.
 
