@@ -204,7 +204,9 @@ the park reason) plus a decision.
   is posted to the issue as the work order. This is how you "add a comment
   and send it back to whatever stage I want."
 - **`abandon --issue N --yes`** — closes the issue and removes the
-  worktree + branch.
+  worktree + branch, and permanently deletes every card of the run
+  (archive, then `archive --rm`) — blocked, done, running: no cards
+  are left on the board for an abandoned run.
 
 ## 9. Dispatch mechanics (what the script does on a transition)
 
