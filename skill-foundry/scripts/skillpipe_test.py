@@ -498,31 +498,37 @@ def main() -> None:
     import subprocess as _sp4
     cb_cases = 0
     inst2 = dict(inst)
-    inst2["ASSIGNEE"] = "author=worker-x"
+    inst2["ASSIGNEE"] = "author=worker-x, verifier=worker-v"
     inst2["WORKTREE_ROOT"] = "/wts"
     import tempfile as _tf
     _cards = _tf.mkdtemp()
     open(os.path.join(_cards, "author-role.md"), "w").write("stub")
+    open(os.path.join(_cards, "verifier-role.md"), "w").write("stub")
     inst2["CARDS_DIR"] = _cards
-    captured = {}
+    cb_create = {}
 
-    def _cap(cmd, *a, **k):
-        captured["cmd"] = cmd
-        return _sp4.CompletedProcess(cmd, 0,
-                                     stdout=json.dumps({"id": "t_cb"}),
-                                     stderr="")
+    def cap_create(cmd, cwd=None, check=True):
+        if "create" in cmd:
+            cb_create["cmd"] = cmd
+            so = json.dumps({"id": "t_cb"})
+        elif "show" in cmd:  # the status probe (best-effort)
+            so = json.dumps({"task": {"status": "ready"}})
+        else:
+            so = ""
+        return _sp4.CompletedProcess(cmd, 0, stdout=so, stderr="")
 
     orig_run2 = skillpipe.run
-    skillpipe.run = _cap
+    skillpipe.run = cap_create
     try:
-        skillpipe.kanban_create(inst2, "author", 33, "author-ready-1",
-                                "github-issue-pr", "/wt", "sr-github-issue-pr-i33")
+        card = skillpipe.kanban_create(inst2, "author", 33, "author-ready-1",
+                                       "github-issue-pr", "/wt",
+                                       "sr-github-issue-pr-i33")
     finally:
         skillpipe.run = orig_run2
     body_path = None
-    for i, tok in enumerate(captured.get("cmd", [])):
-        if tok == "--body" and i + 1 < len(captured["cmd"]):
-            body_path = captured["cmd"][i + 1]
+    for i, tok in enumerate(cb_create.get("cmd", [])):
+        if tok == "--body" and i + 1 < len(cb_create["cmd"]):
+            body_path = cb_create["cmd"][i + 1]
     if body_path is None:
         raise AssertionError("kanban_create did not pass --body")
     cb = " ".join(body_path.split())
@@ -530,7 +536,261 @@ def main() -> None:
            "of this skill are out of scope" in cb, \
         "dispatch card body must carry the work-order-supremacy rule"
     assert f"GitHub issue #33" in cb and "author-ready-1" in cb
+    assert card.get("superseded") is None, \
+        "a fresh (non-blocked-hit) dispatch must not supersede"
     cb_cases = 1
+
+    # -- idempotency hit on a BLOCKED card: supersede, don't unblock ----
+    # The substrate returns the existing card for a key regardless of
+    # its status; a blocked card (parked, possibly pointing at a deleted
+    # worktree) must not be surfaced as the live next card (issue #38,
+    # instance 1). The fix: probe the status; on `blocked` comment the
+    # card superseded and re-create under a fresh key.
+    sp_cases = 0
+    sp_create = {}
+
+    def make_sp_run(statuses):
+        sp_create.update({"creates": [], "show": [], "comments": [],
+                          "unblock": 0})
+        show_calls = {"n": 0}
+
+        def sp_run(cmd, cwd=None, check=True):
+            if "unblock" in cmd:
+                sp_create["unblock"] += 1
+            if "create" in cmd:
+                i = cmd.index("--idempotency-key")
+                key = cmd[i + 1]
+                # the fresh key is derived from the superseded card id
+                so = json.dumps({"id": "t_fresh"}) \
+                    if key.endswith("-t_old") else json.dumps({"id": "t_old"})
+                sp_create["creates"].append(key)
+                return _sp4.CompletedProcess(cmd, 0, stdout=so,
+                                             stderr="")
+            if "show" in cmd:
+                card = cmd[cmd.index("show") + 1]
+                status = (statuses[card] if card in statuses
+                          else statuses.get("*", "ready"))
+                show_calls["n"] += 1
+                sp_create["show"].append(card)
+                if status == "error":
+                    return _sp4.CompletedProcess(cmd, 1, stdout="",
+                                                 stderr="boom")
+                payload = {"task": {"id": card, "status": status}}
+                return _sp4.CompletedProcess(cmd, 0,
+                                             stdout=json.dumps(payload),
+                                             stderr="")
+            if "comment" in cmd:
+                sp_create["comments"].append(cmd)
+                return _sp4.CompletedProcess(cmd, 0, stdout="",
+                                             stderr="")
+            return _sp4.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return sp_run
+
+    skillpipe.run = make_sp_run({"t_old": "blocked"})
+    try:
+        card = skillpipe.kanban_create(inst2, "verifier", 42,
+                                       "verifier-ready-3", "demo", "/wt",
+                                       "sr-demo-i42-verifier-r3")
+    finally:
+        skillpipe.run = orig_run2
+    assert sp_create["creates"] == ["sr-demo-i42-verifier-r3",
+                                    "sr-demo-i42-verifier-r3-t_old"], \
+        f"blocked hit must re-create under a fresh key derived from " \
+        f"the superseded card, got {sp_create['creates']}"
+    assert card["id"] == "t_fresh", \
+        f"the LIVE card must be the fresh one, got {card['id']!r}"
+    assert card["superseded"] == "t_old", \
+        f"the blocked card id must be surfaced as superseded, got " \
+        f"{card.get('superseded')!r}"
+    assert any("SUPERSEDED" in " ".join(c) for c in sp_create["comments"]), \
+        "the superseded card must carry a SUPERSEDED comment"
+    assert sp_create["unblock"] == 0, \
+        "supersede must NOT unblock the parked card (the owner's hand " \
+        "is the only unblock path)"
+    sp_cases = 1
+    # ready status on the hit: the card IS the live card; no fresh key,
+    # no comment, no superseded field.
+    skillpipe.run = make_sp_run({"t_old": "ready"})
+    try:
+        card = skillpipe.kanban_create(inst2, "verifier", 42,
+                                       "verifier-ready-3", "demo", "/wt",
+                                       "sr-demo-i42-verifier-r3")
+    finally:
+        skillpipe.run = orig_run2
+    assert sp_create["creates"] == ["sr-demo-i42-verifier-r3"], \
+        f"ready hit must be surfaced as-is, got {sp_create['creates']}"
+    assert card["id"] == "t_old" and card["superseded"] is None
+    assert sp_create["comments"] == [], \
+        "a ready hit must not be commented"
+    sp_cases += 1
+    # a status probe that fails (unknown / archived card) is best-effort:
+    # it must not fail the dispatch and must not trigger a fresh key.
+    skillpipe.run = make_sp_run({"t_old": "error"})
+    try:
+        card = skillpipe.kanban_create(inst2, "verifier", 42,
+                                       "verifier-ready-3", "demo", "/wt",
+                                       "sr-demo-i42-verifier-r3")
+    finally:
+        skillpipe.run = orig_run2
+    assert sp_create["creates"] == ["sr-demo-i42-verifier-r3"], \
+        "a failed status probe must not fail or re-key the dispatch"
+    assert card["id"] == "t_old" and card["superseded"] is None
+    sp_cases += 1
+
+    # -- operator merge reconciles the run's blocked cards -------------
+    # A card blocked at park is never re-armed by anything, so an
+    # operator merge (which finishes the work outside the role's card
+    # path) must COMPLETE those cards with an owner-completion note —
+    # reconciliation, not unblocking (issue #38, instance 2: a
+    # parked-commit merge left the commit card blocked forever, pointing
+    # at a deleted worktree).
+    import subprocess as _sp6
+    rc_cases = 0
+    rc_state = {"skill": "demo", "mode": "update", "branch": "sr/demo",
+                "worktree": "/tmp/wt/demo", "pr": "https://x/pull/7",
+                "author_round": 1, "ste100_round": 1, "scripter_round": 1,
+                "infeasible": 0,
+                "cards": {"commit": ["t_commit_blocked"],
+                          "fleet": ["t_fleet1"]}}
+    rc_body = "# i\n\n" + skillpipe.state_block(rc_state)
+
+    def make_rc_run(statuses, view_json):
+        rc_create = {"create": None, "complete": None, "unblock": 0,
+                     "shows": [], "pr_views": 0}
+
+        def rc_run(cmd, cwd=None, check=True):
+            if "unblock" in cmd:
+                rc_create["unblock"] += 1
+            if cmd[-1] == "token":
+                return _sp6.CompletedProcess(cmd, 0,
+                                             stdout="ghs_12345_test\n")
+            if cmd[0] == "hermes" and cmd[1] == "kanban":
+                if "create" in cmd:
+                    i = cmd.index("--idempotency-key")
+                    rc_create["create"] = cmd[i + 1]
+                    return _sp6.CompletedProcess(cmd, 0,
+                                                 stdout=json.dumps(
+                                                     {"id": "t_fleet2"}),
+                                                 stderr="")
+                if "show" in cmd:
+                    cid = cmd[cmd.index("show") + 1]
+                    rc_create["shows"].append(cid)
+                    status = statuses.get(cid, statuses.get("*", "ready"))
+                    payload = {"task": {"id": cid, "status": status}}
+                    return _sp6.CompletedProcess(cmd, 0,
+                                                 stdout=json.dumps(payload),
+                                                 stderr="")
+                if "complete" in cmd:
+                    rc_create["complete"] = cmd
+                    return _sp6.CompletedProcess(cmd, 0, stdout="",
+                                                 stderr="")
+                return _sp6.CompletedProcess(cmd, 0, stdout="",
+                                             stderr="")
+            if cmd[0] == "gh":
+                if cmd[1:3] == ["pr", "view"]:
+                    rc_create["pr_views"] += 1
+                    # the 2nd view (post-merge) asks for the merge commit
+                    if rc_create["pr_views"] >= 2:
+                        so = json.dumps({"mergeCommit": {"oid": "abc123"},
+                                         "url": "https://x/pull/7"})
+                    else:
+                        so = view_json
+                    return _sp6.CompletedProcess(cmd, 0, stdout=so,
+                                                 stderr="")
+                return _sp6.CompletedProcess(cmd, 0, stdout="",
+                                             stderr="")
+            return _sp6.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return rc_run, rc_create
+
+    orig_git6 = skillpipe.git
+    orig_ib6 = skillpipe.issue_body
+    _rc_cards = _tf.mkdtemp()
+    open(os.path.join(_rc_cards, "fleet-role.md"), "w").write("stub")
+    inst3b = {"REPO": "owner/repo", "REPO_DIR": "/tmp", "BOARD": "skills",
+              "ASSIGNEE": "fleet=worker-y", "CARDS_DIR": _rc_cards}
+
+    class _MgArgs:
+        issue, pr = 7, None
+
+    def mg_git(inst, args, check=True, **_kw):
+        if args[:1] == ["branch"]:  # preflight: current branch
+            return _sp6.CompletedProcess(args, 0, stdout="main\n",
+                                         stderr="")
+        if args[:1] == ["rev-list"]:  # preflight: main vs origin/main
+            return _sp6.CompletedProcess(args, 0, stdout="0\t0\n",
+                                         stderr="")
+        return _sp6.CompletedProcess(args, 0, stdout="", stderr="")
+
+    try:
+        skillpipe.git = mg_git
+        skillpipe.issue_body = lambda inst, n: rc_body
+        # case 1: a blocked commit card + a ready fleet card -> complete
+        # the blocked one ONLY, with the owner-completion note
+        os.environ["GH_APP_ID"] = "12345"
+        os.environ.pop("GH_TOKEN", None)
+        run1, calls1 = make_rc_run(
+            {"t_commit_blocked": "blocked", "t_fleet2": "ready"},
+            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}))
+        skillpipe.run = run1
+        try:
+            skillpipe.verb_merge(inst3b, _MgArgs())
+            raise AssertionError("merge must out()")
+        except SystemExit as exc:
+            assert exc.code == 0
+        complete = calls1["complete"]
+        assert complete is not None, \
+            "a merge with a blocked card must complete it (reconciliation)"
+        assert "t_commit_blocked" in complete, \
+            f"the blocked card must be completed, got {complete}"
+        assert "t_fleet2" not in complete, \
+            "the ready fleet card is not a blocked card and must not " \
+            "be completed"
+        joined = " ".join(complete)
+        assert "owner-completed" in joined and "issue #7" in joined, \
+            f"the completion must carry the owner note (what, via what), " \
+            f"got {joined}"
+        assert "merged" in joined, "the note must say what happened"
+        assert calls1["unblock"] == 0, \
+            "reconciliation must NOT unblock (no re-armed run)"
+        assert calls1["create"] == "sr-demo-i7-fleet-r0", \
+            f"the fleet dispatch must still happen, key " \
+            f"{calls1['create']!r}"
+        rc_cases += 1
+        # case 2: no blocked cards -> no complete call at all
+        run2, calls2 = make_rc_run({},
+                                   json.dumps({"state": "OPEN",
+                                               "mergeStateStatus": "CLEAN"}))
+        skillpipe.run = run2
+        try:
+            skillpipe.verb_merge(inst3b, _MgArgs())
+            raise AssertionError("merge must out()")
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert calls2["complete"] is None, \
+            "with no blocked cards the merge must not complete any"
+        assert calls2["unblock"] == 0
+        rc_cases += 1
+        # case 3: a status probe failure is best-effort — the merge
+        # still lands, no card is touched (we do not know it was blocked)
+        run3, calls3 = make_rc_run(
+            {"*": "error"},
+            json.dumps({"state": "OPEN", "mergeStateStatus": "CLEAN"}))
+        skillpipe.run = run3
+        try:
+            skillpipe.verb_merge(inst3b, _MgArgs())
+            raise AssertionError("merge must out()")
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert calls3["complete"] is None, \
+            "a failed probe must not complete cards we could not read"
+        rc_cases += 1
+    finally:
+        skillpipe.git = orig_git6
+        skillpipe.issue_body = orig_ib6
+        skillpipe.run = orig_run2
+        skillpipe._ROLE_TOKEN = None
+        os.environ.pop("GH_APP_ID", None)
+        os.environ.pop("GH_TOKEN", None)
 
     # -- merge preflight: the rev-list count is TAB-separated -----------
     # git emits "0\t0" (verified via od -c); a raw comparison to the
@@ -577,6 +837,7 @@ def main() -> None:
     print(json.dumps({"ok": True,
                       "cases": (cases + desyncs + gh_cases + pr_cases
                                 + ab_cases + ehs_cases + rt_cases + cb_cases
+                                + sp_cases + rc_cases
                                 + pf_cases),
                       "table": "all edges covered",
                       "desyncs": desyncs,
@@ -585,6 +846,8 @@ def main() -> None:
                       "abandon": ab_cases,
                       "declares_scripts": ehs_cases + rt_cases,
                       "card_body": cb_cases,
+                      "blocked_supersede": sp_cases,
+                      "blocked_reconcile": rc_cases,
                       "merge_preflight": pf_cases}))
     sys.exit(0)
 
