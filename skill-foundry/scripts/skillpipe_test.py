@@ -186,7 +186,7 @@ def main() -> None:
     def _unpatched(*a, **k):
         raise AssertionError("skillpipe.run left unpatched by a gh test case")
     skillpipe.run = _unpatched
-    inst = {"REPO": "owner/repo", "REPO_DIR": "/tmp"}
+    inst = {"REPO": "owner/repo", "REPO_DIR": "/tmp", "BOARD": "skills"}
 
     # operator context: no SKILLPIPE vars -> gh runs exactly as found,
     # GH_TOKEN left untouched (the operator's own auth, on purpose).
@@ -335,11 +335,14 @@ def main() -> None:
     wt_dir = _tf.mkdtemp(prefix="sp-ab-")
     ab_state = {"skill": "demo", "mode": "create", "branch": "sr/demo",
                 "worktree": wt_dir, "author_round": 1, "ste100_round": 0,
-                "scripter_round": 0, "infeasible": 0, "cards": {}}
+                "scripter_round": 0, "infeasible": 0,
+                "cards": {"author": ["t_aa111111"],
+                          "scripter": ["t_bb222222"]}}
     body_ab = "# i\n\n" + skillpipe.state_block(ab_state)
 
     def make_ab_run(remote_present: bool):
-        calls = {"git": [], "push": None, "close": None, "comment": False}
+        calls = {"git": [], "push": None, "close": None, "comment": False,
+                 "kanban": []}
 
         def ab_run(cmd, cwd=None, check=True):
             if cmd[0] == "git":
@@ -362,6 +365,9 @@ def main() -> None:
                 return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
             if cmd[-1] == "token" and "skillpipe-auth" in cmd[1]:
                 return _sp2.CompletedProcess(cmd, 0, stdout="ghs_12345_test\n")
+            if cmd[0] == "hermes" and cmd[1] == "kanban":
+                calls["kanban"].append(cmd)
+                return _sp2.CompletedProcess(cmd, 0, stdout="", stderr="")
             if cmd[0] == "gh":
                 if cmd[1:3] == ["issue", "close"]:
                     calls["close"] = cmd
@@ -397,6 +403,18 @@ def main() -> None:
             "abandon must push --delete the REMOTE branch"
         assert [c for c in calls1["git"] if c[:2] == ["branch", "-D"]] == \
             [["branch", "-D", ab_state["branch"]]], "local branch delete"
+        # abandon must sweep the run's cards too (archive, then the
+        # permanent archive --rm) - blocked, done, everything (owner rule
+        # 2026-09-11: no leftover cards on an abandoned run)
+        arch_calls = [c for c in calls1["kanban"] if "--rm" not in c]
+        rm_calls = [c for c in calls1["kanban"] if "--rm" in c]
+        assert len(arch_calls) == 1 and len(rm_calls) == 1, \
+            "abandon must archive then archive --rm the run's cards"
+        assert arch_calls[0][-3:] == ["archive", "t_aa111111", "t_bb222222"], \
+            "abandon must archive every card in the state block"
+        assert rm_calls[0][-4:] == ["archive", "--rm", "t_aa111111",
+                                     "t_bb222222"], \
+            "abandon must permanently delete the cards (archive --rm)"
         assert not os.path.isdir(wt_dir), "worktree must be removed"
         # case 2: remote branch already gone -> no push, still True
         run2, calls2 = make_ab_run(remote_present=False)

@@ -49,7 +49,7 @@ Verbs:
   comment     post a note to the PR (or issue)
   status      one issue: label, state, PR, worktree
   list        every open pipeline issue
-  abandon     close the issue, remove the worktree + branch
+  abandon     close the issue, remove worktree + branch + all its cards
 
 House contract: exactly ONE JSON object on stdout per call. Success is
 {"ok": true, ...}; failure is {"ok": false, "error": "..."} + exit 1.
@@ -1109,6 +1109,22 @@ def verb_list(inst: dict, args) -> None:
     out({"open": len(rows), "pipelines": rows})
 
 
+def kanban_delete(inst: dict, ids: list) -> int:
+    """Permanently delete cards: archive, then `archive --rm` them.
+    An abandoned run leaves no cards behind (owner rule, 2026-09-11:
+    "I want the cards gone — all cards, blocked, completed, etc.").
+    check=False: a card already deleted is not an error; the issue is
+    closed by then and the run is over."""
+    ids = [i for i in ids if i]
+    if not ids:
+        return 0
+    run(["hermes", "kanban", "--board", inst["BOARD"], "archive", *ids],
+        check=False)
+    run(["hermes", "kanban", "--board", inst["BOARD"], "archive",
+         "--rm", *ids], check=False)
+    return len(ids)
+
+
 def verb_abandon(inst: dict, args) -> None:
     if not args.yes:
         fail("abandon is destructive (closes issue, removes worktree + "
@@ -1134,9 +1150,16 @@ def verb_abandon(inst: dict, args) -> None:
         probe = git(inst, ["ls-remote", "--heads", "origin", state["branch"]],
                     check=False)
         branch_removed = not probe.stdout.strip()
+    # Sweep the run's cards too — the state block is the complete card
+    # record (the script writes it on every dispatch), so this deletes
+    # every card of the run: blocked, done, running, all of them.
+    card_ids = sorted({c for ids in state.get("cards", {}).values()
+                       for c in ids if c})
+    cards_removed = kanban_delete(inst, card_ids)
     out({"issue": n, "was": cur, "closed": True,
          "worktree_removed": not os.path.isdir(state.get("worktree", "")),
-         "branch_removed": branch_removed})
+         "branch_removed": branch_removed,
+         "cards_removed": cards_removed})
 
 
 # ---------------------------------------------------------------- main
