@@ -133,8 +133,13 @@ def resolve_repo(flag_repo):
                           capture_output=True, text=True, timeout=30)
     url = proc.stdout.strip()
     if proc.returncode == 0 and url:
-        m = re.match(r"(?:https?://|git@github\.com:)?([^/]+/[^/]+?)"
-                     r"(?:\.git)?$", url)
+        # The HTTPS and SSH prefixes must each consume the host so only
+        # owner/name remains to match. An HTTPS URL keeps github.com as a
+        # third path segment, which the two-segment group cannot span, so
+        # anchoring the prefix to github.com/ (not just the scheme) is what
+        # makes the default `git clone https://...` form resolve.
+        m = re.match(r"(?:https?://github\.com/|git@github\.com:)?"
+                     r"([^/]+/[^/]+?)(?:\.git)?$", url)
         if m:
             return m.group(1)
     fail("no repo configured: the install has no configured repo and the "
