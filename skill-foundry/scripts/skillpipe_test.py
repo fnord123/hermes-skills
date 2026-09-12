@@ -796,8 +796,8 @@ def main() -> None:
                 f"each complete call must carry the owner note, " \
                 f"got {cmd}"
             assert "owner-completed" in " ".join(cmd)
-        completed = sorted(set(x for c in complete for x in c
-                                if x.startswith("t_")))
+        ids = [x for c in complete for x in c if x.startswith("t_")]
+        completed = sorted(set(ids))
         assert completed == ["t_commit_blocked", "t_verifier_blocked"], \
             f"both blocked cards must be completed, got {completed}"
         assert calls2b["unblock"] == 0, \
