@@ -97,6 +97,22 @@ paths — the doctrine must stay reusable.
   returns the existing card instead of spawning a duplicate. The key is
   derived, not free-text — a role that hand-creates a card with a
   different key reintroduces the duplicate-successor class.
+- **A card blocked at park is never re-armed (a new run starts for it) —
+  so it is never reconciled on its own.** The substrate returns an
+  idempotency key's existing card regardless of its status, and nothing
+  ever unblocks a parked card. Two observed instances: (1) a resume
+  re-dispatched the same (skill, issue, role, round). The substrate
+  surfaced the EXISTING BLOCKED card as the live next card. The pipeline
+  sat dead until the owner unblocked it by hand; (2) an operator merge
+  finished a parked-commit pipeline. Its cleanup deleted the worktree.
+  The commit card the role had blocked stayed blocked, pointing at a
+  deleted worktree. Rule that closes it: a dispatch that hits an existing
+  `blocked` card supersedes it. It comments the card `SUPERSEDED` and
+  creates the live card under a fresh key. It never unblocks it — the
+  owner's hand is the only unblock path. The operator merge completes the
+  run's remaining `blocked` cards with an owner-completion note (what
+  happened, via what). Completion is reconciliation, not unblocking: it
+  records the outcome on the closing run and re-arms nothing.
 
 ## The merge
 

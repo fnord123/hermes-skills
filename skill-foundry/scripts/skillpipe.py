@@ -374,6 +374,23 @@ def idem_key(state: dict, n: int, role: str, round_no: int) -> str:
     return f"sr-{state['skill']}-i{n}-{role}-r{round_no}"
 
 
+def kanban_status(inst: dict, task_id: str) -> str:
+    """One card's current status ('' if it cannot be read).
+
+    Best-effort by design: a dispatch must not fail on a status probe. The
+    probe exists to catch the ONE idempotency-hit class that a dispatch
+    must not reuse — an existing card in `blocked` (see kanban_create).
+    """
+    proc = run(["hermes", "kanban", "--board", inst["BOARD"], "show",
+                task_id, "--json"], check=False)
+    if proc.returncode != 0:
+        return ""
+    try:
+        return json.loads(proc.stdout).get("task", {}).get("status") or ""
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+
+
 def kanban_create(inst: dict, role: str, n: int, label: str, skill: str,
                   worktree: str, idem: str) -> dict:
     profile = assignee_for(inst, role)
@@ -427,7 +444,34 @@ WORK ORDER (binding):
     except json.JSONDecodeError:
         fail(f"kanban create returned non-JSON:\n{proc.stdout[:500]}")
     task = data[0] if isinstance(data, list) else data
-    return {"id": task.get("id"), "assignee": profile, "title": task.get("title")}
+    card_id = task.get("id")
+    superseded = None
+    # Idempotency hit on a BLOCKED card: the key returns an existing card
+    # regardless of its status. A blocked card is never re-armed: it was
+    # parked for a reason and may point at a deleted worktree.
+    # Supersede, don't unblock: keep the dead card as a record, mark it
+    # superseded, and create the live card under a fresh key.
+    if kanban_status(inst, card_id) == "blocked":
+        superseded = card_id
+        run(["hermes", "kanban", "--board", inst["BOARD"], "comment",
+             card_id,
+             "SUPERSEDED — a re-dispatch hit this card after it blocked "
+             "at park. A fresh card carries the dispatch (see the "
+             "issue); this card is left blocked as a record."],
+            check=False)
+        # A card id is a valid key. The key space is free-form text, and
+        # the substrate only dedups on it. The fresh key derives from the
+        # superseded card: never free-text, always distinct.
+        cmd[cmd.index("--idempotency-key") + 1] = f"{idem}-{card_id}"
+        proc = run(cmd)
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            fail(f"kanban create returned non-JSON:\n{proc.stdout[:500]}")
+        task = data[0] if isinstance(data, list) else data
+        card_id = task.get("id")
+    return {"id": card_id, "assignee": profile, "title": task.get("title"),
+            "superseded": superseded}
 
 
 # ------------------------------------------------- the transition table
@@ -919,8 +963,18 @@ def do_merge(inst: dict, n: int, state: dict, pr: str) -> dict:
     # script-controlled (merge = work order complete)
     gh(inst, ["issue", "close", str(n)])
     _merge_cleanup(inst, state)
+    # Terminal reconciliation: a card still in `blocked` (a parked
+    # commit, a superseded-then-parked role) finished its work outside
+    # its own card path. The merge just deleted the worktree it may
+    # point at. Completing it with the owner note is reconciliation,
+    # not unblocking: no run is re-armed.
+    note = (f"owner-completed: issue #{n} merged (PR {pr}, {sha}); the "
+            "run is terminal — this card's blocked state is reconciled, "
+            "not unblocked (the merge completed the work outside this "
+            "card)")
+    reconciled = reconcile_blocked_cards(inst, state, note)
     return {"merged": True, "pr": merged["url"], "sha": sha,
-            "issue_closed": True}
+            "issue_closed": True, "reconciled_blocked_cards": reconciled}
 
 
 def verb_transition(inst: dict, args) -> None:
@@ -984,14 +1038,19 @@ def verb_transition(inst: dict, args) -> None:
     elif args.fail:
         post_issue_comment(inst, n, comment)
     card = None
+    superseded = None
     if not target.startswith("parked-"):
         trole, tnum = parse_label(target)
         card = kanban_create(inst, trole, n, target, state["skill"],
                              state["worktree"], idem_key(state, n, trole, tnum))
         state["cards"].setdefault(trole, []).append(card["id"])
+        superseded = card.get("superseded")
     note = (f"### {role} round {N} — {verdict} -> {target}\n\n{detail}\n"
             + (f" Next card: `{card['id']}` ({card['assignee']})\n" if card
-               else " PARKED — owner decides (resume / abandon).\n"))
+               else " PARKED — owner decides (resume / abandon).\n")
+            + (f" Superseded the blocked card `{superseded}` "
+               "(it was parked at block time; a fresh card carries the "
+               "dispatch).\n" if superseded else ""))
     edit_issue(inst, n, render_body(issue_body(inst, n), state, note=note),
                add_label=target if not target.startswith("parked-") else target,
                remove_labels=[cur])
@@ -1154,6 +1213,42 @@ def kanban_delete(inst: dict, ids: list) -> int:
     run(["hermes", "kanban", "--board", inst["BOARD"], "archive",
          "--rm", *ids], check=False)
     return len(ids)
+
+
+def blocked_cards(inst: dict, state: dict) -> list:
+    """This run's cards that sit in `blocked`.
+
+    A card blocked at park (needs_input) is never re-armed: unblock is a
+    human act, and the substrate's idempotency return does not look at
+    status. The set is computed from the state block's card record — the
+    complete card record (the script writes it on every dispatch) — and
+    each id is probed so the note lands only on cards that are actually
+    blocked (a card the owner already unblocked by hand is left alone).
+    """
+    ids = sorted({c for ids in state.get("cards", {}).values()
+                  for c in ids if c})
+    return [c for c in ids if kanban_status(inst, c) == "blocked"]
+
+
+def reconcile_blocked_cards(inst: dict, state: dict, note: str) -> list:
+    """Complete the run's blocked cards when the work finished outside
+    their card path (the operator merged).
+
+    Completion is reconciliation, not unblocking: it records what
+    happened (what, via what) on the closing run and leaves no armed
+    dispatch behind. The CLI takes --summary only per task (multi-id
+    complete with --summary exits 2 — a single swallowed refusal would
+    leave every card blocked while the merge result reported them
+    reconciled), so each card gets its own complete call. check=False:
+    reconciliation must not fail the merge because one card vanished.
+    """
+    ids = blocked_cards(inst, state)
+    if not ids:
+        return []
+    for cid in ids:
+        run(["hermes", "kanban", "--board", inst["BOARD"], "complete",
+             cid, "--summary", note], check=False)
+    return ids
 
 
 def verb_abandon(inst: dict, args) -> None:
