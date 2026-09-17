@@ -27,8 +27,9 @@ BOARD = os.environ.get("RX_BOARD", "rx-review")
 # merge, efficacy and sweep cards stay on the profile's -high default. The parts and their synth
 # share the same rx-research profile, so a profile-level change cannot split them - this uses the
 # per-card `hermes kanban create --model` pin, which overrides the profile without changing it.
-# Env-overridable, like RX_BOARD.
-PART_MODEL = os.environ.get("RX_PART_MODEL", "qwen/qwen3-27b-hermes")
+# Allowed reasoning targets are qwen/qwen3-agentic and qwen/qwen3-agentic-high (David, 2026-09-17);
+# this is the plain one. Env-overridable, like RX_BOARD.
+PART_MODEL = os.environ.get("RX_PART_MODEL", "qwen/qwen3-agentic")
 # The DEFAULT profile's config: the Discord fallback channel lives in the gateway that delivers
 # it. HERMES_REAL_HOME is the user's home (profile homes nest under it), so the profile-aware
 # fallback resolves to the same file the old hardcoded path meant; a profile-less CLI run has no
