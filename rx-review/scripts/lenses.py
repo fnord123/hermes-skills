@@ -323,7 +323,8 @@ def cmd_fanout(args):
                                  % (KANBAN_BODY_CAP, lens, tag))
             cid = create(spec["title"] % (tag + rtag), spec["profile"], body,
                          parents=[], runtime="%dm" % CARD_RUNTIME_MINUTES,
-                         priority=30, dry=args.dry_run, notify=False)
+                         priority=30, dry=args.dry_run, notify=False,
+                         model=rxkanban.PART_MODEL)
             ids.append(cid)
             created.append(cid)
         if not args.dry_run:

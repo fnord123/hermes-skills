@@ -22,6 +22,13 @@ import time
 
 HERMES = os.path.expanduser("~/.local/bin/hermes")
 BOARD = os.environ.get("RX_BOARD", "rx-review")
+# The plain (non-high) reasoning model for the high-volume research *part* cards only: the 6a/6b
+# shard parts, the Stage-7 lens chunk cards, and the Stage-7 citation-audit cards. Their synthesis,
+# merge, efficacy and sweep cards stay on the profile's -high default. The parts and their synth
+# share the same rx-research profile, so a profile-level change cannot split them - this uses the
+# per-card `hermes kanban create --model` pin, which overrides the profile without changing it.
+# Env-overridable, like RX_BOARD.
+PART_MODEL = os.environ.get("RX_PART_MODEL", "qwen/qwen3-27b-hermes")
 # The DEFAULT profile's config: the Discord fallback channel lives in the gateway that delivers
 # it. HERMES_REAL_HOME is the user's home (profile homes nest under it), so the profile-aware
 # fallback resolves to the same file the old hardcoded path meant; a profile-less CLI run has no
@@ -264,15 +271,20 @@ def _pace_creates():
 
 
 def create_card(title, assignee, body, workspace, parents=(), runtime="45m",
-                priority=0, key=None, dry=False, notify=False):
+                priority=0, key=None, dry=False, notify=False, model=None, provider=None):
     """Create one kanban card and return its id, or a DRY_PREFIX placeholder when previewing.
 
     A create failure is fatal, never assumed: the caller's graph is wrong from that point on,
     and continuing builds the rest of it on a parent that does not exist.
 
     `key` is the idempotency key. Callers prefix it per module so two scripts cannot collide
-    on a shared title, and round-dependent titles must carry the round - re-planning with the
-    same title returns the EXISTING card and silently discards the new --parent arguments.
+    on a shared title, and round-dependent titles must carry the round - re-planning with
+    the same title returns the EXISTING card and silently discards the new --parent arguments.
+
+    `model` pins the worker to a specific model via `--model`, overriding the profile's
+    configured model without changing the profile itself (e.g. running high-volume part cards
+    on the plain model while their synthesis stays on the profile default). `provider`
+    names the backend that model belongs to; requires `model` when set.
     """
     cmd = [HERMES, "kanban", "--board", BOARD, "create", title,
            "--assignee", assignee, "--max-runtime", runtime,
@@ -280,6 +292,10 @@ def create_card(title, assignee, body, workspace, parents=(), runtime="45m",
            "--priority", str(priority),
            "--idempotency-key", key or slugify(title),
            "--body", body]
+    if model:
+        cmd += ["--model", model]
+        if provider:
+            cmd += ["--provider", provider]
     for p in parents:
         if p and not is_dry(p):
             cmd += ["--parent", p]

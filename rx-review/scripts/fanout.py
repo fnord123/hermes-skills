@@ -721,7 +721,8 @@ def shard(args, label, name, slug, intro, parts, synth_q, out, fmt, priority, qf
         body = PART_BODY.format(intro=intro, n=i, total=len(parts), name=name,
                                 questions=questions.format(**qfmt), frag=frag, **pfmt)
         ids.append(create(args, "%s: %s — part %d/%d" % (label, name, i, len(parts)),
-                          "rx-research", body, runtime=PART_RUNTIME, priority=priority))
+                          "rx-research", body, runtime=PART_RUNTIME, priority=priority,
+                          model=rxkanban.PART_MODEL))
     frag_list = "\n".join("    %s/%s" % (REPORTS, f) for f in frags)
     body = SYNTH_BODY.format(name=name, total=len(parts), frag_list=frag_list,
                              questions=synth_q.format(**qfmt), out=out, **fmt)
@@ -746,8 +747,11 @@ supports the claim but no single sentence says so, write that in the endnote ins
 # worth pushing are already sent by other means: the two human gates subscribe themselves in
 # rx.py, and phase boundaries go through announce(). A blocked work card is visible in
 # `rx.py status` and on the board.
-def create(args, title, assignee, body, parents=(), runtime="45m", priority=0):
-    """Graph card rooted in reports/, keyed with the rxfan- prefix. Mechanics in rxkanban."""
+def create(args, title, assignee, body, parents=(), runtime="45m", priority=0, model=None):
+    """Graph card rooted in reports/, keyed with the rxfan- prefix. Mechanics in rxkanban.
+
+    `model` pins the card to a model (see rxkanban.PART_MODEL); None keeps the profile default.
+    """
     tag = getattr(args, "tag", "")
     if tag:
         title = "%s [%s]" % (title, tag)
@@ -757,7 +761,8 @@ def create(args, title, assignee, body, parents=(), runtime="45m", priority=0):
         return "DRY-" + rxkanban.slugify(title, 12)
     tid = rxkanban.create_card(title, assignee, body, REPORTS, parents=parents,
                                runtime=runtime, priority=priority,
-                               key="rxfan-" + rxkanban.slugify(title), notify=False)
+                               key="rxfan-" + rxkanban.slugify(title), notify=False,
+                               model=model)
     print("  %s  %-58s <- %s  [%s]"
           % (tid, title[:58], ", ".join(parents) or "no parents", assignee))
     return tid

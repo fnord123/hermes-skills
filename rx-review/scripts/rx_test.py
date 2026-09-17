@@ -1146,7 +1146,8 @@ def main():
     import tempfile as _tf6
     _calls6 = []
 
-    def _fake_create6(args, title, assignee, body, parents=(), runtime="45m", priority=0):
+    def _fake_create6(args, title, assignee, body, parents=(), runtime="45m", priority=0,
+                      model=None):
         _calls6.append((title, list(parents)))
         return "t_%02d" % len(_calls6)
 
@@ -1404,7 +1405,8 @@ def main():
     # verbatim sentence, and a compacted answer is indistinguishable from a real one.
     calls = []
 
-    def _fake_create(args, title, assignee, body, parents=(), runtime="45m", priority=0):
+    def _fake_create(args, title, assignee, body, parents=(), runtime="45m", priority=0,
+                     model=None):
         calls.append(dict(title=title, body=body, parents=list(parents), runtime=runtime))
         return "t_%02d" % len(calls)
 

@@ -624,11 +624,15 @@ def _fmt_stats(st, wall_s):
 
 
 def create(title, assignee, body, parents=(), runtime="45m", priority=0, dry=False,
-           notify=False):
-    """Card rooted in reports/, keyed on its own title. Mechanics live in rxkanban."""
+           notify=False, model=None):
+    """Card rooted in reports/, keyed on its own title. Mechanics live in rxkanban.
+
+    `model` pins the card to a model (see rxkanban.PART_MODEL); None keeps the profile default.
+    """
     tid = rxkanban.create_card(title, assignee, body, REPORTS, parents=parents,
                                runtime=runtime, priority=priority,
-                               key=rxkanban.slugify(title), dry=dry, notify=notify)
+                               key=rxkanban.slugify(title), dry=dry, notify=notify,
+                               model=model)
     if dry:
         print("  would create: %s" % title)
     return tid
@@ -706,7 +710,8 @@ def cmd_fanout(args):
                 % (len(body.encode()), KANBAN_BODY_CAP, items_file))
         tid = create("Context audit %02d/%02d%s: do the sources support the claims"
                      % (i, len(parts), "" if rnd == 1 else " r%d" % rnd), "rx-audit", body,
-                     runtime="%dm" % CARD_RUNTIME_MINUTES, priority=33, dry=args.dry_run)
+                     runtime="%dm" % CARD_RUNTIME_MINUTES, priority=33, dry=args.dry_run,
+                     model=rxkanban.PART_MODEL)
         expected_parts.append(out)
         ids.append(tid)
         print("  %s  part %02d  %2d items  ~%dk tokens"
