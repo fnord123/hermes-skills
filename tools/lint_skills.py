@@ -66,6 +66,82 @@ LEAK_ALLOW = {
     "agentmail-lite": {"agentmail"},
 }
 
+# ── canonical hostnames (David's standing map, 2026-09-17) ──────────────────
+# Any raw IP on the local subnet in SKILL.md is a finding: the host name is the
+# durable reference — an IP is a snapshot of a lease, and the same octets mean
+# different machines on different networks (this repo is published for reuse; a
+# 192.168.x.x in model context is wrong on every reader's network). This table
+# is the REPAIR hint only, and the message says so: when the IP is not in the
+# table the author must substitute the host's canonical name from the house
+# host docs, never an IP and never a guessed name. The table lives in one place
+# so a lease change updates one line, not every skill.
+HOST_NAMES = {
+    "192.168.1.226": "docker.putzolu.com",
+    "192.168.1.228": "agent.putzolu.com",
+    "192.168.1.9":   "hass.putzolu.com",
+    "192.168.1.8":   "proxmox.local.putzolu.com",
+    "192.168.1.5":   "hackintosh.putzolu.com",
+    "192.168.1.12":  "ubuntu.putzolu.com",
+}
+
+IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# The whole repo lives on RFC1918 space, so a blanket private scan is the honest
+# rule. Public IPs stay legal: worked examples legitimately carry public API
+# endpoints, and a placeholder octet inside code (0.0.0.0, 127.0.0.1, a test
+# fixture) is not a host claim.
+RFC1918 = re.compile(r"^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)")
+
+
+def lint_hostname(text):
+    """(ip, lineno, host) per RFC1918 address in SKILL.md; host None when the
+    IP is not in the canonical map. Line numbers come from the ORIGINAL text,
+    so a hit inside a code fence still points the author at the right line."""
+    hits = []
+    for i, ln in enumerate(text.splitlines(), 1):
+        for m in IPV4.finditer(ln):
+            ip = m.group(0)
+            if not all(int(o) <= 255 for o in ip.split(".")):
+                continue
+            if RFC1918.match(ip):
+                hits.append((ip, i, HOST_NAMES.get(ip)))
+    return hits
+
+
+# ── historical content (David's standing rule, 2026-09-17) ────────────────────
+# SKILL.md is injected model context, and everything in it reads as CURRENT
+# instructions. A dated changelog, a "supersedes / previously / no longer"
+# narration, or an "old vs new" comparison teaches the model a surface that no
+# longer exists — the repo's own bug class: a stale "retired" host label in a
+# live doc read as truth and the failover host went missing (2026-09-17). The
+# fix is removal: the current statement stands alone; history belongs in git
+# log. CONVENTIONS.md, "SKILL.md is model context, not documentation".
+#
+# The prose markers are a closed, unambiguous list — deliberately NOT a bare
+# "was"/"had" proximity: house docs carry verified-incident writeups
+# ("Verified incident: a typo the user fixed…") whose past tense is a
+# CAUTIONARY example, not a retired surface, and burning that prose is how the
+# linter trained authors to ignore it (the exit-code false-positive class,
+# 2026-08-27). `was deprecated` fires; `the batch succeeds and the corruption
+# only shows up on re-read` never can. The mechanical shapes are zero-ambiguity:
+# a changelog-style heading, or a version→version bump inside prose (a
+# code span is excluded — "→" inside a code span is a command the model copies).
+HISTORY_HEADING = re.compile(
+    r"^#+\s*(?:[^\n]*\b)?(?:changelog|change log|release notes|version history|"
+    r"revisions|what.s (?:new|changed)|history)\b", re.I | re.M)
+# Deliberately NO "no longer X" and NO "supersedes" member: the house carries
+# both in CURRENT-semantics prose — "bump --sequence so the update supersedes
+# the prior invite" (live iCalendar semantics), "the public-equity framework
+# supersedes the private-round one" (live routing rule), "the saved session is
+# no longer valid" (error-code meaning) — verified against the repo 2026-09-17.
+# A stale fact is caught by the unambiguous markers below plus the headings and
+# version-arrow checks; ambiguous verbs stay with the human reviewer.
+HISTORY_PROSE = re.compile(
+    r"\b(?:formerly|replaced by|replaced with|migrated to|renamed (?:from|to)"
+    r"|used to (?:be|have|live|call|use)|deprecated"
+    r"|previously (?:this|it|the|was|named|used|lived))\b",
+    re.I)
+VERSION_ARROW = re.compile(r"\bv?\d+\.\d+(?:\.\d+)? *(?:→|->) *v?\d+")
+
 # Files under scripts/ that are not entry points and so carry no JSON contract.
 def _is_library(path):
     b = os.path.basename(path)
@@ -552,6 +628,58 @@ def lint_skill(name, baseline=None):
         add("major", "body/domain-leak",
             "backend vocabulary in model context: %s" % ", ".join(leaked),
             lineno(re.escape(leaked[0])))
+
+    # ── raw host IPs (critical: wrong-on-this-network instructions) ─────────
+    # A raw LAN IP is a machine reference that breaks the moment the lease
+    # moves or the skill is installed anywhere else — and the model copies it
+    # verbatim because SKILL.md code is copy-verbatim material. The finding
+    # names the canonical hostname when the map knows the IP, and says
+    # REMOVE-THE-IP-not-guess when it doesn't, so the fix never introduces a
+    # wrong hostname.
+    ip_hits = lint_hostname(text)
+    seen_ips = {}
+    for ip, ln, host in ip_hits:
+        seen_ips.setdefault(ip, (ln, host))
+    for ip, (ln, host) in sorted(seen_ips.items()):
+        fix = ("replace it with %s everywhere it appears" % host) if host else \
+            ("remove it and use the host's canonical hostname from the house "
+             "host docs — it is not in the canonical name map, so never an IP "
+             "and never a guessed name")
+        add("critical", "body/raw-host-ip",
+            "raw LAN IP %s in SKILL.md: %s — the hostname is the durable "
+            "reference; a raw IP is wrong the day the lease moves" % (ip, fix),
+            "SKILL.md:%d" % ln)
+
+    # ── historical content (critical: stale reads as current) ────────────────
+    # Everything in SKILL.md is injected as current instruction, so a
+    # narration of what USED to be true is a surface the model will treat as
+    # live. One finding per shape with the first offending line; the required
+    # fix is always deletion — git history is the changelog.
+    hist = []
+    m = HISTORY_HEADING.search(body)
+    if m:
+        hist.append(("changelog-style heading %r" % m.group(0).strip(),
+                     lineno(re.escape(m.group(0).strip()[:40]))))
+    # supersedes / no-longer narration is deliberately NOT machine-checked here:
+    # both verbs carry live meanings in house prose (see HISTORY_PROSE comment).
+    # audit-role.md assigns that judgement to the reviewer instead.
+    prose_hist = re.sub(r"```.*?```", " ", text, flags=re.S)
+    prose_hist = re.sub(r"`[^`\n]*`", " ", prose_hist)
+    m = HISTORY_PROSE.search(prose_hist)
+    if m:
+        hist.append(("historical narration %r — a fact about what used to be "
+                     "true reads to the model as a live option" % m.group(0),
+                     lineno(re.escape(m.group(0)))))
+    m = VERSION_ARROW.search(prose_hist)
+    if m:
+        hist.append(("version-transition %r — describe the current version "
+                     "only" % m.group(0), lineno(re.escape(m.group(0)[:20]))))
+    if hist:
+        add("critical", "body/history",
+            "historical content in model context — %s. Remove it entirely; the "
+            "current statement stands alone and git log is the changelog"
+            % "; ".join(h[0] for h in hist),
+            hist[0][1])
 
     # ── layout ─────────────────────────────────────────────────────────────
     subs = {x for x in os.listdir(d)

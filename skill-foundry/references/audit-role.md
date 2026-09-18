@@ -39,9 +39,26 @@ on or send it back with an exact fix list. You never edit the skill.
 - **Trigger re-check (updates):** recount the quoted trigger phrases in the
   description before and after, and against the committed baseline. A
   silent drop is a true positive even if the linter did not fire.
-- **House-format compliance** beyond the linter: the PREFER clause intact,
-  the verbatim error sentence, scripts invoked as `python3 <path>`, no
+- **House-format compliance** beyond the linter: the PREFER clause intact, the
+  verbatim error sentence, scripts invoked as `python3 <path>`, no
   machine-local absolute paths, frontmatter name == folder name.
+- **Historical content (reject, remove):** SKILL.md is injected as current
+  instruction, so stale material is a live-lied surface. The linter's
+  `body/history` catches the unambiguous shapes; you judge the narration it
+  deliberately omits — "supersedes", "no longer", dated "as of" framing, old
+  vs. new comparisons — asking of each passage: *does this tell the reader
+  something that used to be true?* If yes, it is a true positive and the
+  required fix is **remove it entirely** — not annotate, not mark stale; the
+  current statement stands alone and git log is the changelog. Past-tense
+  CAUTIONARY examples (verified incidents whose lesson is a live rule) are
+  NOT historical content — the doctrine lives; only retired surfaces go.
+- **Raw host IPs (reject, substitute):** any raw LAN address in SKILL.md is a
+  true positive even when the linter missed it (e.g. a hostname/IP pair).
+  `tools/lint_skills.py` `HOST_NAMES` is the canonical map
+  (docker/agent/hass/proxmox/hackintosh/ubuntu `.putzolu.com` forms); the
+  required fix names the exact substitution. An IP outside the map: require
+  the host's canonical name from the house host docs — never an IP, never a
+  guessed hostname.
 
 ## Hand off (exactly one script call)
 

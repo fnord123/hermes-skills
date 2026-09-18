@@ -19,7 +19,8 @@ GATE TESTS. Whole-repo behaviours a per-skill case cannot express (the exit code
 the gate, not the finding list): --severity must not bypass a critical, one unreadable
 SKILL.md must not mask the rest of the repo, the trigger baseline round-trips and
 stays quiet on gained triggers, and each promoted rule reports at CRITICAL and flips
-the exit code (G6 for the contract rules, G7 for the body/invocation promotions).
+the exit code (G6 for the contract rules, G7 for the body/invocation promotions,
+G8 for body/raw-host-ip + body/history and their repair-hint message contract).
 
 HERMETIC. The suite copies the linter into a tempdir and builds fixtures next to it — the
 linter resolves its repo ROOT from its own file location, so a copied linter lints a
@@ -725,6 +726,81 @@ case("I10 stray backtick earlier does not hide a later declaration",
      {"scripts/json-contract", "scripts/top-level-guard"})
 
 
+# ── J. hostnames & historical content (David's rules, 2026-09-17) ────────────
+# J1-J2: any raw LAN IP is a finding; the map turns known IPs into an exact
+# hostname substitution (asserted in G8, which reads messages).
+case("J1 mapped LAN IP fires body/raw-host-ip",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nPoint at `http://192.168.1.226:4000/v1` for the model.\n")),
+     {"body/raw-host-ip"})
+
+case("J2 unmapped private IP still fires",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nSSH to 10.4.7.9 first.\n")),
+     {"body/raw-host-ip"})
+
+case("J3 public/loopback/placeholder IPs stay clean",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nBinds `0.0.0.0`, health-checks `http://127.0.0.1:8080`,"
+             " and the API lives at 8.8.8.8.\n")),
+     set(), must_not={"body/raw-host-ip"})
+
+case("J4 canonical hostnames stay clean",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nUse `docker.putzolu.com` and `hass.putzolu.com`.\n")),
+     set(), must_not={"body/raw-host-ip"})
+
+# J5-J8: each history shape fires; the required fix is deletion.
+case("J5 changelog heading fires body/history",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("## When to use",
+             "## Changelog\n\n- 0.2.0 renamed `stage` to `ingest`.\n\n## When to use")),
+     {"body/history"})
+
+case("J6 'formerly' narration fires body/history",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nThe endpoint was formerly /v0/thing.\n")),
+     {"body/history"})
+
+case("J7 'was deprecated' fires body/history",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nThe `--legacy` flag was deprecated last quarter.\n")),
+     {"body/history"})
+
+case("J8 prose version-arrow fires body/history",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nBehaviour changed in v2.1 → v2.2.\n")),
+     {"body/history"})
+
+# J9-J11: the false-positive guard (this linter's history says the must-not
+# side is the load-bearing one).
+case("J9 cautionary past-tense incident prose stays clean",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nVerified incident: a typo the user fixed shifted character"
+             " indexes and three deletes clipped one character each.\n")),
+     set(), must_not={"body/history"})
+
+case("J10 live-semantics 'no longer valid' / 'supersedes' stay clean",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\n`session_expired` means the saved session is no longer"
+             " valid. Bump `--sequence` so the update supersedes the prior invite.\n")),
+     set(), must_not={"body/history"})
+
+case("J11 version-arrow inside a code span stays clean",
+     lambda: make_skill(LAB, "x", script=BASE_SCRIPT,
+         skillmd=BASE_SKILLMD.replace("# Thing\n",
+             "# Thing\n\nCopy `sed 's/v2.1 → v2.2/' release.txt` verbatim.\n")),
+     set(), must_not={"body/history"})
+
 # ── gate tests (whole-repo behaviours) ───────────────────────────────────────
 def gate_tests(lab):
     """The exit code IS the gate. Whole-repo behaviours a per-skill case cannot
@@ -864,6 +940,44 @@ def gate_tests(lab):
                     ok7, e7 or "got %s" % sorted(sev7) or "clean (the teeth are gone)"))
 
     shutil.rmtree(lab4, ignore_errors=True)
+
+    # G8: body/raw-host-ip and body/history (added 2026-09-17) report at CRITICAL
+    # and gate — the per-skill J cases only assert rule names, so this pins the
+    # severity and the exit code. Also pins the message contract the author
+    # depends on: a mapped IP carries its canonical hostname verbatim (the fix
+    # is copy-paste), an unmapped private IP carries "canonical hostname" and
+    # must NOT invent one.
+    lab5 = fresh_lab()
+    make_skill(lab5, "ips", script=CLEAN_SCRIPT,
+               skillmd=BASE_SKILLMD
+               .replace("# Thing\n", "# Thing\n\nModel at 192.168.1.226:4000.\n")
+               .replace("## When to use",
+                        "## History\n\n## When to use"))
+    make_skill(lab5, "clean", script=CLEAN_SCRIPT)
+    f8, e8 = run_lint(lab5)
+    sev8 = {(f["rule"], f["severity"]) for f in f8} if f8 else set()
+    msgs8 = " | ".join(f["message"] for f in (f8 or []) if f["rule"] == "body/raw-host-ip")
+    ok8 = (f8 is not None
+           and ("body/raw-host-ip", "critical") in sev8
+           and ("body/history", "critical") in sev8
+           and "docker.putzolu.com" in msgs8
+           and "canonical hostname" not in msgs8)  # mapped → exact name, no hedge
+    r8 = subprocess.run([sys.executable, os.path.join(lab5, "tools", "lint_skills.py"),
+                         "--severity", "major"], capture_output=True, text=True, timeout=60)
+    ok8 = ok8 and r8.returncode == 1
+    # unmapped IP: the message must tell the author to use the canonical
+    # hostname WITHOUT inventing one.
+    make_skill(lab5, "ips", script=CLEAN_SCRIPT,
+               skillmd=BASE_SKILLMD.replace("# Thing\n",
+                                            "# Thing\n\nPeer at 10.4.7.9:4000.\n"))
+    f8b, _ = run_lint(lab5, "ips")
+    msgs8b = " | ".join(f["message"] for f in (f8b or []) if f["rule"] == "body/raw-host-ip")
+    ok8 = ok8 and "canonical hostname" in msgs8b and ".putzolu.com" not in msgs8b
+    results.append(("G8 raw-host-ip + history report at critical, gate, and carry "
+                    "the right repair hint",
+                    ok8, e8 or "got %s / unmapped msg %s" % (sorted(sev8), msgs8b[:60])))
+
+    shutil.rmtree(lab5, ignore_errors=True)
 
     shutil.rmtree(lab2, ignore_errors=True)
     return results

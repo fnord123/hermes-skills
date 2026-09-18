@@ -112,6 +112,14 @@ Everything in SKILL.md (body **and** description) is injected into the model's
 context when the skill activates. So:
 
 - Describe the **happy path** — what to DO.
+- **No historical content.** Everything injected reads as a current instruction,
+  so anything that *used* to be true — changelog/history sections, "formerly X",
+  "replaced by Y", "used to Z", "now deprecated", old-version→new-version
+  narration — is **removed entirely**, not annotated or marked stale. The
+  current statement stands alone; `git log` is the changelog. The linter
+  enforces the unambiguous shapes critical (`body/history`); the Audit stage
+  judges the narration the regex can't safely express ("supersedes" and "no
+  longer valid" can carry live semantics — see the HISTORY_PROSE comment).
 - Push rationale, "why this exists", comparisons to other skills, and any
   discussion of failure modes to the **README**. Listing a failure mode in
   SKILL.md ("models tend to call `create_inbox`…") primes exactly that mistake.
@@ -135,6 +143,29 @@ surface** must also speak the user's domain, never the backend's:
 
 The model reasons about whatever words are literally in front of it; a stray
 backend term drags it off the domain.
+
+## Hosts are named, never numbered
+
+SKILL.md refers to machines by their **canonical hostname**, never a raw LAN
+IP (`192.168.x.x`, `10.x.x.x`). An IP is a lease snapshot — wrong the day the
+DHCP moves it, and wrong on install for anyone reusing this repo, because the
+same octets are somebody else's machine on their network. The house map lives
+in `tools/lint_skills.py` (`HOST_NAMES`) so a lease change updates one line:
+
+| IP | Canonical hostname |
+|---|---|
+| 192.168.1.226 | `docker.putzolu.com` |
+| 192.168.1.228 | `agent.putzolu.com` |
+| 192.168.1.9 | `hass.putzolu.com` |
+| 192.168.1.8 | `proxmox.local.putzolu.com` |
+| 192.168.1.5 | `hackintosh.putzolu.com` |
+| 192.168.1.12 | `ubuntu.putzolu.com` |
+
+The linter fires critical (`body/raw-host-ip`) on **any** RFC1918 address in
+SKILL.md — mapped or not — and names the canonical hostname in the finding so
+the fix is copy-paste. For an IP outside the map, the fix is the host's
+canonical name from the house host docs, never a guessed name and never the
+IP. Public, loopback, and placeholder IPs (`0.0.0.0`, `127.0.0.1`) stay legal.
 
 ## Be explicit — the model won't impute
 
@@ -187,7 +218,11 @@ cannot be checked), broken routing (no PREFER clause, no trigger list, or a
 trigger dropped from the description against the committed baseline, missing
 When to use / When NOT to use sections, or a script documented as `./<path>`
 instead of `python3 <path>` — the executable bit is lost over an HTTP install),
-a silent capability gap (a skill that uses a toolset without declaring it, a
+stale or machine-local instructions (historical content in model context —
+changelog sections, "formerly / used to / deprecated" narration, version
+transitions; or a raw LAN IP where the canonical hostname belongs — both are
+instructions that go silently wrong), a silent capability gap (a skill that
+uses a toolset without declaring it, a
 destructive subcommand with no `--confirm` guard, a directory outside the four
 Hermes ones, a "NEVER read" section, or broken frontmatter), a broken error
 contract (the error section that does not end with the mandatory ask-the-user
