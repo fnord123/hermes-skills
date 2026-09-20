@@ -3177,7 +3177,8 @@ def cmd_reset(args):
 # readings and neither superseded the other nor joined its trend.
 MARKER_SYNONYMS = {"chol": "cholesterol", "hdlc": "hdl", "ldlc": "ldl",
                    "trig": "triglyceride", "trigs": "triglyceride", "tg": "triglyceride",
-                   "apob": "apolipoprotein b", "lpa": "lipoprotein a"}
+                   "apob": "apolipoprotein b", "lpa": "lipoprotein a",
+                   "alp": "alkaline phosphatase"}
 
 
 def _fold_token(tok):
@@ -3310,7 +3311,13 @@ def _norm_marker(name):
     n = re.sub(r"[^A-Za-z0-9%]+", " ", n).lower()
     NOISE = {"total", "direct", "serum", "plasma", "level", "levels", "calc",
              "calculated", "ia", "w", "with", "test", "measured"}
-    toks = [_fold_token(t) for t in n.split() if t and t not in NOISE]
+    # A fold can emit several tokens ("apob" -> "apolipoprotein b"), so split what the fold
+    # returns and de-duplicate: "Apolipoprotein B (ApoB)" folds to "apolipoprotein apolipoprotein
+    # b b" and sorted-join made it a DIFFERENT marker from "APOLIPOPROTEIN B", so the newer
+    # in-range 9/16 ApoB never superseded the stale 3/31 high. Same split kept "Alkaline
+    # Phosphatase (ALP)" apart from "Alkaline Phosphatase" — two question cards for one analyte.
+    toks = [f for t in n.split() if t and t not in NOISE for f in _fold_token(t).split()]
+    toks = list(dict.fromkeys(toks))
     if len(toks) > 1 and "cholesterol" in toks:
         toks = [t for t in toks if t != "cholesterol"]
     if not toks:
