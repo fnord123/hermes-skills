@@ -828,7 +828,9 @@ and add NO row that is not printed below:
     | marker | value | unit | reference range | specimen | date |
 
 Keep the lab's flag on the value (e.g. `186 H`). Write UNREADABLE for any value that is not printed
-below. Set specimen to the panel heading above the row. When the table is written, run:
+below — for VALUES only: leave the unit, reference range, or specimen BLANK when the lab did not
+print them (portal exports often print no reference ranges at all).
+Set specimen to the panel heading above the row. When the table is written, run:
 
     python3 ~/hermes-skills/rx-review/scripts/rx.py check-transcription {token}
 
@@ -3725,9 +3727,11 @@ def _latest_per_marker(rows):
     return latest, superseded
 
 
-# "(ref: 53 - 128)" / "(reference range 53 - 128)" - a formatting difference between two
-# transcriptions of the same draw, not a different finding.
-_REF_NOTE_RE = re.compile(r"\s*\(\s*(?:ref|reference range)\b[^)]*\)\s*$", re.I)
+# " (ref: 53 - 128)" / " (reference range 53 - 128)" - a formatting difference between two
+# transcriptions of the same draw, not a different finding. Also strips the trailing bracketed
+# suffixes the renderer may add ("[2026-05-27]" draw date, "[last measured ...]" staleness
+# note) in any combination, so dedup and value extraction see the bare finding.
+_REF_NOTE_RE = re.compile(r"(?:\s*\(\s*(?:ref|reference range)\b[^)]*\)|\s*\[[^\]]*\])+\s*$", re.I)
 
 
 # A marker that a NEWER panel does not measure directly but fully DEFINES is not stale - it is
@@ -5302,9 +5306,18 @@ def derive_out_of_range_lines(rows):
     for d in sorted(by_date, key=_dkey, reverse=True):
         out += ["### %s" % (d or "(undated)"), ""]
         for r in sorted(by_date[d], key=lambda x: x.get("marker", "").lower()):
-            ref = (" (ref: %s)" % r["reference range"]) if r.get("reference range") else ""
+            # An UNKNOWN range gets no "(ref: ...)" at all. Portal exports that print only
+            # "Below Range" leave the ref cell blank or with the transcriber's UNREADABLE
+            # placeholder, and showing that literal at the gate reads as broken (David 2026-09-20).
+            refv = (r.get("reference range") or "").strip()
+            ref = (" (ref: %s)" % refv) if refv and refv.upper() != "UNREADABLE" else ""
             unit = (" %s" % r["unit"]) if r.get("unit") else ""
-            out.append("- %s: %s%s%s" % (r.get("marker", ""), r.get("value", ""), unit, ref))
+            # The draw's date rides ON the line: review_labs flattens one line per finding into
+            # marker-question-*.md and the batched review loses the "### <date>" heading. The
+            # "[YYYY..]" suffix is stripped by _ENTRY_DATE_RE in out_of_range_keys(), and the
+            # widened _REF_NOTE_RE keeps dedup/value extraction intact.
+            dated = (" [%s]" % (_norm_date(d) or d)) if d else ""
+            out.append("- %s: %s%s%s%s" % (r.get("marker", ""), r.get("value", ""), unit, ref, dated))
         out.append("")
     return out
 
