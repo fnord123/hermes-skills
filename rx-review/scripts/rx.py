@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """rx — run the medication/supplement review end to end.
 
-    python3 ~/hermes-skills/rx-review/scripts/rx.py stage           # start a review: stage 1 of 8
+    python3 ~/hermes-skills/rx-review/scripts/rx.py stage           # start a review: stage 1 of 9
     python3 ~/hermes-skills/rx-review/scripts/rx.py status          # where everything stands
     python3 ~/hermes-skills/rx-review/scripts/rx.py analyze-research # build the research substages (6a-6d)
 
-A review runs as eight stages. Stage 1 (`stage` + `start`) creates the WHOLE Begin/Barrier chain
-for stages 2-8 up front; each later stage is a Stage Begin card - intake-regimen (2),
+A review runs as nine stages. Stage 1 (`stage` + `start`) creates the WHOLE Begin/Barrier chain
+for stages 2-9 up front; each later stage is a Stage Begin card - intake-regimen (2),
 intake-regimen-items (3), intake-labs (4), review_labs (5), analyze-research (6),
-analyze-adversarial (7), analyze-conclude (8) - released when the Barrier ahead of it completes.
+analyze-adversarial (7), analyze-reconcile (8), analyze-report (9) - released when the Barrier
+ahead of it completes.
 Add lab PDFs to inputs/raw/, edit inputs/regimen.txt, run `stage`, then `start`.
 
 Everything is idempotent. Cards carry idempotency keys, and a card is only created when its
@@ -20,6 +21,7 @@ worker keeps each well under the limit and isolates a failure to one lab result.
 """
 
 import argparse
+import datetime
 import difflib
 import glob
 import hashlib
@@ -68,7 +70,7 @@ PHOTOS = os.path.join(INPUTS, "supplements")
 # both, verifies, and writes the real labs-doc-*.md. Dotted so reset() clears it explicitly.
 XCRIBE = os.path.join(INPUTS, ".xcribe")
 # Each invocation gets its OWN timestamped output dir REPORTS_ROOT/<YYYY-MM-DD-HHMMSS>/, and
-# `current` is a symlink to the active one. REPORTS resolves through that symlink, so all eight
+# `current` is a symlink to the active one. REPORTS resolves through that symlink, so all nine
 # stages — dozens of separate worker processes over hours — write into the SAME run dir. Stage 1
 # (start_run) is the one writer that creates the dir and swaps the symlink, before any parallel
 # card exists. Past run dirs are kept as the deliverables; only `reset --clear-reports` purges them.
@@ -918,7 +920,7 @@ kanban_complete. Do nothing else.
 # ── commands ───────────────────────────────────────────────────────────────
 
 def cmd_intake_regimen(args):
-    """STAGE 2 of 8. Read the regimen into regimen-draft.txt.
+    """STAGE 2 of 9. Read the regimen into regimen-draft.txt.
 
     One worker: `Worker: Read regimen` is HANDED the regimen text in its card body and transcribes
     it into regimen-draft.txt as one pipe-delimited line per product — `product | brand | quantity |
@@ -967,7 +969,7 @@ def cmd_intake_regimen(args):
                     parents=[me], assignee="rx-intake",
                     key=stable_key("rx-read-regimen", hashlib.sha1(text.encode()).hexdigest()))
     _parent_worker_to_barrier(worker, "Stage 2: Regimen Read", dry=args.dry_run)
-    print("\nStage 2 of 8: 1 worker (`Worker: Read regimen`) created, linked in front of the "
+    print("\nStage 2 of 9: 1 worker (`Worker: Read regimen`) created, linked in front of the "
           "`Stage 2: Regimen Read` Barrier.%s" % ("  (DRY RUN)" if args.dry_run else ""))
     return 0
 
@@ -1010,7 +1012,7 @@ def _draft_regimen_rows():
 
 
 def cmd_intake_regimen_items(args):
-    """STAGE 3 of 8. Create one `Regimen Intake:` worker per supplement and medication.
+    """STAGE 3 of 9. Create one `Regimen Intake:` worker per supplement and medication.
 
     Enumerates the rows of regimen-draft.txt and creates one `Regimen Intake: <name>` worker per
     row — each researches its item's ingredients and dose and writes its own
@@ -1052,14 +1054,14 @@ def cmd_intake_regimen_items(args):
                      key=stable_key("rx-regitem", slug))
         _parent_worker_to_barrier(wid, "Stage 3: Finalize Regimen", dry=args.dry_run)
         made += 1
-    print("\nStage 3 of 8: %d `Regimen Intake:` worker(s) created (each linked in front of the "
+    print("\nStage 3 of 9: %d `Regimen Intake:` worker(s) created (each linked in front of the "
           "`Stage 3: Finalize Regimen` Barrier).%s"
           % (made, "  (DRY RUN)" if args.dry_run else ""))
     return 0
 
 
 def cmd_intake_labs(args):
-    """STAGE 4 of 8. Transcribe every staged lab PDF, then merge and condense them.
+    """STAGE 4 of 9. Transcribe every staged lab PDF, then merge and condense them.
 
     Its Begin starts as soon as Stage 1 completes — in PARALLEL with the regimen branch (Stages
     2-3), not after it — because transcription is by far the longest work and there is no reason
@@ -1139,7 +1141,7 @@ def cmd_intake_labs(args):
                     "own card. I will report once they are all transcribed and merged."
                     % (time.strftime("%H:%M"), len(lab_card_ids)))
 
-    print("\nStage 4 of 8: %d `Lab:` card(s), each linked in front of the "
+    print("\nStage 4 of 9: %d `Lab:` card(s), each linked in front of the "
           "`Stage 4: Labs Transcribed` Barrier.%s"
           % (len(lab_card_ids), "  (DRY RUN)" if args.dry_run else ""))
     print("\n%d card(s) created.%s" % (made, "  (DRY RUN)" if args.dry_run else ""))
@@ -4218,6 +4220,296 @@ def _lab_rows():
     return rows
 
 
+# ── Stage 9: marker graphs (deterministic renderer) ────────────────────────
+# ARCHITECTURE.md (Stage 9 in detail): "the script does the arithmetic; no model touches a
+# number." One PNG per marker with a dated numeric value; a TRUE date axis with identical
+# endpoints on every graph (earliest → latest draw in the run), one point per dated value, and
+# the band drawn from each reading's own printed reference range — a lab that changed its range
+# mid-history gets the honest band per era, not the current one painted backwards. Skips are
+# always named in graphs/INDEX.md, never silent.
+
+GRAPHS = os.path.join(REPORTS, "graphs")
+GRAPHS_HEADING = "## Marker graphs"
+
+# "83 - 108", "20–50" (en dash), "< 40", ">= 1.0", "12 - 20 (adult)" — the printed forms the
+# transcriptions actually carry. An unparseable cell yields no band, and the point plots without
+# one; a printed range we cannot parse is a fact about the transcription, so it is named in the
+# INDEX rather than dropped.
+_BAND_RNG = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*[-–—]\s*(-?\d+(?:\.\d+)?)")
+_BAND_MAX = re.compile(r"^\s*(?:<=|<)\s*(-?\d+(?:\.\d+)?)")
+_BAND_MIN = re.compile(r"^\s*(?:>=|>)\s*(-?\d+(?:\.\d+)?)")
+
+
+def _parse_band(rng):
+    """(lo, hi) from one printed reference-range cell; (None, None) when it says nothing."""
+    t = (rng or "").strip()
+    if not t:
+        return None, None
+    m = _BAND_RNG.match(t)                        # "83 - 108" / "20–50"
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    m = _BAND_MAX.match(t)                        # "< 40" / "<= 40": open low end
+    if m:
+        return None, float(m.group(1))
+    m = _BAND_MIN.match(t)                        # "> 1.0" / ">= 1.0": open high end
+    if m:
+        return float(m.group(1)), None
+    return None, None
+
+
+def _in_band(v, band):
+    lo, hi = band
+    return (lo is None or v >= lo) and (hi is None or v <= hi)
+
+
+def _marker_slug(name):
+    """Filesystem-safe graph name for a marker — the one slugify the board already uses."""
+    return rxkanban.slugify(name, 60) or "marker"
+
+
+def graph_stem(key):
+    """The PNG stem (no extension) for one observation key. The renderer names its files with
+    this and the caption cards name their files after it — the appendix matches them by exact
+    stem, so BOTH sides must derive it from here. No second implementation.
+
+    The `pct-` prefix is load-bearing. slugify drops `%`, so BASOPHIL (absolute count) and
+    % BASOPHIL (differential percentage) — two observations on two scales, by the ONE
+    observation rule — would slugify to one file and silently overwrite each other. On the real
+    2026-09 transcription 13 pairs collided (every CBC differential, both PSA percentages).
+    Every other marker keeps the plain name.
+    """
+    marker, specimen, _scale = key
+    stem = _marker_slug(marker + (("_" + specimen) if specimen else ""))
+    if stem.startswith("pct-"):                       # slugify may already have kept the %
+        return stem
+    return ("pct-" + stem.lstrip("-")) if "%" in marker else stem
+
+
+def graph_observations():
+    """(obs, skipped_nons numeric, skipped_baddate) — the ONE reading of labs-complete.md that
+    says which markers get a graph. obs: {key: {dates: {date: (value, band, flagged)}, unit, label}}.
+
+    Shared by the renderer (`lab-graphs`) and Stage 9's caption fan-out (fanout.py imports rx),
+    so the marker a caption is written for and the graph it is written under cannot disagree
+    about which observation they name.
+    """
+    obs, skipped_nonnumeric, skipped_baddate = {}, [], []
+    for r in _lab_rows():
+        name = (r.get("marker") or "").strip()
+        if not name:
+            continue
+        key = observation_key(r)
+        num = _numeric(r.get("value", ""))
+        if num is None:
+            skipped_nonnumeric.append(key)        # not a number (Negative, Clear, <30, UNREADABLE)
+            continue
+        date = _norm_date(r.get("date", ""))
+        if not date:
+            skipped_baddate.append((key, (r.get("date") or "").strip()))
+            continue
+        o = obs.setdefault(key, {"dates": {}, "unit": "",
+                                 "label": name if not key[1] else "%s (%s)" % (name, key[1])})
+        o["dates"][date] = (num, _parse_band(r.get("reference range", "")),
+                            _flagged_value(r.get("value", "")))
+        if not o["unit"] and (r.get("unit") or "").strip():
+            o["unit"] = r["unit"].strip()
+    return obs, skipped_nonnumeric, skipped_baddate
+
+
+def caption_targets(names):
+    """[(name, stem, label)] — for each out-of-range marker name, the graph stems whose
+    observation carries that marker. One name can own two graphs (blood and urine GLUCOSE); the
+    review named the finding once, both graphs exist, and both get the caption rather than one
+    silently going unexplained. Matching is on the normalised marker, never the specimen: the
+    review card names findings, not specimens.
+    """
+    obs, _sn, _sd = graph_observations()
+    want = {_norm_marker(n) for n in names if n}
+    out = []
+    for key, o in sorted(obs.items()):
+        if _norm_marker(key[0]) in want and any(
+                not _in_band(v[0], v[1]) for v in o["dates"].values()):
+            out.append((key[0], graph_stem(key), o["label"]))
+    return out
+
+
+def cmd_lab_graphs(args):
+    """STAGE 9 per-card — render one PNG per marker with a dated numeric value (arithmetic only).
+
+    Reads labs-complete.md through the ONE row parser (`_lab_rows`) and groups through the ONE
+    observation rule (`observation_key`): blood glucose and urine glucose are two observations and
+    get two graphs, exactly as the trend code already treats them. Every graph spans the same two
+    dates — the earliest and latest parsed draw in the run — so a 2021 point sits under 2021 on
+    every marker and the eye can compare histories side by side. The band is per reading:
+    consecutive draws sharing a printed range draw one band, so a lab that changed its range
+    mid-history shows two bands instead of painting today's range backwards.
+
+    A marker with no dated numeric value, and a row whose date will not parse, are NAMED in
+    graphs/INDEX.md. A skip that is not written down is a graph the user waits for forever. The
+    verb completes its own card; the model running it does nothing else.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        return _hold("the graph renderer needs matplotlib, which is not importable (%s)" % exc,
+                     ["matplotlib is a machine dependency, not a card task — do NOT try to "
+                      "install it from a card; the board's terminal guard forbids pip.",
+                      "The person operating the board installs it once, outside the board, for "
+                      "the interpreter that runs the cards — then unblocks this card. Nothing "
+                      "else about the run changed."],
+                     dry=args.dry_run)
+
+    rows = _lab_rows()
+    if not rows:
+        return _hold("the graph renderer found no transcribed rows",
+                     ["labs-complete.md is absent or empty — graphs of nothing are not graphs."],
+                     dry=args.dry_run)
+
+    # observations: the ONE reading shared with the caption fan-out (see graph_observations)
+    obs, skipped_nonnumeric, skipped_baddate = graph_observations()
+
+    all_dates = sorted({d for o in obs.values() for d in o["dates"]})
+    if not all_dates:
+        return _hold("the graph renderer found no dated numeric values",
+                     ["Every row failed numeric or date parsing — graphs/ would be empty."],
+                     dry=args.dry_run)
+
+    os.makedirs(GRAPHS, exist_ok=True)
+    x_lo = float(mdates.date2num(datetime.date.fromisoformat(all_dates[0])))
+    x_hi = float(mdates.date2num(datetime.date.fromisoformat(all_dates[-1])))
+
+    index, n_graphs = [], 0
+    for key, o in sorted(obs.items()):
+        dates = sorted(o["dates"])
+        if not dates:
+            continue
+        pts = [o["dates"][d] for d in dates]
+        xs = [float(mdates.date2num(datetime.date.fromisoformat(d))) for d in dates]
+        ys = [p[0] for p in pts]
+
+        fig, ax = plt.subplots(figsize=(7.2, 3.4), dpi=110)
+        i = 0
+        while i < len(dates):                     # per-era bands from each reading's printed range
+            band = pts[i][1]
+            lo, hi = band
+            if lo is None and hi is None:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(dates) and pts[j + 1][1] == band:
+                j += 1
+            y_lo, y_hi = (lo if lo is not None else min(ys)), (hi if hi is not None else max(ys))
+            ax.axhspan(y_lo, y_hi, color="#9ecbff", alpha=0.35, zorder=0)
+            ax.plot([xs[i], xs[j]], [y_lo, y_lo], color="#5b9bd5", lw=1.0, zorder=1)
+            ax.plot([xs[i], xs[j]], [y_hi, y_hi], color="#5b9bd5", lw=1.0, zorder=1)
+            i = j + 1
+        ax.plot(xs, ys, color="#2f6fb2", lw=1.4, zorder=2)
+        ax.scatter(xs, ys, s=26, zorder=3,
+                   c=["#c0392b" if (not _in_band(p[0], p[1]) or p[2]) else "#2f6fb2" for p in pts])
+        ax.set_xlim(x_lo, x_hi)                   # identical endpoints on EVERY graph
+        ax.set_title(o["label"], fontsize=11)
+        ax.set_ylabel(o["unit"] or "value", fontsize=9)
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+        fig.autofmt_xdate(rotation=45)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        fig.tight_layout()
+        stem = graph_stem(key)
+        fig.savefig(os.path.join(GRAPHS, "%s.png" % stem))
+        plt.close(fig)
+        n_graphs += 1
+        out_of_band = sum(1 for p in pts if not _in_band(p[0], p[1]))
+        index.append((o["label"], "%s.png" % stem, len(dates), dates[0], dates[-1], out_of_band))
+
+    skip_nodes, skip_dates = sorted(set(skipped_nonnumeric)), sorted(set(skipped_baddate))
+    with open(os.path.join(GRAPHS, "INDEX.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Marker graphs\n\n")
+        fh.write("Every graph spans **%s → %s** (the earliest and latest draw in this run) on the "
+                 "x-axis; the band is each reading's own printed reference range. Red points sit "
+                 "outside their band or carry the lab's own abnormal flag.\n\n"
+                 % (all_dates[0], all_dates[-1]))
+        fh.write("| marker | graph | points | first | last | outside band |\n"
+                 "|---|---|---|---|---|---|\n")
+        for label, fn, n, d0, d1, n_out in sorted(index):
+            fh.write("| %s | [%s](%s) | %d | %s | %s | %s |\n"
+                     % (label, fn, fn, n, d0, d1, str(n_out) if n_out else "—"))
+        if skip_nodes:
+            fh.write("\n## Not graphed — no numeric value\n\n")
+            for k in skip_nodes:
+                fh.write("- %s%s\n" % (k[0], (" (%s)" % k[1]) if k[1] else ""))
+        if skip_dates:
+            fh.write("\n## Not graphed — date did not parse\n\n")
+            for k, raw in skip_dates:
+                fh.write("- %s%s — printed date %r\n"
+                         % (k[0], (" (%s)" % k[1]) if k[1] else "", raw))
+
+    print("Stage 9: %d marker graph(s) rendered into graphs/, INDEX.md written; %d marker(s) named "
+          "as not graphed (%s → %s on every axis).%s"
+          % (n_graphs, len(skip_nodes) + len(skip_dates), all_dates[0], all_dates[-1],
+             "  (DRY RUN)" if args.dry_run else ""))
+    _complete_self("%d marker graphs rendered" % n_graphs, dry=args.dry_run)
+    return 0
+
+
+def cmd_graphs_append(args):
+    """STAGE 9 barrier step — append the brief's Marker graphs appendix, then hand off to check.
+
+    The devil reviews the brief proper; this runs behind it, at the barrier, which is the only
+    place a deliverable may still change once written. The appendix walks graphs/INDEX.md in order
+    and drops each caption beneath its graph where a caption card wrote one (caption-<slug>.md,
+    the file named in the caption card's own body); a graph with no caption says so rather than
+    sitting there unexplained. Idempotent: a re-run replaces the existing appendix instead of
+    appending a second copy. Completes nothing — `check-output --stage 9` owns the card.
+    """
+    briefs = sorted(glob.glob(os.path.join(REPORTS, "*rx-review.md")))
+    idx = os.path.join(GRAPHS, "INDEX.md")
+    if not briefs:
+        return _hold("graphs-append found no brief to append to",
+                     ["The assembler writes the brief before this barrier runs."],
+                     dry=args.dry_run)
+    if not os.path.exists(idx):
+        return _hold("graphs-append found no graphs/INDEX.md",
+                     ["The Render marker graphs card must complete before this barrier; unblock "
+                      "that card first."], dry=args.dry_run)
+    brief = briefs[-1]
+
+    rows = []
+    for line in open(idx, encoding="utf-8"):
+        m = re.match(r"^\|\s*(.+?)\s*\|\s*\[(.+?)\]\(.+?\)\s*\|", line)
+        if m:
+            rows.append((m.group(1), m.group(2)))
+
+    txt = open(brief, encoding="utf-8").read()
+    cut = txt.find("\n" + GRAPHS_HEADING)
+    if cut != -1:                                  # idempotent: replace, never double-append
+        txt = txt[:cut].rstrip("\n") + "\n"
+
+    parts = [txt.rstrip("\n"), "\n\n", GRAPHS_HEADING, "\n\n",
+             "One graph per marker with a dated numeric value; every x-axis spans the earliest to "
+             "the latest draw in this run. A caption appears beneath a graph where a reading fell "
+             "outside its printed reference range, and nowhere else — a caption is a distillation "
+             "of the brief above it, not a separate finding.\n"]
+    missing = 0
+    for label, fn in rows:
+        parts.append("\n### %s\n\n![%s](graphs/%s)\n" % (label, label, fn))
+        cap = os.path.join(GRAPHS, "caption-%s.md" % fn[:-len(".png")])
+        if os.path.exists(cap):
+            parts.append("\n" + open(cap, encoding="utf-8").read().strip() + "\n")
+        else:
+            missing += 1
+            parts.append("\n_(no caption — no caption card ran for this marker)_\n")
+    with open(brief, "w", encoding="utf-8") as fh:
+        fh.write("".join(parts))
+    print("Stage 9: Marker graphs appendix appended to %s — %d graph(s), %d without a caption. "
+          "Now run check-output --stage 9 to complete this barrier."
+          % (os.path.basename(brief), len(rows), missing))
+    return 0
+
+
 def cmd_labs_report(args):
     """Emit a readable, Discord-ready review of the out-of-range markers.
 
@@ -4847,7 +5139,7 @@ def _wait_for_upload_quiescence():
 
 
 def cmd_stage(args):
-    """STAGE 1 of 8. Copy every document Hermes has received into the intake folder.
+    """STAGE 1 of 9. Copy every document Hermes has received into the intake folder.
 
     The head of the chain. A review runs as five stages in a fixed order - stage, regimen,
     supplements, labs, research - and each one ends by creating the card that runs the next.
@@ -4975,6 +5267,16 @@ STAGE_BARRIER_CMD_BODY = """Run this and report what it printed. Do nothing else
     python3 ~/hermes-skills/rx-review/scripts/rx.py {verb}
 """
 
+# The Stage 9 barrier is the one barrier with two scripted steps: the appendix is a deliverable
+# edit (allowed only behind the devil), and the check that completes the card is the standard one.
+# Step one never completes the card; step two completes or holds it — same protocol as every
+# other barrier.
+STAGE_BARRIER_APPEND_THEN_CHECK_BODY = """Run these two, in order, and report what each printed. Do nothing else:
+
+    python3 ~/hermes-skills/rx-review/scripts/rx.py graphs-append
+    python3 ~/hermes-skills/rx-review/scripts/rx.py check-output --stage {n}
+"""
+
 
 STAGE_BARRIER_LOOP_BODY = """Run this, then do exactly what it prints — running each command it
 names as the user replies:
@@ -4985,7 +5287,7 @@ Do nothing else.
 """
 
 
-# The spine, stages 2-8, each a (Begin, Barrier) pair. Stage 1 creates the WHOLE chain up front —
+# The spine, stages 2-9, each a (Begin, Barrier) pair. Stage 1 creates the WHOLE chain up front —
 # every later stage's Begin and Barrier — each Barrier parented in front of the next stage's
 # Begin, so the execution order is an edge in a graph that exists from the first minute. Nothing
 # after stage 1 creates a stage boundary. The one nesting is Stage 6: `Stage 6: Research Begin`
@@ -5030,18 +5332,26 @@ STAGE_SPINE = [
          barrier="Stage 7: Adversarial Complete",
          barrier_purpose="Confirm the four lens reports and CONTEXT-AUDIT.md are written.",
          output="reports/", barrier_verb=None),
-    dict(n=8, begin="Stage 8: Conclusion", verb="analyze-conclude",
-         begin_purpose="Reconciles the adversarial verdicts and assembles the final brief.",
-         barrier="Stage 8: Conclusion Complete",
-         barrier_purpose="The run is done — the brief has been written.",
-         output="the prescriber discussion brief", barrier_verb=None),
+    dict(n=8, begin="Stage 8: Reconciliation", verb="analyze-reconcile",
+         begin_purpose="Reconciles the adversarial verdicts into VETTED.md — which claims survive.",
+         barrier="Stage 8: Reconciliation Complete",
+         barrier_purpose="Confirm VETTED.md is written.",
+         output="VETTED.md", barrier_verb=None),
+    dict(n=9, begin="Stage 9: Report", verb="analyze-report",
+         begin_purpose="Builds the deliverable: the brief and the marker graphs in parallel, the "
+                       "devil review and one graph caption per flagged marker behind the brief.",
+         barrier="Stage 9: Report Complete",
+         barrier_purpose="Append the brief's Marker graphs appendix and confirm the run's outputs.",
+         output="brief+graphs", barrier_verb=None, barrier_append=True),
 ]
 
 
 def _stage_output_ready(out):
     """(ready, detail) — is a CHECK barrier's declared output present? Concrete inputs/ files are
     checked for non-empty existence; a `reports/` output is satisfied by any report on disk; a
-    prose output (the brief) by the dated brief file. Anything else is trusted (nothing to check)."""
+    named `reports/` file (VETTED.md) by that file; a `brief+graphs` output by the dated brief file
+    plus a `graphs/` dir holding PNGs; a prose output (the brief) by the dated brief file.
+    Anything else is trusted (nothing to check)."""
     out = (out or "").strip()
     if out.startswith("inputs/"):
         p = os.path.join(INPUTS, out[len("inputs/"):])
@@ -5049,6 +5359,14 @@ def _stage_output_ready(out):
     if out.rstrip("/") == "reports":
         md = glob.glob(os.path.join(REPORTS, "*.md"))
         return (len(md) > 0), "%d report(s) in reports/" % len(md)
+    if out.endswith(".md"):
+        p = os.path.join(REPORTS, out)
+        return (os.path.exists(p) and os.path.getsize(p) > 0), "%s %s" % (
+            out, "present" if os.path.exists(p) else "MISSING")
+    if out.startswith("brief+graphs"):
+        md = glob.glob(os.path.join(REPORTS, "*rx-review.md"))
+        pngs = glob.glob(os.path.join(REPORTS, "graphs", "*.png"))
+        return (len(md) > 0 and len(pngs) > 0), "%d brief(s), %d graph(s)" % (len(md), len(pngs))
     if "brief" in out.lower():
         md = glob.glob(os.path.join(REPORTS, "*rx-review.md"))
         return (len(md) > 0), "%d brief(s) in reports/" % len(md)
@@ -5141,7 +5459,7 @@ def cmd_uploads_done(args):
 
 
 def cmd_start(args):
-    """Stage 1 of 8. Create the WHOLE Begin/Barrier chain for stages 2-8 in one pass.
+    """Stage 1 of 9. Create the WHOLE Begin/Barrier chain for stages 2-9 in one pass.
 
     SEPARATE FROM `stage` BECAUSE THEY RUN A DIFFERENT NUMBER OF TIMES. Labs arrive over
     several rounds - chat platforms cap attachments per message - so `stage` is run after every
@@ -5223,14 +5541,14 @@ def cmd_start(args):
         return 1
 
     if args.dry_run:
-        print("would create the whole Begin/Barrier chain for stages 2-8")
+        print("would create the whole Begin/Barrier chain for stages 2-9")
     else:
         run_dir, stamp = start_run()
         print("Run %s — artifacts land in %s"
               % (stamp, run_dir.replace(os.path.expanduser("~"), "~")))
 
     made = 0
-    total = STAGE_SPINE[-1]["n"]   # 8 — the highest stage number, for the "Stage N of {total}" text
+    total = STAGE_SPINE[-1]["n"]   # 9 — the highest stage number, for the "Stage N of {total}" text
     root = _my_card_id()          # None on a hand run, normalises away to "parentless"
 
     # The spine topology, as each Begin's dependency. "root" = start after Stage 1 (a branch head).
@@ -5238,8 +5556,8 @@ def cmd_start(args):
     # pole and has no reason to wait. But Stage 5 (the marker review, a HUMAN gate) waits on BOTH
     # the Stage 4 AND the Stage 3 Barriers, so the user is only ever asked one thing at a time: the
     # regimen review (Stage 3) settles before the marker review (Stage 5) is ever posted. 6 JOINS
-    # both branches (Stage 3 AND Stage 5 Barriers); 7 and 8 chain behind 6. Change ordering HERE.
-    begin_after = {2: ["root"], 3: [2], 4: ["root"], 5: [4, 3], 6: [3, 5], 7: [6], 8: [7]}
+    # both branches (Stage 3 AND Stage 5 Barriers); 7, 8 and 9 chain behind 6. Change ordering HERE.
+    begin_after = {2: ["root"], 3: [2], 4: ["root"], 5: [4, 3], 6: [3, 5], 7: [6], 8: [7], 9: [8]}
 
     barrier_of = {}               # stage number -> its Barrier id, so a later Begin can name it
     first_begin = None
@@ -5263,6 +5581,9 @@ def cmd_start(args):
         if s.get("barrier_loop"):
             # A settle-and-correct loop with the user, driven by the verb's own stdout.
             bbody = STAGE_BARRIER_LOOP_BODY.format(verb=s["barrier_verb"])
+        elif s.get("barrier_append"):
+            # Stage 9: append the graphs appendix (behind the devil), then the standard check.
+            bbody = STAGE_BARRIER_APPEND_THEN_CHECK_BODY.format(n=s["n"])
         elif s["barrier_verb"]:
             bbody = STAGE_BARRIER_CMD_BODY.format(verb=s["barrier_verb"])
         else:
@@ -5878,7 +6199,7 @@ def _exec_fanout(args, phase, family=None):
 
 
 def cmd_analyze_research(args):
-    """STAGE 6 of 8. Build the research substages (6a-6d) by exec'ing fanout.py.
+    """STAGE 6 of 9. Build the research substages (6a-6d) by exec'ing fanout.py.
 
     With no --family this is the `Stage 6: Research Begin` card: it creates the four substage
     shells (6a-6d). With --family it is a substage Begin, building that family's worker cards.
@@ -5918,7 +6239,7 @@ def cmd_trend_dispatch(args):
 
 
 def cmd_analyze_adversarial(args):
-    """STAGE 7 of 8. Chunk the Stage 6 reports and fan out the four lenses + the citation audit.
+    """STAGE 7 of 9. Chunk the Stage 6 reports and fan out the four lenses + the citation audit.
 
     Released only when `Stage 6: Research Complete` has completed, so the reports exist on disk;
     it hands them to fanout.py, which packs them into window-sized chunks and creates the
@@ -5927,17 +6248,28 @@ def cmd_analyze_adversarial(args):
     _exec_fanout(args, "adversarial")
 
 
-def cmd_analyze_conclude(args):
-    """STAGE 8 of 8. Reconcile the adversarial verdicts and assemble the final brief.
+def cmd_analyze_reconcile(args):
+    """STAGE 8 of 9. Reconcile the adversarial verdicts into VETTED.md.
 
-    Released only when `Stage 7: Adversarial Complete` has completed; it builds the fixed
-    Reconcile -> Assemble -> Adversarial-review-of-the-brief chain.
+    Released only when `Stage 7: Adversarial Complete` has completed; it creates the single
+    Reconcile worker. No prose for the patient is produced here — VETTED.md is the only input
+    Stage 9's assembler may use.
     """
-    _exec_fanout(args, "conclude")
+    _exec_fanout(args, "reconcile")
+
+
+def cmd_analyze_report(args):
+    """STAGE 9 of 9. Build the deliverable.
+
+    Released only when `Stage 8: Reconciliation Complete` has completed; it creates the assembler
+    and the deterministic graph renderer in parallel, the devil review and one graph caption per
+    flagged marker behind the assembler.
+    """
+    _exec_fanout(args, "report")
 
 
 def cmd_review_labs(args):
-    """STAGE 5 of 8. Flag every OUT-OF-RANGE marker for the batched review at the barrier.
+    """STAGE 5 of 9. Flag every OUT-OF-RANGE marker for the batched review at the barrier.
 
     Seeds labs-complete.md from labs-draft.md and derives the "## Out of range" section (moved here
     from the merge — stage 5 owns out-of-range derivation). ONLY out-of-range markers are flagged:
@@ -5987,7 +6319,7 @@ def cmd_review_labs(args):
                 fh.write("%s — %s\n" % (name, " ".join(str(detail).split())))
         print("   flagged out of range (batched at the barrier): %s" % name)
         made += 1
-    print("\nStage 5 of 8: %d out-of-range marker(s) flagged for the batched review at the "
+    print("\nStage 5 of 9: %d out-of-range marker(s) flagged for the batched review at the "
           "`Stage 5: Labs Complete` Barrier.%s"
           % (made, "  (DRY RUN)" if args.dry_run else ""))
     if not made:
@@ -6258,13 +6590,19 @@ def main():
         ("before-after", cmd_before_after,
          "before/after values for one marker, split at a medication start date"),
         ("analyze-research", cmd_analyze_research,
-         "stage 6 of 8 — build the research substages (6a-6d) and their workers"),
+         "stage 6 of 9 — build the research substages (6a-6d) and their workers"),
         ("trend-dispatch", cmd_trend_dispatch,
          "stage 6c per-trend — read the triage verdict and either skip or deepen"),
         ("analyze-adversarial", cmd_analyze_adversarial,
-         "stage 7 of 8 — chunk the reports and fan out the lenses + citation audit"),
-        ("analyze-conclude", cmd_analyze_conclude,
-         "stage 8 of 8 — reconcile the verdicts and assemble the brief"),
+         "stage 7 of 9 — chunk the reports and fan out the lenses + citation audit"),
+        ("analyze-reconcile", cmd_analyze_reconcile,
+         "stage 8 of 9 — reconcile the verdicts into VETTED.md"),
+        ("analyze-report", cmd_analyze_report,
+         "stage 9 of 9 — assemble the brief, render the marker graphs, caption the outliers"),
+        ("lab-graphs", cmd_lab_graphs,
+         "stage 9 per-card — render one PNG per marker, identical date axes, printed band (deterministic)"),
+        ("graphs-append", cmd_graphs_append,
+         "stage 9 barrier — append the brief's Marker graphs appendix (deterministic)"),
         ("regimen", cmd_regimen, "record the regimen from a file or stdin"),
         ("patient", cmd_patient,
          "materialise the patient fact lines (Name/Age/DOB) from the same document"),
@@ -6278,13 +6616,13 @@ def main():
         ("uploads-done", cmd_uploads_done,
          "record that the user says every lab document has been sent — `start` waits on this"),
         ("start", cmd_start,
-         "stage 1 of 8 — begin the review, creating the whole Begin/Barrier chain"),
+         "stage 1 of 9 — begin the review, creating the whole Begin/Barrier chain"),
         ("intake-regimen", cmd_intake_regimen,
-         "stage 2 of 8 — read the regimen into regimen-draft.txt"),
+         "stage 2 of 9 — read the regimen into regimen-draft.txt"),
         ("intake-regimen-items", cmd_intake_regimen_items,
-         "stage 3 of 8 — one `Regimen Intake:` worker per item into regimen-item-<slug>.md"),
+         "stage 3 of 9 — one `Regimen Intake:` worker per item into regimen-item-<slug>.md"),
         ("intake-labs", cmd_intake_labs,
-         "stage 4 of 8 — create one `Lab: <file>` card per staged PDF"),
+         "stage 4 of 9 — create one `Lab: <file>` card per staged PDF"),
         ("plan-lab", cmd_plan_lab,
          "stage 4 per-PDF — OCR-detect, split, and create one PDF's transcription card(s)"),
         ("check-transcription", cmd_check_transcription,
@@ -6293,7 +6631,7 @@ def main():
          "a CHECK barrier — confirm a stage's output exists, then complete or block this card"),
         ("settle", cmd_settle, "complete THIS sync barrier card (its parents guarantee the work)"),
         ("review_labs", cmd_review_labs,
-         "stage 5 of 8 — review out-of-range markers with the user"),
+         "stage 5 of 9 — review out-of-range markers with the user"),
         ("merge-labs", cmd_merge_labs,
          "concatenate the per-PDF transcriptions into labs-draft.md (deterministic)"),
         ("labs-brief", cmd_labs_brief,
@@ -6310,7 +6648,7 @@ def main():
                                 "`<n> <correction>`); for response: the LLM's merged line")
             p.add_argument("--text", dest="text", default="",
                            help="the reply / merged line, as an option instead of a positional")
-        if name in ("analyze-research", "analyze-adversarial", "analyze-conclude",
+        if name in ("analyze-research", "analyze-adversarial", "analyze-reconcile", "analyze-report",
                     "confirm", "intake-labs", "check-transcription", "check-output"):
             p.add_argument("--force", action="store_true",
                            help="proceed despite an outstanding hold")

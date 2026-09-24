@@ -36,9 +36,9 @@ _This section is under user control - do not change without explicit permission_
 
 A rx-review consists of a skill used by the Hermes agent, a set of Hermes kanban cards, and a set of scripts the skill and cards use to offload as much functionality as possible away from the agent LLM and onto deterministic code.
 
-Functionally the review runs as **eight** stages in a fixed order. Stages **1–5** run first. The Stage 6 research phase then fans out into four substages — **6a Research Substances**, **6b Research out-of-range markers**, and **6c Research marker trends** (independent, running in parallel), plus **6d Whole-regimen screens** (waits on 6a only, so it runs alongside 6b/6c). Finally **7 Adversarial review** and **8 Conclusion**. Each substage has its own Begin/Barrier.
+Functionally the review runs as **nine** stages in a fixed order. Stages **1–5** run first. The Stage 6 research phase then fans out into four substages — **6a Research Substances**, **6b Research out-of-range markers**, and **6c Research marker trends** (independent, running in parallel), plus **6d Whole-regimen screens** (waits on 6a only, so it runs alongside 6b/6c). Finally **7 Adversarial review**, **8 Reconciliation** and **9 Report**. Each substage has its own Begin/Barrier.
 
-Additional details for Stages 2-6 are provided in later sections.
+Additional details for Stages 2-9 are provided in later sections.
 
 ### Stage 1 — Set up the board and stage the labs
 - **Purpose:** create the Stage Begin and Barrier cards for every later stage, stage the uploaded lab PDFs, and establish that the input set is complete. The labs may arrive as individual PDF attachments **or** as a single `.zip` archive containing them; staging accepts either shape.
@@ -46,7 +46,7 @@ Additional details for Stages 2-6 are provided in later sections.
 - **Does:** creates the stage level Begin and Barrier cards for the following stages. The spine is a **DAG, not one chain**: the regimen branch and the labs branch both start from Stage 1 and run **in parallel**, and Stage 6 **joins** them (it waits on both the Stage 3 and Stage 5 Barriers):
   - regimen branch: `Stage 2: Read Regimen` (Begin) → `Stage 2: Regimen Read` (Barrier) → `Stage 3: Settle the Regimen` (Begin) → `Stage 3: Finalize Regimen` (Barrier)
   - labs branch (parallel): `Stage 4: Transcribe Labs` (Begin) → `Stage 4: Labs Transcribed` (Barrier) → `Stage 5: Review Labs` (Begin, also waits on the **Stage 3** Barrier) → `Stage 5: Labs Complete` (Barrier)
-  - join + tail: `Stage 6: Research Begin` (Begin, parented on **both** the Stage 3 and Stage 5 Barriers) → … → `Stage 6: Research Complete` (Barrier) → `Stage 7: Adversarial Review` (Begin) → `Stage 7: Adversarial Complete` (Barrier) → `Stage 8: Conclusion` (Begin) → `Stage 8: Conclusion Complete` (Barrier).
+  - join + tail: `Stage 6: Research Begin` (Begin, parented on **both** the Stage 3 and Stage 5 Barriers) → … → `Stage 6: Research Complete` (Barrier) → `Stage 7: Adversarial Review` (Begin) → `Stage 7: Adversarial Complete` (Barrier) → `Stage 8: Reconciliation` (Begin) → `Stage 8: Reconciliation Complete` (Barrier) → `Stage 9: Report` (Begin) → `Stage 9: Report Complete` (Barrier).
 Additional Begin, Worker, and Barrier cards needed within a stage are created within that stage, not by Stage 1.
 
 - **Completion:** the person has said the lab set is complete and that confirmation is recorded (`rx.py uploads-done`), the PDFs have been verified as copied, and all of the above cards created.
@@ -126,17 +126,20 @@ Additional Begin, Worker, and Barrier cards needed within a stage are created wi
   - **citation audit** — per-chunk Workers trace every citation in every report and confirm that the cited text exists and supports the report's claim that cited it. A **citation-audit merge** Worker, gated on all the per-chunk audit cards (the audit track's counterpart to each lens's merge), concatenates their results into `CONTEXT-AUDIT.md`.
   Dependencies: the chunk/lens/audit Workers are created by the Stage 7 Begin once the Stage 6 reports exist; each lens **merge** is parented by that lens's own chunk cards; and the four lens merges plus the **citation-audit merge** are the parents of the `Stage 7: Adversarial Complete` Barrier. The lenses never read one another, so a lens cannot launder another's miss.
 - **Completion:** the four lens reports (`LOGIC.md`, `REFUTATION.md`, `OVERREACH.md`, `NULLHYP.md`) and `CONTEXT-AUDIT.md` are written — the verdicts Stage 8's reconciler uses to keep, narrow, or drop each claim — and the `Stage 7: Adversarial Complete` Barrier completes.
-- **Exit:** the `Stage 7: Adversarial Complete` Barrier completes, releasing `Stage 8: Conclusion`.
+- **Exit:** the `Stage 7: Adversarial Complete` Barrier completes, releasing `Stage 8: Reconciliation`.
 
-### Stage 8 — Conclusion
-- **Purpose:** reconcile the reviewed findings and assemble the final brief.
+### Stage 8 — Reconciliation
+- **Purpose:** reconcile the adversarial verdicts and settle which claims survive into the report.
 - **Starts when:** the `Stage 7: Adversarial Complete` Barrier completes.
-- **Does:** `Stage 8: Conclusion` (invoking `rx.py analyze-conclude`) creates three Worker cards in fixed order — no data-dependent fan-out:
-  - **Reconcile adversarial verdicts** (`rx-verify`) — reads the Stage 6 research reports (substance, marker, trend, screens, **and `efficacy-*.md`**) and Stage 7's four lens reports plus `CONTEXT-AUDIT.md`, resolves disagreements between lenses, and decides each claim's fate: a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or an un-narrowed `serious`) finding against it; the rest are dropped or narrowed. An efficacy report's "expected to move X" claims are audited like any claim; its observed pre/post values are arithmetic over the user's confirmed labs and stand or fall on the lab confirmation, not on a citation.
-  - **Assemble prescriber discussion brief** (`rx-verify`, parented on Reconcile) — writes the surviving, cited claims into `<date>-<patient>-rx-review.md`, including a "what this review did not cover" section for anything excluded (from `coverage.md`) and a **Medication/Supplement efficacy** section from the surviving efficacy findings: for each dated substance, the before/after comparison of the markers its research says it moves, with the post-start draw count; "too early to tell" carried through verbatim.
-  - **Adversarial review of the brief** (`rx-devil`, parented on Assemble) — a final adversarial pass over the assembled brief. It **never blocks**: it flags each defect (`fatal`/`serious`/`minor`) **in place** in `<date>-<patient>-rx-review.md` — a `> **[review: …]**` line inserted directly after the sentence it concerns — writes the full critique to `<date>-<patient>-critique.md`, and completes with the counts. The card is subscribed, so its completion and issue counts reach the user; the analysis always finishes.
-  The three run in sequence (each parented on the previous), and the last is a parent of the `Stage 8: Conclusion Complete` Barrier. The Stage 8: Conclusion Complete Barrier runs `check-output --stage 8` (the dated brief in reports/ satisfies it).
-- **Completion:** `<date>-<patient>-rx-review.md` produced, containing all findings, evidence, and citations.
+- **Does:** `Stage 8: Reconciliation` (invoking `rx.py analyze-reconcile`) creates one Worker, **Reconcile adversarial verdicts** (`rx-verify`) — it reads the Stage 6 research reports (substance, marker, trend, screens, **and `efficacy-*.md`**) and Stage 7's four lens reports plus `CONTEXT-AUDIT.md`, resolves disagreements between lenses, and decides each claim's fate: a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or an un-narrowed `serious`) finding against it; the rest are dropped or narrowed. An efficacy report's "expected to move X" claims are audited like any claim; its observed pre/post values are arithmetic over the user's confirmed labs and stand or fall on the lab confirmation, not on a citation. Its verdict file `VETTED.md` is the report's only input.
+- **Completion:** `VETTED.md` written; the `Stage 8: Reconciliation Complete` Barrier completes.
+- **Exit:** the Barrier completes, releasing `Stage 9: Report`.
+
+### Stage 9 — Report
+- **Purpose:** build the deliverable: the prescriber discussion brief, a time-series graph for every lab marker, and a caption under each graph that shows an outlier.
+- **Starts when:** the `Stage 8: Reconciliation Complete` Barrier completes.
+- **Does:** `Stage 9: Report` (invoking `rx.py analyze-report`) creates four kinds of card. **Assemble prescriber discussion brief** (`rx-verify`) writes `<date>-<patient>-rx-review.md` from `VETTED.md`, including the "what this review did not cover" section (from `coverage.md`) and the **Medication/Supplement efficacy** section ("TOO EARLY TO TELL" carried through verbatim). **Render marker graphs** (deterministic) runs `rx.py lab-graphs` in parallel with the brief: one PNG per marker with a dated numeric value in `labs-complete.md` — a true date axis with identical endpoints on every graph (earliest → latest lab date in the run), one point per dated value, the band drawn from each reading's own printed reference range; markers with no dated numeric value and rows whose date will not parse are skipped and named in `graphs/INDEX.md`. **Graph caption: <marker>** — one Worker per marker with a reading outside its printed band, parented on the assembler: 3–5 sentences distilled from the finished brief's own sections on what the plotted series can signify — distillation, no new research, no diagnosis. The **Adversarial review of the brief** (`rx-devil`) moves with the brief and behaves exactly as before.
+- **Completion:** brief and critique produced, `graphs/` complete, every caption written; the `Stage 9: Report Complete` Barrier (parented on the devil, the render card, and every caption card) appends the brief's **Marker graphs** appendix (every graph, its caption beneath where one exists), runs `check-output --stage 9`, and completes.
 - **Exit:** none — the pipeline is complete.
 
 ---
@@ -152,7 +155,7 @@ execution of this pipeline:
 
 - **Stage Begin Cards** — Used at the start of each stage except Stage 1. Responsible for creating the stage's initial cards - Worker cards, or none (Stage 5), or the substage Begin/Barrier pairs (Stage 6) - and marking them as parents of the stage's Barrier card where they gate it.
 - **Worker Cards** — created parentless (if they do not depend on any other card), or with a `parents=[…]` list naming what must finish before they run. Dependencies that cards may have include the Stage Begin card that created them, a Barrier card, or other Worker cards in the same stage. That last case lets a stage's workers form a dependency chain — a DAG, not just a flat set — so a worker that consumes another's output is parented by it and runs only after it completes. In Stage 6, for example, each **synthesis** worker is parented by its own part workers, and 6d's **schedule review** worker is parented by the **interaction & timing screen** worker whose output it consumes (the interaction & timing screen is itself parented on 6d's Begin, which is gated on 6a's Barrier).
-Worker cards do the majority of the actual work within a stage and run without the user — they never block on or wait for a human. A worker may report its completion to the user (a subscribed card posts its result and counts on finishing — Stage 8's brief review does exactly this), but a completion notification is not a question: nothing waits for a reply. Anything a stage needs from the user is raised by the stage's Barrier — i.e. the two gates: the Stage 3 Finalize review and the Stage 5 marker review.
+Worker cards do the majority of the actual work within a stage and run without the user — they never block on or wait for a human. A worker may report its completion to the user (a subscribed card posts its result and counts on finishing — Stage 9's brief review does exactly this), but a completion notification is not a question: nothing waits for a reply. Anything a stage needs from the user is raised by the stage's Barrier — i.e. the two gates: the Stage 3 Finalize review and the Stage 5 marker review.
 
 - **Barrier cards** — Parented by Stage Begin or Worker cards and used to verify that a set of Worker cards has completed. These cards implement any needed checks on whether work is done or if new Worker cards (along with an associated required Barrier card) need to be created. These may be created at the start of an rx-review run or dynamically, e.g. when additional workers / passes are needed. When its checks pass a Barrier card completes, which releases the next stage's Stage Begin card gated behind it. A Barrier that guards dynamically-created workers must itself be set as a parent of that next Stage Begin card, or the next stage starts before the new work finishes.
 
@@ -443,6 +446,217 @@ Barriers, completes last and releases `Stage 7: Adversarial Review`.
 
 ---
 
+## Stage 7 in detail — adversarial review
+
+_This section is under user control - do not change without explicit permission_
+
+Stage 7 attacks every claim the research produced and audits every citation it carried, on two
+tracks that read `reports/` and never each other — a lens cannot launder the audit's miss, nor
+the reverse. It exists because the pipeline is structurally biased toward finding something to
+say; four hostile readers and a citation check are the counterweight.
+
+### Stage 7: Adversarial Review Begin Card functionality
+
+The Begin card invokes `rx.py analyze-adversarial`, which execs `fanout.py --phase adversarial`.
+The Stage 6 reports are on disk by the time this card runs, so the chunking happens here, in the
+script, rather than in a Worker card: `lenses.cmd_fanout` builds the lens track,
+`verify.cmd_build` and `verify.cmd_fanout` build the audit track, each splices its merges ahead of
+the `Stage 7: Adversarial Complete` Barrier, and the Begin self-completes.
+
+The chunker sizes chunks to the worker's window because a chunk gets read whole by one Worker:
+the window comes from Hermes' configured `context_length` (via `worker_context()`, not by probing
+a GPU host), converts tokens to characters, and takes a quarter of the result
+(`WINDOW_FRACTION`) — the failure this design fixes is not "didn't fit" but "fit and compacted
+anyway," so the model needs room to think, not merely room to hold. The hard ceiling
+`LENS_BUDGET_CHARS` (150k) applies regardless of how generous the window is, and no card reads
+more than `MAX_REPORTS_PER_CARD` (8) reports. Reports are packed whole where possible; a report
+longer than a full chunk splits at its own headings, and fragments under `MIN_SECTION_CHARS`
+(400) rejoin their neighbour — a lone heading carries no argument worth attacking. Slices carry
+the `LENS-` prefix so a later round's chunker cannot mistake yesterday's slice for a fresh
+report. Why the conversion step exists: the first version read the token count as a byte count,
+sized every chunk at 2.5% of the window, and shipped 104 cards for 26 reports.
+
+### Stage 7: Lens Worker Card functionality
+
+One Worker per (chunk × lens), created parentless, one profile per lens (`logic` and `overreach`
+→ `rx-logic`, `counter` → `rx-redteam`, `nullhyp` → `rx-nullhyp`), 40-minute clock, pinned to the
+plain part model like every sharded Worker. The card body carries the chunk's items file, the
+lens's one question, the shared severity rule, and its part file `LENS-<lens>-part-<NN>.md`; a
+body over the kanban byte cap is a build-time error, never a runtime truncation. Every finding a
+lens records carries a severity on the one shared scale — `fatal` (the claim cannot stand),
+`serious` (weaken before use), `minor` (imprecision worth fixing) — and a chunk that survives a
+lens earns exactly one line: `clean`. The scale is shared because one gate consumes it: when two
+lenses graded in private vocabularies, the reconciler read only `fatal` and every middle grade
+was invisible to the stage that decides what reaches the brief.
+
+Before a lens's cards run, the fan-out writes a manifest of its expected part files. The
+manifest is what lets the lens's **merge** card (`Consolidate the <lens> lens`, `rx-intake`,
+parented by that lens's own chunk cards) distinguish "still running" from "finished and wrote
+nothing": it refuses to consolidate an incomplete manifest rather than publish a report with a
+silently missing chunk. The merge concatenates the parts into the lens's one report —
+`LOGIC.md`, `REFUTATION.md`, `OVERREACH.md`, `NULLHYP.md` — the file the reconciler reads. Card
+titles are round-suffixed because a card's idempotency key derives from its title: a constant
+title handed a later round the *round-1* merge and silently discarded its new parents, and the
+stale merge published as complete the moment round 1's archived chunks counted as satisfied.
+
+### Stage 7: Citation Audit Card functionality
+
+`verify.cmd_build` walks every endnote in every report, resolves each source through the shared
+fetcher, and locates the quoted sentence inside it — the locating is scripted, so a judging card
+never spends a fetch discovering it cannot read its source. A located (section, quote) pair is
+probed against the verdict cache, and a cached verdict is reused only when today's claim is
+confirmed equivalent to the cached one (embedding similarity to find the candidate, a direct
+equivalence check to allow the reuse); otherwise the citation is judged fresh — the same quoted
+sentence can support one claim and not the next. Per-chunk Workers then return one of `supported`,
+`context-reversed`, `scope-mismatch`, `overstated`, `misquoted`, `unsupported`, `absent`. A
+source that cannot be read is `dead-link`, never `unsupported`: calling an unread page
+unsupported would accuse the report of inventing a citation on the strength of our own network
+trouble. The **citation-audit merge** (the audit track's counterpart to a lens merge, gated on
+every per-chunk audit card) concatenates the results into `CONTEXT-AUDIT.md`, and a **sweep**
+card behind the merge goes back over any card that completed having judged only some of its
+items — partial completion is invisible from the board, so something has to go back and look.
+Merges and sweeps are linked into the Barrier by listing board cards through the Hermes CLI —
+never by touching `kanban.db` — and only into a Barrier that has not started, because linking a
+parent to a running card does nothing.
+
+### Stage 7: Adversarial Complete Barrier Card functionality
+
+Its parents are the four lens merges plus the citation-audit merge (and the sweep, when one is
+scheduled). It runs `rx.py check-output --stage 7`, completes on the four lens reports and
+`CONTEXT-AUDIT.md` present, and releases `Stage 8: Reconciliation`.
+
+---
+
+## Stage 8 in detail — reconciliation
+
+_This section is under user control - do not change without explicit permission_
+
+Stage 8 is the judgement step: one card that reads every verdict Stage 7 produced and settles,
+claim by claim, what survives into the report. It produces no prose for the patient — its output,
+`VETTED.md`, is the only input the report stage's assembler may use.
+
+### Stage 8: Reconciliation Begin Card functionality
+
+The Begin card invokes `rx.py analyze-reconcile`, snapshots the run's inputs into the run dir
+(the self-contained record), and creates the single Worker **Reconcile adversarial verdicts**
+(`rx-verify`, 60-minute clock, priority 20) parented on the Begin.
+
+### Stage 8: Reconcile Worker Card functionality
+
+It reads `CONTEXT-AUDIT.md`, the four lens reports, and every Stage 6 report — substance, marker,
+trend, screens, efficacy — applying the same survival rule to a timing claim as to a dose claim,
+and reading all four grades a lens can return. A claim reaches the brief only when the audit's
+verdict is `supported` (a citation absent from `CONTEXT-AUDIT.md` has no verdict and counts as a
+failed audit), no lens left a `fatal`, no `serious` stands unnarrowed, and any `minor` findings
+travel into the brief as corrections. The audit's failures are labelled by what they mean: a read
+source that does not support the claim is a finding **about the literature** ("Evidence
+findings"); a source that could not be read is a finding **about our tooling** ("Unverified",
+silent on whether the claim is true). Failing one test demotes a claim to "Uncertain — for
+clinician", stating which test it failed; failing two or more drops it, recorded as dropped.
+Where `NULLHYP`'s steelman survives, both sides are kept. An efficacy report's "expected to move
+X" claims are audited like any claim; its observed pre/post values are arithmetic over the user's
+confirmed labs and stand on the lab confirmation, not on a citation.
+
+**Escalation.** A surviving high-stakes claim — an interaction warning, or anything implying a
+regimen change — earns a focused **Deep refutation** card (`rx-redteam`, capped at 5 for the
+stage), created by the reconciler and declared in its completion metadata. It is the only place
+late in a run where new research cards appear; the cap keeps the exception small and named.
+
+It writes `VETTED.md` — what survived, what was demoted, what was dropped, each with its reason —
+and completes with `{survived, uncertain, dropped, escalated}`.
+
+### Stage 8: Reconciliation Complete Barrier Card functionality
+
+Parented on the reconciler, it runs `rx.py check-output --stage 8`, completes on `VETTED.md`
+present, and releases `Stage 9: Report`.
+
+---
+
+## Stage 9 in detail — report
+
+_This section is under user control - do not change without explicit permission_
+
+Stage 9 builds the deliverable: the prescriber discussion brief, a time-series graph per marker,
+a caption under every graph that shows an outlier, and one hostile review of the finished
+document. Every card here can only see what survived Stage 8; the graphs are the single exception,
+because a graph is arithmetic over transcribed values, not a claim.
+
+### Stage 9: Report Begin Card functionality
+
+The Begin card invokes `rx.py analyze-report`, which execs `fanout.py --phase report` and creates
+four kinds of card: **Assemble prescriber discussion brief** and **Render marker graphs** start in
+parallel on the Begin; **Adversarial review of the brief** hangs off the assembler; and one
+**Graph caption: <marker>** Worker hangs off the assembler per flagged marker — the markers that
+survived Stage 5 with a reading outside its printed bands, the same list that drove the 6b
+research, so one upstream exclusion still takes effect exactly once.
+
+### Stage 9: Assemble Worker Card functionality
+
+The assembler (`rx-verify`, 45m) opens the brief with **Top five findings** — the five items the
+prioritised-questions section will rank highest, each distilled to one bold finding sentence
+carrying its own caveat, each linked to every section holding its evidence. Links must jump:
+every linked heading gets an explicit `<a id>` anchor, because auto-generated heading slugs break
+on numbered headings. The summary makes no judgement the body does not already make. Then the
+nine sections: regimen overview; per-substance evidence; interaction flags ranked by severity;
+the schedule with the single highest-value change called out; redundancy; medication efficacy
+framed as observation with "TOO EARLY TO TELL" carried through verbatim; lab observations
+explicitly framed as hypotheses; prioritised prescriber questions; and what this review did
+**not** cover, reproduced from `coverage.md` — every marker and item excluded at the user's
+request, stated as not investigated.
+
+It uses only claims that survived `VETTED.md`, with its corrections applied verbatim; a dropped
+or demoted claim must not reappear in any form, and no recommendation may rest on one. Citations
+carry through — every sentence traces to a child report — and web access is for checking
+something already claimed. Uncertainty is plain language ("two trials disagree" beats "results
+are mixed"), contradictions stay visible, and where the surviving evidence supports a dose,
+timing, or stop recommendation it is made with its evidence stated; where it does not, the brief
+says so plainly.
+
+### Stage 9: Render marker graphs Card functionality
+
+A deterministic card (`rx-intake`) running `rx.py lab-graphs` — the script does the arithmetic; no
+model touches a number. For every marker with a dated numeric value in `labs-complete.md` it
+renders one PNG: a true date axis with identical endpoints on every graph (earliest → latest draw
+in the run), one point per dated value, and a band drawn from each reading's own printed reference
+range, so a marker whose lab changed its reference range carries the honest band per era. Markers
+with no dated numeric value, and rows whose date will not parse, are skipped and named in
+`graphs/INDEX.md` — a skip is always named, never silent. The verb completes the card.
+
+### Stage 9: Graph caption Worker Card functionality
+
+One Worker per flagged marker, parented on the assembler because its only input is the finished
+brief: 3–5 sentences under the graph on what the plotted series could signify, distilled from the
+brief's own sections — the lab-observations section and whatever claims about that marker
+survived. Distillation, not fresh judgement: no new research, no diagnosis, nothing the brief
+did not already survive. A caption therefore cannot lead the reconciler — its input has already
+been attacked by four lenses, citation-audited, and reconciled.
+
+### Stage 9: Adversarial review of the brief Card functionality
+
+The devil (`rx-devil`, 45m) attacks the brief as a hostile reviewer, assuming it is
+overconfident. Recommendations are allowed — dose, timing, stop — what is not allowed is resting
+one on a claim that did not survive. It hunts: overstated confidence; uncertainty buried in
+reassuring prose; a hypothesis presented as a finding; a claim VETTED dropped or discredited
+reappearing; a claim that arrived with a citation and appears without one; anything a pharmacist
+would challenge on sight; and omission — a serious interaction or safety signal present in the
+child reports but missing from the brief. The schedule section is scrutinised hardest: a schedule
+change to a prescription that contradicts its label without flagging the conflict is `fatal`, and
+so is a timing claim the audit or logic lens marked defective reappearing here clean. Every
+attacked sentence is quoted, every defect rated `fatal`/`serious`/`minor` with what it should say
+instead, judged against the document's own sources. It writes each defect into the brief in place
+and completes with `{fatal, serious, minor}` counts — a flawed brief is never silently blocked.
+This is the one card on the board that is subscribed: the run's conclusion reaches the user
+through its completion notice. The devil reviews the brief proper — the graphs appendix is
+appended after, by the Barrier, so the devil never sees it.
+
+### Stage 9: Report Complete Barrier Card functionality
+
+Parented on the devil, the render card, and every caption card. It appends the brief's **Marker
+graphs** appendix — every graph, its caption beneath where one exists — runs
+`rx.py check-output --stage 9`, and completes; the run is done.
+
+---
+
 ## The shape of a run
 
 ```
@@ -524,11 +738,19 @@ Barriers, completes last and releases `Stage 7: Adversarial Review`.
      |                        claim that cited it? then a citation-audit merge → CONTEXT-AUDIT.md
      |     Stage 7: Adversarial Complete (Barrier)   four lens merges + citation-audit merge → releases Stage 8
      |
-  STAGE 8  Stage 8: Conclusion (Begin)           `rx.py analyze-conclude`
-     |       Reconcile adversarial verdicts   (rx-verify)   keep / narrow / drop each claim
+  STAGE 8  Stage 8: Reconciliation (Begin)       `rx.py analyze-reconcile`
+     |       Reconcile adversarial verdicts   (rx-verify)   keep / narrow / drop each claim → VETTED.md
+     |     Stage 8: Reconciliation Complete (Barrier)   VETTED.md written → releases Stage 9
+     |
+  STAGE 9  Stage 9: Report (Begin)               `rx.py analyze-report`
      |       Assemble prescriber discussion brief   (rx-verify)   <date>-<patient>-rx-review.md
-     |       Adversarial review of the brief   (rx-devil)    hostile review of the finished brief
-     |     Stage 8: Conclusion Complete (Barrier)      the run is done
+     |       ├─ Adversarial review of the brief   (rx-devil)    hostile review of the finished brief
+     |       └─ Graph caption: <marker>   one per marker with a reading outside its band; 3–5
+     |                                    sentences distilled from the finished brief
+     |       Render marker graphs (deterministic, parallel)   graphs/*.png + graphs/INDEX.md — one
+     |                                    graph per marker, identical date axes, printed band on each
+     |     Stage 9: Report Complete (Barrier)   appends the Marker graphs appendix — each graph, its
+     |                                    caption beneath where one exists → the run is done
 ```
 
 Stage 1 creates the numbered spine — every later stage's Stage Begin and Barrier cards — in one
@@ -543,7 +765,7 @@ goes.
 **A stage is not one card.** Stage 1 usually runs as no card at all — a person runs `rx.py stage`
 and `rx.py start` by hand — and every later stage runs as a single Stage Begin card that fans out
 into workers and then completes: stages 2–5, then `Stage 6: Research Begin`, each of the four
-research substages 6a–6d, `Stage 7: Adversarial Review` and `Stage 8: Conclusion`. What is
+research substages 6a–6d, `Stage 7: Adversarial Review`, `Stage 8: Reconciliation` and `Stage 9: Report`. What is
 one-per-stage is the Begin card and its *command*, not the work: a stage's real size is its Worker
 cards, and `Stage 3: Settle the Regimen` alone can create one per supplement and medication.
 
@@ -640,7 +862,7 @@ that run outside any card.
 | ↳ `rx.py labs-accept` | 'looks good' — keeps every remaining flagged marker significant, deletes their question files, writes `labs-succinct.md`, and completes the barrier | — | — |
 | **`Stage 6: Research Begin`** (Begin) | Stage 6 spine. Creates the four research substage shells — 6a/6b/6c/6d, each a Begin+Barrier — wires `Stage 6a: Substances Researched` ahead of the 6d Begin, and sets all four substage Barriers ahead of `Stage 6: Research Complete` | Released when **both** the `Stage 3: Finalize Regimen` and `Stage 5: Labs Complete` Barriers complete — the join | the 6a/6b/6c/6d Begin/Barrier shells |
 | ↳ `rx.py analyze-research` | Execs `fanout.py --phase research`. With **no** `--family` (the Stage 6 Begin) it creates the four substage shells; with `--family <substances\|markers\|trends\|screens>` (a substage Begin) it builds that family's workers | — | the substage shells, or one family's workers |
-| ↳ `fanout.py --phase {research,adversarial,conclude}` | Builds one stage-phase's cards; card bodies are templates here. Consults the ignore decisions `marker-review` recorded, at the single point where a marker becomes a card, and refuses to create one for a marker the user asked to ignore | — | the phase's cards (a substage's workers, or the shells, or Stage 7/8) |
+| ↳ `fanout.py --phase {research,adversarial,reconcile,report}` | Builds one stage-phase's cards; card bodies are templates here. Consults the ignore decisions `marker-review` recorded, at the single point where a marker becomes a card, and refuses to create one for a marker the user asked to ignore | — | the phase's cards (a substage's workers, or the shells, or the Stage 8/9 cards) |
 | **`Stage 6a: Research Substances`** (Begin) | 6a spine — one card-set per regimen substance | Released by `Stage 6: Research Begin`, in parallel with 6b/6c | per substance, three part-cards + a synthesis; each synthesis a parent of `Stage 6a: Substances Researched` |
 | **`Research: <substance> — part N/3`** | Sharded substance research: the 7 questions grouped into three cards — evidence & efficacy · safety & marker effects · timing. Parts never read each other. | Created by the 6a Begin | — |
 | **`Research: <substance> — report`** | Synthesis; the only card that sees all three fragments → `substance-<slug>.md` | Its own three parts | — |
@@ -670,13 +892,18 @@ that run outside any card.
 | **Citation audit** (per-chunk) | Confirms each cited text exists in its source and supports the report's claim that cited it (a source that cannot be read is `dead-link`, never `unsupported`); each is a parent of the citation-audit merge | Created by the Stage 7 Begin | — |
 | **Citation-audit merge** | Concatenates the per-chunk audit findings → `CONTEXT-AUDIT.md`; the audit track's counterpart to each lens's merge, and a parent of `Stage 7: Adversarial Complete` | That track's per-chunk audit cards | — |
 | ↳ `verify.py` | Locates each quoted sentence in its source (fetched through the shared fetcher), so the audit cards judge support, not retrieval. An unreadable source is `dead-link`, never `unsupported` | — | — |
-| **`Stage 7: Adversarial Complete`** (Barrier) | Confirms the four lens reports + `CONTEXT-AUDIT.md` written, then completes — releasing `Stage 8: Conclusion` | The four lens merges + the citation-audit merge | — |
-| **`Stage 8: Conclusion`** (Begin) | Stage 8 spine. Creates the three conclusion cards in fixed order — no data-dependent fan-out | Released when `Stage 7: Adversarial Complete` completes | Reconcile → Assemble → Adversarial review of the brief |
-| ↳ `rx.py analyze-conclude` | Execs `fanout.py` to create the reconcile → assemble → devil chain | — | the three conclusion cards |
-| **`Reconcile adversarial verdicts`** (rx-verify) | Resolves disagreements between the lenses; a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or un-narrowed `serious`) finding. Ingests `efficacy-*.md` alongside the research reports — any "expected to move X" claim is audited like any other, while observed values stand on lab confirmation, not citation | The Stage 8 Begin | — |
-| **`Assemble prescriber discussion brief`** (rx-verify) | Writes `<date>-<patient>-rx-review.md`, including what the review did **not** cover (from `coverage.md`): markers excluded by `--ignore`, items the user dropped at the regimen review, and a **Medication/Supplement efficacy** section carrying each dated substance's before/after findings — with any **"TOO EARLY TO TELL"** verdict verbatim | The reconciler | — |
-| **`Adversarial review of the brief`** (rx-devil) | Final hostile pass over the finished product; a parent of `Stage 8: Conclusion Complete` | The assembler | — |
-| **`Stage 8: Conclusion Complete`** (Barrier) | Confirms `<date>-<patient>-rx-review.md` produced, then completes — the run is done | The brief's adversarial review | — |
+| **`Stage 7: Adversarial Complete`** (Barrier) | Confirms the four lens reports + `CONTEXT-AUDIT.md` written, then completes — releasing `Stage 8: Reconciliation` | The four lens merges + the citation-audit merge | — |
+| **`Stage 8: Reconciliation`** (Begin) | Stage 8 spine. Creates the single Reconcile worker | Released when `Stage 7: Adversarial Complete` completes | Reconcile adversarial verdicts |
+| ↳ `rx.py analyze-reconcile` | Execs `fanout.py` to create the reconcile card | — | the reconcile card |
+| **`Reconcile adversarial verdicts`** (rx-verify) | Resolves disagreements between the lenses → `VETTED.md`; a claim survives only if its citation passed the audit **and** no lens left a `fatal` (or un-narrowed `serious`) finding. Ingests `efficacy-*.md` alongside the research reports — any "expected to move X" claim is audited like any other, while observed values stand on lab confirmation, not citation | The Stage 8 Begin | — |
+| **`Stage 8: Reconciliation Complete`** (Barrier) | Confirms `VETTED.md` written, then completes — releasing `Stage 9: Report` | The reconciler | — |
+| **`Stage 9: Report`** (Begin) | Stage 9 spine. Creates the report cards: assembler and graph renderer in parallel, the devil parented on the assembler, one caption card per flagged marker parented on the assembler | Released when `Stage 8: Reconciliation Complete` completes | Assemble; devil; Render marker graphs; `Graph caption: <marker>` ×(flagged markers) |
+| ↳ `rx.py analyze-report` | Execs `fanout.py --phase report` to create the Stage 9 cards | — | the Stage 9 cards |
+| **`Assemble prescriber discussion brief`** (rx-verify) | Writes `<date>-<patient>-rx-review.md` from `VETTED.md`, including what the review did **not** cover (from `coverage.md`) and the **Medication/Supplement efficacy** section with any **"TOO EARLY TO TELL"** verdict verbatim | The Stage 9 Begin | — |
+| **`Render marker graphs`** (rx-intake) | Runs `rx.py lab-graphs`: one PNG per marker with a dated numeric value in `labs-complete.md` — true date axis, identical endpoints on every graph (earliest → latest lab date), one point per dated value, each reading's band from its own printed reference range; skipped markers and unparseable dates named in `graphs/INDEX.md`; the verb completes the card | The Stage 9 Begin | — |
+| **`Graph caption: <marker>`** | 3–5 sentences under the marker's graph on what the plotted series can signify, distilled from the finished brief's own sections — no new research, no diagnosis | The assembler | — |
+| **`Adversarial review of the brief`** (rx-devil) | Final hostile pass over the finished product; a parent of `Stage 9: Report Complete` | The assembler | — |
+| **`Stage 9: Report Complete`** (Barrier) | Appends the brief's **Marker graphs** appendix (every graph, its caption beneath where one exists), runs `check-output --stage 9`, completes — the run is done | The devil, the render card, and every caption card | — |
 | **`rxkanban.py`** | Kanban mechanics: create, announce, subscribe. Library for `rx.py` and `fanout.py`. Every card is a separate `hermes kanban create` subprocess, so creations are PACED — `CREATE_DELAY_S`, 1s between them (`RX_CARD_CREATE_DELAY`, 0 disables). A burst of 86 unpaced creations tore the board's SQLite one page short of its own header on 2026-08-11; the cost is (N-1)x1s per fan-out | Imported | — |
 | **`terminal-pipeline-only.sh`** | Hook. Holds this board's `terminal` to an allowlist, scoped by `HERMES_KANBAN_DB` | Every terminal call on this board | — |
 | **`rx.py status` / `doctor` / `labs-report`** | `status` answers "what is happening, and what happens next" in ONE ranked headline from `pipeline_state()` — a card held for the user outranks everything and is never truncated away, and the headline names the verb that routes their reply; `--detail` adds the old inputs/cache/board/reports dump. `doctor` explains a held card by asking the board what is `blocked`, not by matching card titles. `labs-report` is the readable out-of-range list | the model on every "how is it going", and a person | — |
@@ -991,8 +1218,8 @@ unread page unsupported accuses the report of inventing a citation on the streng
 network trouble. A **citation-audit merge** — the audit track's counterpart to each lens's
 merge, gated on all the per-chunk audit cards — concatenates their results into `CONTEXT-AUDIT.md`.
 
-The severity scale, the barrier wiring, and Stage 8's reconcile → assemble → devil chain carry no
-detail beyond their canonical sections (*Pipeline Stages*, Stages 7–8).
+The severity scale and the barrier wiring carry no detail beyond their canonical sections
+(*Pipeline Stages*, Stages 7–9) and *Stage 7/8/9 in detail*.
 
 ---
 
@@ -1004,10 +1231,10 @@ its own timestamped output directory.
 **Each invocation gets `~/.hermes/reports/rx-review/<YYYY-MM-DD-HHMMSS>-<patient-slug>/`;** the slug is the patient name from `inputs/patient.md` (lowercased, hyphenated, or absent when no name is recorded). `rx.py start`
 (`start_run()`) creates it at Stage 1 — the single writer, before any parallel card exists — and
 points a `current` symlink in the parent at it, swapped atomically. Every stage resolves its output
-dir (`REPORTS`) through `current`, so all eight stages' worker processes write into the SAME run
+dir (`REPORTS`) through `current`, so all nine stages' worker processes write into the SAME run
 dir; the `reports/…` paths in the table below are relative to it. Past run dirs are the deliverables
 and are KEPT across `reset` (which only drops the `current` pointer); only `reset --clear-reports`
-purges the history. At Stage 8 the conclusion snapshots the run's inputs (the regimen and the lab
+purges the history. At Stage 8 the reconciliation snapshots the run's inputs (the regimen and the lab
 transcriptions) into `<run>/inputs/`, so each timestamped dir is a self-contained record — the caches
 (transcriptions, verdicts, fetched pages) are content-addressed and never copied in.
 
@@ -1028,6 +1255,8 @@ transcriptions) into `<run>/inputs/`, so each timestamped dir is a self-containe
 | `inputs/.xcribe/<token>.json` | `intake-labs` (one per document) and `plan-lab` (one per window) — ONE writer each, never a shared file | `plan-lab`, to learn its document; `check-transcription`, for a window's source and destination | working — the run's token bindings; swept by `reset` |
 | `inputs/.uploads-done.json` | `rx.py uploads-done` — the set of documents the user called complete | `rx.py start`, which refuses without it or if a document arrived since | **yes** — the person's "that is all the labs" |
 | `inputs/labs-draft.md` | the `Stage 4: Labs Transcribed` barrier (`merge-labs`) | `review_labs`, `labs-report` | **yes** — full transcription with provenance |
+| `graphs/<marker-slug>.png`, `graphs/INDEX.md` | `rx.py lab-graphs` (the Stage 9 **Render marker graphs** card) | the `Stage 9: Report Complete` Barrier's appendix, a person | no — every value in it is copied from `labs-complete.md` |
+| `graphs/caption-<slug>.md` | one `Graph caption:` card per flagged marker | the appendix, a person | no — a distillation of the finished brief, citing nothing new |
 | `inputs/labs-complete.md` | `review_labs` (seeded from `labs-draft.md`), annotated by `marker-review` | **all scripts** — `check_labs`, `out_of_range_entries`, `trends`, `labs-report` | **yes** — full provenance plus review decisions |
 | `inputs/marker-question-<slug>.md` | `review_labs` (one per out-of-range marker; deleted by `marker-review` / `labs-accept`) | the `Stage 5: Labs Complete` barrier | working — the still-unreviewed markers |
 | `inputs/marker-batch-index.md` | the `Stage 5: Labs Complete` barrier (`rx.py labs-brief`) | `marker-review --number` | the stable number → marker map for the marker review |
@@ -1038,8 +1267,10 @@ transcriptions) into `<run>/inputs/`, so each timestamped dir is a self-containe
 | `reports/interactions.md`, `reports/SCHEDULE.md` | the 6d whole-regimen screens (`SCHEDULE.md` only when the regimen records dose times) | lenses, audit, assembler | yes |
 | `reports/LOGIC.md`, `REFUTATION.md`, `OVERREACH.md`, `NULLHYP.md` | lens merges (Stage 7) | reconciler | yes |
 | `reports/CONTEXT-AUDIT.md` | the citation-audit merge (Stage 7) | reconciler | yes |
+| `reports/VETTED.md` | the reconciler (Stage 8) | the assembler (Stage 9) | **yes** — the claims that survived adversarial review, with each keep / demote / drop stated with its reason |
 | `reports/<date>-<patient>-rx-review.md` | assembler | rx-devil, the user | **the output** — including what it did NOT cover: markers the user asked to ignore and items dropped at the regimen review |
-| `reports/inputs/` (regimen + transcriptions) | Stage 8 conclusion (`_snapshot_inputs`) | a person reading the run later | the run's input snapshot — makes the timestamped dir a self-contained record |
+| `reports/<date>-<patient>-critique.md` | the devil (Stage 9) | the user | yes — the devil's full critique; each defect is also flagged in place inside the brief |
+| `reports/inputs/` (regimen + transcriptions) | the Stage 8 reconciliation Begin (`_snapshot_inputs`) | a person reading the run later | the run's input snapshot — makes the timestamped dir a self-contained record |
 
 ### labs-complete.md vs labs-succinct.md
 
@@ -1119,10 +1350,12 @@ the other direction, that every command a card instructs is one the allowlist pe
 | `(computed)` | rx-intake | {begin_parents} | 20m | `fanout.py` |
 | `(computed)` | rx-intake | (computed) | 15m | `fanout.py` |
 | `Adversarial review of the brief` | rx-devil | (computed) | 45m | `fanout.py` |
-| `Assemble prescriber discussion brief` | rx-verify | (computed) | 45m | `fanout.py` |
+| `Assemble prescriber discussion brief` | rx-verify | {me} | 45m | `fanout.py` |
 | `Efficacy: %s (started %s)` | rx-research | (computed) | {SYNTH_RUNTIME} | `fanout.py` |
+| `Graph caption: %s` | rx-verify | (computed) | 15m | `fanout.py` |
 | `Interaction and timing screen: full regimen` | rx-research | {me} | 60m | `fanout.py` |
 | `Reconcile adversarial verdicts` | rx-verify | {me} | 60m | `fanout.py` |
+| `Render marker graphs` | rx-intake | {me} | 20m | `fanout.py` |
 | `Schedule review: current vs evidence-based timing` | rx-research | (computed) | 60m | `fanout.py` |
 | `Trend: %s — dispatch` | rx-intake | (computed) | 15m | `fanout.py` |
 | `Trend: %s — part %d/3` | rx-research | — | {PART_RUNTIME} | `fanout.py` |
@@ -1136,7 +1369,7 @@ the other direction, that every command a card instructs is one the allowlist pe
 | `Transcribe Lab %s (part %d)` | rx-intake | (computed) | {_mn}m | `rx.py` |
 | `Worker: Read regimen` | rx-intake | (computed) | 90m | `rx.py` |
 
-_21 card types. Generated by `cardmap.py`; do not edit by hand._
+_23 card types. Generated by `cardmap.py`; do not edit by hand._
 <!-- END GENERATED CARD MAP -->
 
 ---
@@ -1185,7 +1418,7 @@ and the inputs that produced them are gone.
 
 | Script | Does |
 |---|---|
-| `rx.py` | The driver. The intake and review stages — `intake-regimen`, `intake-regimen-items`, `intake-labs` / `plan-lab`, `review_labs` — the regimen and marker review answers, the three analysis phases (`analyze-research` / `analyze-adversarial` / `analyze-conclude`), halt, reset — `rx.py --help`. |
+| `rx.py` | The driver. The intake and review stages — `intake-regimen`, `intake-regimen-items`, `intake-labs` / `plan-lab`, `review_labs` — the regimen and marker review answers, the four analysis phases (`analyze-research` / `analyze-adversarial` / `analyze-reconcile` / `analyze-report`), halt, reset — `rx.py --help`. |
 | `fanout.py` | Builds the research + adversarial graph. Card bodies are templates here. |
 | `lenses.py` | Packs reports into window-sized chunks and defines the four lenses. |
 | `verify.py` | Citation verification: locates quoted sentences in fetched sources. |
@@ -1203,7 +1436,7 @@ and the inputs that produced them are gone.
 | Setting | Value | Where | Why |
 |---|---|---|---|
 | `rxkanban.CREATE_DELAY_S` | 1s | `RX_CARD_CREATE_DELAY` | Seconds between consecutive card creations. Each card is its own `hermes kanban create` subprocess — open the board, write, close. 86 of them back to back, while the dispatcher spawned workers and the dashboard polled, left the board one page shorter than its header claimed (a torn extend) and the burst died with `could not parse a task id from:`. Measured 2026-08-12: a create is ~0.26s end to end, of which only ~0.08s is the write and ~0.18s is interpreter start — so 1s is ~12x the write it separates. Costs (N-1)x1s per fan-out (an 86-card audit ~1.5 min, not 7); 0 disables, which is what the test suite uses. |
-| `kanban.max_in_progress` | 4 | archivist profile + global | The backend serializes: latency scales ~linearly with in-flight requests. Six concurrent cards ran ~8x slower each and timed out; four is measured-better throughput. Read once at gateway start — **needs a restart**. |
+| `kanban.max_in_progress` | 6 | archivist profile + global | The backend serializes: latency scales ~linearly with in-flight requests. Raised from 4 to 6-wide on David's decision (2026-09-20) — expect timeouts on the first runs at the new width, retried through. Read once at gateway start — **needs a restart**. |
 | `model.context_length` | 200,000 | every rx profile | The host serves 240k (verified via /v1/models 2026-08-12). The estimator undercounts tool-heavy history by ~30%, so what matters is where compression fires: 0.6x200k = 120k estimated is ~171k actual, +24,576 output = ~196k against 240k. 44k headroom (was 61k at 180k; raised 2026-08-12). |
 | `model.max_tokens` | 24,576 | every rx profile | Unset, workers request the model's 65,536 ceiling and blow the window. |
 | `compression.threshold` | 0.6 | every rx profile | Compaction fires at `0.6 x context_length` = 120k estimated (was 108k at 180k). Every card that timed out had crossed it. Do not raise it without re-reading the undercount note above. |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fan out the rx-review analysis graph, one stage-phase per invocation.
 
-rx.py's Stage 6/7/8 Begin cards exec this with a --phase. Each phase builds only its own
+rx.py's Stage 6/7/8/9 Begin cards exec this with a --phase. Each phase builds only its own
 cards with `hermes kanban create`, hanging them off the running Begin card (HERMES_KANBAN_TASK)
 and splicing what a downstream Barrier must wait on in front of that Barrier:
 
@@ -16,7 +16,11 @@ and splicing what a downstream Barrier must wait on in front of that Barrier:
         |                          lens (logic, counter-evidence, overreach, status-quo) + the
         |                          citation audit; a merge per lens + the citation-audit merge,
         |                          all spliced ahead of `Stage 7: Adversarial Complete`.
-    --phase conclude               Stage 8. Reconcile -> Assemble -> hostile final review.
+    --phase reconcile              Stage 8. The single Reconcile worker -> VETTED.md.
+    --phase report                 Stage 9. Assemble + deterministic graph render in parallel;
+                                   the devil and one caption card per flagged marker hang off
+                                   the assembler; all spliced ahead of `Stage 9: Report
+                                   Complete`, which appends the brief's Marker graphs appendix.
 
 Card bodies are templates — substance and marker names are substituted in, so adding a
 row to the regimen file is the only thing needed to get it researched.
@@ -355,7 +359,13 @@ reason. Then kanban_complete with metadata:
 
 SYNTH = """Assemble the prescriber discussion brief from {reports}/VETTED.md.
 
-Write {reports}/{brief}:
+Write {reports}/{brief}. Open with a "## Top five findings" block before section 1: the five
+items the Prioritized-questions section will rank highest, each distilled to one bold finding
+sentence that carries its own caveat, each followed by a link to every section holding its
+evidence. Distill only from the body's claims — the summary makes no judgment the brief does not
+already make. Links must jump: give every heading the summary links to an explicit anchor
+(`## 7. Lab observations <a id="sec7"></a>`) and link `[text](#sec7)` — never rely on
+auto-generated heading slugs, they break on numbered headings. Then write:
   1. Regimen overview
   2. Per-substance evidence summary
   3. Interaction flags, ranked by severity
@@ -1236,40 +1246,93 @@ def phase_adversarial(args):
     _complete_self("Stage 7 lenses + citation audit fanned out", dry=args.dry_run)
 
 
-def phase_conclude(args):
-    """Stage 8: Conclusion — the fixed Reconcile -> Assemble -> Adversarial-review-of-the-brief
-    chain. The Stage 7 reports exist on disk (Stage 7 completed); Reconcile hangs off this Begin,
-    the others chain behind it, and the final devil card is spliced ahead of `Stage 8: Conclusion
-    Complete`."""
+def phase_reconcile(args):
+    """Stage 8: Reconciliation — the single Reconcile worker. Its verdict file VETTED.md is the
+    only input Stage 9's assembler may use. The Stage 7 reports exist on disk (Stage 7 completed);
+    Reconcile hangs off this Begin and is spliced ahead of `Stage 8: Reconciliation Complete` so
+    the Barrier cannot complete on the Begin alone. The run's inputs are snapshotted here — this
+    Begin owns the stage, and the snapshot is the stage's own bookkeeping, not the deliverable's."""
     fmt = _fmt()
     if not args.dry_run:
         _snapshot_inputs()                                     # self-contained record in the run dir
     me = _my_parents()
     rec = create(args, "Reconcile adversarial verdicts", "rx-verify",
                  RECONCILE.format(**fmt), parents=me, runtime="60m", priority=20)
+    rxkanban.splice([rec] if not rxkanban.is_dry(rec) else [],
+                    "Stage 8: Reconciliation Complete")
+    print("\nStage 8: Reconciliation — reconcile card created, spliced ahead of the Barrier.%s"
+          % ("  (DRY RUN)" if args.dry_run else ""))
+    _complete_self("Stage 8: reconcile created", dry=args.dry_run)
+
+
+CAPTION = """Write the caption for one marker graph in the finished brief's appendix.
+
+The graph: {reports}/graphs/{stem}.png — every dated reading of the marker, plotted on the run's
+common date axis, with the band drawn from each reading's own printed reference range.
+
+Read {reports}/{brief} — the finished brief, nothing else. Write 3-5 sentences for
+{reports}/graphs/caption-{stem}.md on what the plotted series could signify, distilled ONLY from
+what the brief already says about this marker (its lab-observations claims, the interactions and
+efficacy sections, whatever survived into it). Quote no source the brief does not already cite;
+cite nothing new. This is distillation, not fresh judgement: no new research, no web access, no
+diagnosis, no recommendation the brief does not already make. If the brief says little about the
+marker, say that little plainly — an honest short caption beats a padded one.
+
+Then kanban_complete with a one-line summary.
+"""
+
+
+def phase_report(args):
+    """Stage 9: Report — the deliverable. The assembler and the deterministic graph renderer run
+    in parallel on this Begin; the devil review and the graph captions hang off the assembler,
+    because a caption's only input is the finished brief (distillation, no new research). The
+    devil, the render card, and EVERY caption card are spliced ahead of `Stage 9: Report
+    Complete`, which appends the brief's Marker graphs appendix behind the devil."""
+    fmt = _fmt()
+    me = _my_parents()
     syn = create(args, "Assemble prescriber discussion brief", "rx-verify",
-                 SYNTH.format(**fmt),
-                 parents=[rec] if not rxkanban.is_dry(rec) else [], runtime="45m", priority=10)
+                 SYNTH.format(**fmt), parents=me, runtime="45m", priority=10)
+    render = create(args, "Render marker graphs", "rx-intake",
+                    "Run this and report what it printed. Do nothing else:\n\n"
+                    "    python3 ~/hermes-skills/rx-review/scripts/rx.py lab-graphs\n",
+                    parents=me, runtime="20m", priority=8)
     devil = create(args, "Adversarial review of the brief", "rx-devil",
                    DEVIL.format(**fmt),
                    parents=[syn] if not rxkanban.is_dry(syn) else [], runtime="45m", priority=5)
-    # Subscribe the FINAL card so the run's conclusion reaches the user — the one place a
+    # Subscribe the FINAL prose card so the run's conclusion reaches the user — the one place a
     # subscription is right on this board (work cards stay unsubscribed to avoid noise). The devil
-    # never blocks now: it completes with {fatal, serious, minor} counts and writes each defect
-    # into the brief (<date>-rx-review.md) in place, so this completion notice tells the user the brief is ready and how
-    # many issues it carries. Previously its block on a flawed brief was silent (2026-08-13).
+    # never blocks: it completes with {fatal, serious, minor} counts and writes each defect into
+    # the brief in place, so this completion notice tells the user the brief is ready and how many
+    # issues it carries. Previously its block on a flawed brief was silent (2026-08-13).
     if not rxkanban.is_dry(devil):
         rxkanban.subscribe(devil)
-    rxkanban.splice([devil] if not rxkanban.is_dry(devil) else [],
-                    "Stage 8: Conclusion Complete")
-    print("\nStage 8: Conclusion — reconcile -> assemble -> devil created.%s"
-          % ("  (DRY RUN)" if args.dry_run else ""))
-    _complete_self("Stage 8: reconcile -> assemble -> devil created", dry=args.dry_run)
+
+    # One caption card per graph whose marker is out of range. The out-of-range list is rx.py's
+    # single authoritative one (read_markers' source), the graph set is rx.py's single reading of
+    # labs-complete.md (rx.caption_targets) — the caption and the graph it lands under cannot
+    # disagree about which observation they name, and an ignored marker never reaches either.
+    caps = []
+    names = read_markers()                     # fail-closed by design: raises if the list can't be read
+    for name, stem, label in _rx_module().caption_targets(names):
+        cid = create(args, "Graph caption: %s" % label, "rx-verify",
+                     CAPTION.format(reports=REPORTS, stem=stem, brief=_brief_name()),
+                     parents=[syn] if not rxkanban.is_dry(syn) else [],
+                     runtime="15m", priority=5)
+        caps.append(cid)
+    print("  captions        : %d card(s) (markers with a reading outside their band)" % len(caps))
+
+    splice_ids = [x for x in ([devil, render] + caps) if not rxkanban.is_dry(x)]
+    rxkanban.splice(splice_ids, "Stage 9: Report Complete")
+    print("\nStage 9: Report — assemble + render created; devil and %d caption(s) on the "
+          "assembler; all spliced ahead of the Barrier.%s"
+          % (len(caps), "  (DRY RUN)" if args.dry_run else ""))
+    _complete_self("Stage 9: report cards created", dry=args.dry_run)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--phase", choices=("research", "adversarial", "conclude", "trend-dispatch"),
+    ap.add_argument("--phase", choices=("research", "adversarial", "reconcile", "report",
+                                        "trend-dispatch"),
                     default="research", help="which analyze stage to build")
     ap.add_argument("--family", choices=("substances", "markers", "trends", "screens"),
                     help="within --phase research: build one substage's (6a-6d) workers; omit to "
@@ -1287,8 +1350,10 @@ def main():
         return phase_trend_dispatch(args)
     if args.phase == "adversarial":
         return phase_adversarial(args)
-    if args.phase == "conclude":
-        return phase_conclude(args)
+    if args.phase == "reconcile":
+        return phase_reconcile(args)
+    if args.phase == "report":
+        return phase_report(args)
 
 
 if __name__ == "__main__":

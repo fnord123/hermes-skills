@@ -649,7 +649,8 @@ def main():
     # held by the Begin/Barrier edges the whole graph is built from, and human input is the
     # `Regimen clarify:` / `Marker review:` worker cards. What is left inside analyze-research (the
     # Stage 6 Begin) is a pair of backstops for a card reached out of order, and the exec into
-    # fanout. analyze-adversarial (7) and analyze-conclude (8) run after those backstops passed.
+    # fanout. analyze-adversarial (7), analyze-reconcile (8) and analyze-report (9) run after those
+    # backstops passed.
     _analyze_src = inspect.getsource(rx.cmd_analyze_research)
     check("the stale-inventory NOT YET block is gone", "NOT YET" in _analyze_src, False,
           "a stage reached in order never sees a stale inventory; the edge guarantees it")
@@ -1006,6 +1007,10 @@ def main():
     check("brief still asks about redundancy", "Redundancy" in _fan.SYNTH, True,
           "duplicating a mechanism is the useful half")
     check("brief does not ask about cost", "ongoing cost" in _fan.SYNTH, False, "")
+    check("brief opens with a linked top-five summary",
+          "Top five findings" in _fan.SYNTH and "<a id=" in _fan.SYNTH, True,
+          "a 50KB brief without a front door reads as a wall of text; auto slugs break on "
+          "numbered headings (David 2026-09-21)")
     # Removing question 8 left TIMING_Q numbered 9 behind a gap.
     _p3t = _fan.SUBSTANCE_PARTS[2].format(
         timing_q=_fan.TIMING_Q.format(when="morning"), name="X", inputs="I")
@@ -2101,11 +2106,11 @@ def main():
     _spine_begins = ["Stage 2: Read Regimen", "Stage 3: Settle the Regimen",
                      "Stage 4: Transcribe Labs", "Stage 5: Review Labs",
                      "Stage 6: Research Begin", "Stage 7: Adversarial Review",
-                     "Stage 8: Conclusion"]
+                     "Stage 8: Reconciliation", "Stage 9: Report"]
     _spine_barriers = ["Stage 2: Regimen Read", "Stage 3: Finalize Regimen",
                        "Stage 4: Labs Transcribed", "Stage 5: Labs Complete",
                        "Stage 6: Research Complete", "Stage 7: Adversarial Complete",
-                       "Stage 8: Conclusion Complete"]
+                       "Stage 8: Reconciliation Complete", "Stage 9: Report Complete"]
 
     def _run_start_as_card(task):
         with tempfile.TemporaryDirectory() as _td:
@@ -2153,7 +2158,7 @@ def main():
 
     _rc, _byt = _run_start_as_card("t_self")
     check("start creates the whole spine", _rc, 0, "")
-    check("...all fourteen spine cards exist",
+    check("...all sixteen spine cards exist",
           sorted(t for t in _byt if t in _spine_begins + _spine_barriers),
           sorted(_spine_begins + _spine_barriers),
           "a missing spine card is a stage that never runs")
@@ -2162,7 +2167,7 @@ def main():
               _byt[_b]["id"] in _byt[_bar]["parents"], True,
               "a Barrier that does not wait on its Begin gates nothing")
     # The spine is a DAG: regimen (2->3) and labs (4->5) are two PARALLEL branches from the root,
-    # Stage 6 JOINS both Barriers, and 7/8 chain behind 6. Assert each join/branch edge explicitly.
+    # Stage 6 JOINS both Barriers, and 7/8/9 chain behind 6. Assert each join/branch edge explicitly.
     _joins = {
         "Stage 3: Settle the Regimen": ["Stage 2: Regimen Read"],
         # Stage 5 (marker review) waits on Stage 4 AND Stage 3, so the regimen review settles before
@@ -2170,7 +2175,8 @@ def main():
         "Stage 5: Review Labs": ["Stage 4: Labs Transcribed", "Stage 3: Finalize Regimen"],
         "Stage 6: Research Begin": ["Stage 3: Finalize Regimen", "Stage 5: Labs Complete"],
         "Stage 7: Adversarial Review": ["Stage 6: Research Complete"],
-        "Stage 8: Conclusion": ["Stage 7: Adversarial Complete"],
+        "Stage 8: Reconciliation": ["Stage 7: Adversarial Complete"],
+        "Stage 9: Report": ["Stage 8: Reconciliation Complete"],
     }
     for _begin, _bars in _joins.items():
         for _bar in _bars:
@@ -2235,11 +2241,15 @@ def main():
     for _gone in ("regimen-confirm", "finalize-regimen"):
         check("`%s` is gone from the CLI" % _gone, _verb_registered(_gone), False,
               "the old confirm/finalize verbs are replaced by gather + correct")
+    check("`analyze-conclude` is gone from the CLI", _verb_registered("analyze-conclude"), False,
+          "Stage 8 is Reconciliation (analyze-reconcile) and the deliverable is Stage 9 "
+          "(analyze-report); a card still naming the old verb fails the worker mid-run")
     for _v in ("stage", "intake-regimen", "intake-regimen-items", "gather-regimen-slugs",
                "correct-item-slug-request", "correct-item-slug-response", "regimen-accept",
                "marker-review", "labs-accept",
                "intake-labs", "review_labs",
-               "analyze-research", "analyze-adversarial", "analyze-conclude", "patient"):
+               "analyze-research", "analyze-adversarial", "analyze-reconcile", "analyze-report",
+               "lab-graphs", "graphs-append", "patient"):
         check("`%s` is a registered verb" % _v, _verb_registered(_v), True,
               "the card bodies name it; an unregistered verb fails the worker mid-run")
 
@@ -3595,8 +3605,9 @@ def main():
                 rx.cmd_start(_A())
             check("start is keyed on constants, so it cannot fork",
                   sorted({k for _t, k in _made}),
-                  sorted("rx-stage%d-%s" % (n, part)
-                         for n in range(2, 9) for part in ("begin", "barrier")),
+                  sorted("rx-stage%d-%s" % (s["n"], part)
+                         for s in rx.STAGE_SPINE if s["n"] >= 2
+                         for part in ("begin", "barrier")),
                   "one beginning per review, whatever the inputs looked like when it was reached")
 
             # The realistic version of the mistake: the user says "that's all", then remembers
