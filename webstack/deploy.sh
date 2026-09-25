@@ -53,30 +53,38 @@ fi
 scp -q "$tmp/ws.tar" "$HOST:~/ws-$STAMP.tar"
 
 echo ">> $STAMP: deploying to $HOST"
-ssh "$HOST" "set -euo pipefail
-  mkdir -p ~/webstack-repo
-  tar -xf ~/ws-$STAMP.tar -C ~/webstack-repo
-  rm -f ~/ws-$STAMP.tar
-  cd ~/webstack-repo/webstack
-  webaccess/sync-from-skill.sh
-  [ -f webaccess/.env ] || { echo 'ERROR: webaccess/.env missing on host — restore from the backup before deploying' >&2; exit 1; }
-  [ -f .env ]           || echo 'WARN: top-level .env (firecrawl vars) missing — firecrawl tiers will use compose defaults'
-  # --- secret guards: a deploy must not silently run searxng keyless or unsigned ---
-  # (awk field compare, not a KEY=value regex — keeps the check out of the redactor's
-  #  pattern space and exact: the line must be KEY=<non-empty>)
-  env_has() { awk -F= -v k="$1" '$1==k && length($2)>0 { found=1 } END { exit found?0:1 }' "$2"; }
-  env_has SEARXNG_SECRET .env || { echo 'ERROR: SEARXNG_SECRET missing/empty in root .env — searxng would fall back to the secret baked in settings.yml (or auto-gen on a fresh host): sessions and signed URLs break' >&2; exit 1; }
-  if [ -f searxng/.env ]; then
-    env_has SEARXNG_BRAVE_API_KEY searxng/.env || { echo 'ERROR: SEARXNG_BRAVE_API_KEY missing/empty in searxng/.env — the brave api engine will be skipped at next apply' >&2; exit 1; }
-  else
-    echo 'WARN: searxng/.env missing — keyed engines will be skipped (keyless engines unaffected)'
-  fi
-  # --- keep searxng's managed engine block in sync with the (clean) repo tree ---
-  # The tarball ships api-engines.yml with placeholder keys; without this, the
-  # host's live managed block would go stale against repo changes. The apply
-  # script expands real keys from searxng/.env and re-verifies the engine answers.
-  searxng/apply-api-engines.sh
-"
+# The remote block runs over a QUOTED heredoc, never a double-quoted ssh string:
+# inside "...", the LOCAL shell expands every $1/$2/$STATements — under `set -u` a
+# deploy aborted on an unbound $2 (live 2026-09-25), and had it proceeded, the
+# env_has guards below would have been silently rewritten by the local shell into
+# garbage that still exits 0. A quoted heredoc means the only thing crossing the
+# wire is this one argument; every expansion happens on the host, where it belongs.
+ssh "$HOST" bash -s -- "ws-$STAMP.tar" <<'REMOTE'
+set -euo pipefail
+T="$1"
+mkdir -p ~/webstack-repo
+tar -xf ~/"$T" -C ~/webstack-repo
+rm -f ~/"$T"
+cd ~/webstack-repo/webstack
+webaccess/sync-from-skill.sh
+[ -f webaccess/.env ] || { echo 'ERROR: webaccess/.env missing on host — restore from the backup before deploying' >&2; exit 1; }
+[ -f .env ]           || echo 'WARN: top-level .env (firecrawl vars) missing — firecrawl tiers will use compose defaults'
+# --- secret guards: a deploy must not silently run searxng keyless or unsigned ---
+# (awk field compare, not a KEY=value regex — keeps the check out of the redactor's
+#  pattern space and exact: the line must be KEY=<non-empty>)
+env_has() { awk -F= -v k="$1" '$1==k && length($2)>0 { found=1 } END { exit found?0:1 }' "$2"; }
+env_has SEARXNG_SECRET .env || { echo 'ERROR: SEARXNG_SECRET missing/empty in root .env — searxng would fall back to the secret baked in settings.yml (or auto-gen on a fresh host): sessions and signed URLs break' >&2; exit 1; }
+if [ -f searxng/.env ]; then
+  env_has SEARXNG_BRAVE_API_KEY searxng/.env || { echo 'ERROR: SEARXNG_BRAVE_API_KEY missing/empty in searxng/.env — the brave api engine will be skipped at next apply' >&2; exit 1; }
+else
+  echo 'WARN: searxng/.env missing — keyed engines will be skipped (keyless engines unaffected)'
+fi
+# --- keep searxng's managed engine block in sync with the (clean) repo tree ---
+# The tarball ships api-engines.yml with placeholder keys; without this, the
+# host's live managed block would go stale against repo changes. The apply
+# script expands real keys from searxng/.env and re-verifies the engine answers.
+searxng/apply-api-engines.sh
+REMOTE
 
 if [ "$BUILD" = 1 ]; then
   echo ">> building webaccess (Fara + docker CLI fetched at pinned pins)"
