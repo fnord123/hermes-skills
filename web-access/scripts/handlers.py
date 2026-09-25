@@ -262,6 +262,13 @@ def cmd_fetch(url, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
     body = {"ok": r.ok, "url": rxfetch.canonical_url(url), "outcome": r.outcome,
             "chars": len(text), "truncated": truncated,
             "text": text[:max_chars]}
+    # age_hours: hours since this copy was WRITTEN or last CONFIRMED against the origin
+    # (a 304 resets it to ~0). Absent on a live fetch — its absence means "just fetched".
+    # Not a rung name; black-box compatible. It exists because `truncated: false` is
+    # silent about freshness, and a model that cannot tell "certified now" from "replayed
+    # from last week" will report an aged document as live news (the 2026-09-25 incident).
+    if r.ok and getattr(r, "age_hours", None) is not None:
+        body["age_hours"] = round(r.age_hours, 1)
     if trace:
         body["trace"] = str(trace)
     if r.outcome == "unreadable" and no_browser:

@@ -106,7 +106,11 @@ One JSON object.
 `search` returns `ok`, `query`, `count`, and `results` — each with `title`,
 `url`, `snippet`.
 
-`fetch` returns `ok`, `url`, `outcome`, `chars`, `truncated`, and `text`.
+`fetch` returns `ok`, `url`, `outcome`, `chars`, `truncated`, and `text` — plus
+`age_hours` when the copy came from cache: hours since it was written or last
+confirmed against the origin (a revalidated copy reports ~0). Its ABSENCE means the
+document was fetched live just now. Treat a large `age_hours` as a fact about the
+document's currency, not a warning to ignore.
 
 `do` returns `ok`, `status`, and `answer`:
 

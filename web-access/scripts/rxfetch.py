@@ -163,10 +163,10 @@ class Result(object):
     verbatim quotes, so it may reasonably refuse anything a browser rendered; a product lookup
     may not care. Neither can choose if the tier is invisible. string."""
 
-    __slots__ = ("text", "outcome", "detail", "via", "attempts", "meta")
+    __slots__ = ("text", "outcome", "detail", "via", "attempts", "meta", "age_hours")
 
     def __init__(self, text="", outcome="unreachable", detail="", via="", attempts=None,
-                 meta=None):
+                 meta=None, age_hours=None):
         self.text, self.outcome, self.detail, self.via = text, outcome, detail, via
         # Every layer tried, in order, with what it returned. A failure that cannot say how far
         # it got is indistinguishable from a layer that never ran — which is exactly the doubt
@@ -175,6 +175,9 @@ class Result(object):
         # Revalidation material from the origin (etag / last_modified), set by the http
         # tier; empty for every rung that renders through a browser and never sees them.
         self.meta = dict(meta or {})
+        # Hours since the bytes were written or last origin-confirmed; None on a live
+        # fetch. See the response projection in handlers.cmd_fetch.
+        self.age_hours = age_hours
 
     @property
     def ok(self):
@@ -902,7 +905,9 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
                     cached = open(cand, encoding="utf-8", errors="ignore").read()
                     if not looks_unusable(cached):
                         _note("cache", "hit", chars=len(cached), path=cand)
-                        return Result(cached, "ok", "cached", via="cache", attempts=trail)
+                        res = Result(cached, "ok", "cached", via="cache", attempts=trail)
+                        res.age_hours = age / 3600.0
+                        return res
                     _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
                     continue
                 # Past the fresh window the origin is ASKED before the copy is trusted or
@@ -932,8 +937,12 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
                         pass
                     _note("cache", "revalidated (origin confirmed the stored copy is "
                           "unchanged)", age_hours=round(age / 3600, 1), chars=len(cached))
-                    return Result(cached, "ok", "cached (revalidated)", via="cache",
-                                  attempts=trail)
+                    # age_hours counts from LAST CONFIRMATION against the origin, not from
+                    # the original write: a 304 means we know about this copy NOW.
+                    res = Result(cached, "ok", "cached (revalidated)", via="cache",
+                                 attempts=trail)
+                    res.age_hours = 0.0
+                    return res
                 if cond.ok:
                     _write_cache(path, cond.text, meta=cond.meta)
                     _purge_negative(url)
@@ -942,8 +951,10 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
                     return cond
                 _note("cache", "revalidation failed (%s) — serving the aged copy "
                       "(%d h)" % (cond.detail, age // 3600), chars=len(cached))
-                return Result(cached, "ok", "cached (revalidation failed; %dh old)"
-                              % (age // 3600), via="cache", attempts=trail)
+                res = Result(cached, "ok", "cached (revalidation failed; %dh old)"
+                             % (age // 3600), via="cache", attempts=trail)
+                res.age_hours = age / 3600.0   # honest: unconfirmed for THIS long
+                return res
         _note("cache", "miss", path=path)
         neg = _read_negative(url)
         if neg:

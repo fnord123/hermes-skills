@@ -370,6 +370,8 @@ with tempfile.TemporaryDirectory() as td:
         _r = rxfetch.fetch(_u)
         chk("a young entry is served from cache, no request",
             _r.via == "cache" and _live["n"] == 0, "(via=%s live=%d)" % (_r.via, _live["n"]))
+        chk("a cache-served response carries its age",
+            _r.age_hours is not None and _r.age_hours < 0.1, "(age=%s)" % _r.age_hours)
         _old = _t.time() - rxfetch.SOURCES_TTL - 60
         os.utime(_p, (_old, _old))
         _r = rxfetch.fetch(_u)
@@ -390,6 +392,8 @@ with tempfile.TemporaryDirectory() as td:
             and _t.time() - os.path.getmtime(_p) < 60
             and _live["cond"] == {"etag": '"v1"', "last_modified": None},
             "(via=%s detail=%s cond=%s)" % (_r.via, _r.detail, _live["cond"]))
+        chk("a revalidated copy reports age ~0 — the origin confirmed it NOW",
+            _r.age_hours is not None and _r.age_hours < 0.1, "(age=%s)" % _r.age_hours)
 
         # Aged + validators + origin answers 200 with new bytes: the new doc wins.
         _old = _t.time() - rxfetch.SOURCES_TTL - 60
@@ -408,6 +412,8 @@ with tempfile.TemporaryDirectory() as td:
         chk("a walled revalidation serves the aged copy marked, without descending the ladder",
             _r.via == "cache" and "revalidation failed" in _r.detail,
             "(via=%s detail=%s)" % (_r.via, _r.detail))
+        chk("the aged copy's age_hours is HONEST (>= the 3h we aged it), not reset",
+            _r.age_hours is not None and _r.age_hours >= 3.0, "(age=%s)" % _r.age_hours)
 
         # A browser-rung write clears the sidecar: rendered bytes can never be 304-certified.
         _live["mode"] = "304"
@@ -747,6 +753,25 @@ try:
         "(%s)" % _ndns)
     _nto = _fetch_next("TimeoutError")
     chk("a generic unreachable keeps the reach caveat", "reach" in _nto, "(%s)" % _nto)
+finally:
+    _wa.rxfetch.fetch = saved_fetch
+
+# age_hours crosses the response boundary ONLY when the fetcher knows an age:
+# a cache-served copy must carry it (a model cannot otherwise tell "certified now"
+# from "replayed from last week"); a live fetch must NOT (absence means "just fetched").
+_cached = _wa.rxfetch.Result("usable document text" * 40, "ok", "cached", via="cache",
+                             age_hours=72.34)
+_live = _wa.rxfetch.Result("usable document text" * 40, "ok", "fetched 800 chars", via="http")
+try:
+    _wa.rxfetch.fetch = lambda url, **k: _cached
+    _b = _wa.cmd_fetch("https://age.example/p", max_chars=1000, timeout=5,
+                       no_browser=True, trace=None, min_chars=200)
+    chk("a cache-served fetch response carries age_hours, rounded",
+        _b.get("age_hours") == 72.3, "(%s)" % _b.get("age_hours"))
+    _wa.rxfetch.fetch = lambda url, **k: _live
+    _b = _wa.cmd_fetch("https://age.example/p", max_chars=1000, timeout=5,
+                       no_browser=True, trace=None, min_chars=200)
+    chk("a live fetch response omits age_hours entirely", "age_hours" not in _b)
 finally:
     _wa.rxfetch.fetch = saved_fetch
 
