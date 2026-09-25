@@ -335,19 +335,32 @@ with tempfile.TemporaryDirectory() as td:
         rxfetch.looks_unusable(open(p).read()))
 
 
-# ── cached page text expires after SOURCES_TTL ────────────────────────────────────────────────
-# The text cache is content-addressed but not immortal: an entry older than the 30d TTL is
-# ignored on read (lazy, like the search cache) and overwritten by the next successful fetch.
-section("cached page text expires after the 30d TTL")
+# ── cached page text: 3d fresh window, then the origin is ASKED ──────────────────────────────
+# Within SOURCES_TTL (3 days) a cached copy is served without touching the network: one
+# review and its citation audit read one consistent copy. Past it, an entry WITH origin
+# validators is revalidated by conditional GET — 304 re-certs the copy, an answering 200
+# replaces it, a failed revalidation serves the aged copy rather than paying the ladder.
+# An entry WITHOUT validators (browser-rung content, or predating sidecars) just expires,
+# as before, and the next successful fetch re-caches it (now with its sidecar).
+section("cache: 3d fresh window; past it, conditional GET decides")
 with tempfile.TemporaryDirectory() as td:
     import time as _t
     rxfetch.configure(sources_dir=td)
     _real_attempt = rxfetch._one_attempt
-    _live = {"n": 0}
+    _live = {"n": 0, "cond": None}          # cond: what the origin answers a conditional GET
 
-    def _fresh(url, timeout, via="http"):
+    def _fresh(url, timeout, via="http", conditional=None):
+        if conditional is not None:
+            _live["cond"] = conditional
+            if _live["mode"] == "304":
+                return rxfetch.Result("", "notmodified", "304 (validators matched)"), False
+            if _live["mode"] == "wall":
+                return rxfetch.Result("", "unreachable", "HTTP 403"), False
+            return rxfetch.Result("new doc " * 100, "ok", "stub", via=via,
+                                  meta={"etag": '"v2"'}), False
         _live["n"] += 1
-        return rxfetch.Result("fresh copy " * 100, "ok", "stub", via=via), False
+        return rxfetch.Result("fresh copy " * 100, "ok", "stub", via=via,
+                              meta={"etag": '"v1"'}), False
 
     rxfetch._one_attempt = _fresh
     try:
@@ -360,10 +373,47 @@ with tempfile.TemporaryDirectory() as td:
         _old = _t.time() - rxfetch.SOURCES_TTL - 60
         os.utime(_p, (_old, _old))
         _r = rxfetch.fetch(_u)
-        chk("an entry older than the TTL is re-fetched, not served",
+        chk("an aged entry WITHOUT validators expires and is re-fetched, not served",
             _r.via == "http" and _live["n"] == 1, "(via=%s live=%d)" % (_r.via, _live["n"]))
-        chk("...and the re-fetch overwrote the expired entry",
+        chk("...the re-fetch overwrote the expired entry",
             "fresh copy" in open(_p).read() and _t.time() - os.path.getmtime(_p) < 60)
+        chk("...and stored the sidecar with its validators",
+            _json.load(open(rxfetch._meta_path(_p)))["etag"] == '"v1"')
+
+        # Aged + validators + origin answers 304: stored copy is re-certified, no ladder.
+        _old = _t.time() - rxfetch.SOURCES_TTL - 60
+        os.utime(_p, (_old, _old))
+        _live["mode"] = "304"
+        _r = rxfetch.fetch(_u)
+        chk("304 serves the stored copy, revalidated, and re-certs its age",
+            _r.via == "cache" and "revalidated" in _r.detail
+            and _t.time() - os.path.getmtime(_p) < 60
+            and _live["cond"] == {"etag": '"v1"', "last_modified": None},
+            "(via=%s detail=%s cond=%s)" % (_r.via, _r.detail, _live["cond"]))
+
+        # Aged + validators + origin answers 200 with new bytes: the new doc wins.
+        _old = _t.time() - rxfetch.SOURCES_TTL - 60
+        os.utime(_p, (_old, _old))
+        _live["mode"] = "200"
+        _r = rxfetch.fetch(_u)
+        chk("a changed document is re-fetched and re-stored with the NEW validators",
+            "new doc" in open(_p).read()
+            and _json.load(open(rxfetch._meta_path(_p)))["etag"] == '"v2"')
+
+        # Aged + validators + revalidation walled: serve the aged copy, say so.
+        _old = _t.time() - rxfetch.SOURCES_TTL - 3 * 3600
+        os.utime(_p, (_old, _old))
+        _live["mode"] = "wall"
+        _r = rxfetch.fetch(_u)
+        chk("a walled revalidation serves the aged copy marked, without descending the ladder",
+            _r.via == "cache" and "revalidation failed" in _r.detail,
+            "(via=%s detail=%s)" % (_r.via, _r.detail))
+
+        # A browser-rung write clears the sidecar: rendered bytes can never be 304-certified.
+        _live["mode"] = "304"
+        rxfetch._write_cache(_p, "rendered " * 100, meta={})
+        chk("a browser-rung write deletes the sidecar",
+            not os.path.exists(rxfetch._meta_path(_p)))
     finally:
         rxfetch._one_attempt = _real_attempt
 

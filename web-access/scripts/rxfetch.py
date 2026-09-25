@@ -57,12 +57,15 @@ import urllib.request
 # TEST isolation only; no production caller sets it.
 SOURCES = os.path.expanduser("~/.hermes/cache/web-access/sources")
 
-# Cached page text expires after 30 days: long enough that one review and its citation audit read
-# one consistent copy, short enough that the next review re-reads a page that may have changed.
-# Age is the file's mtime — _write_cache publishes by rename, so mtime is the write time. Expiry
-# is lazy (an expired file is ignored, then overwritten by the next successful fetch), matching
-# the search cache's behaviour in web_access.py.
-SOURCES_TTL = int(os.environ.get("RX_SOURCES_TTL", 30 * 24 * 3600))
+# Cached page text is FRESH for 3 days: one review and its citation audit read one
+# consistent copy without touching the network (David 2026-09-24, after a served-stale
+# incident: a 30d silent TTL replayed a 3-day-dead doc with truncated:false while the
+# live page had changed under it). Past the fresh window the entry is NOT trusted
+# silently: the read path revalidates with the origin's own validators (ETag /
+# Last-Modified, stored in a sidecar at cache time) and serves the stored copy only
+# after a 304 confirms it still matches. Age is the file's mtime — _write_cache
+# publishes by rename, so mtime is the write/last-validation time. Expiry is lazy.
+SOURCES_TTL = int(os.environ.get("RX_SOURCES_TTL", 3 * 24 * 3600))
 
 # The locks are NOT per-corpus. A rate limit counts the client, not the pipeline, so every
 # consumer on this machine has to queue behind the same per-host gate — otherwise two pipelines
@@ -160,14 +163,18 @@ class Result(object):
     verbatim quotes, so it may reasonably refuse anything a browser rendered; a product lookup
     may not care. Neither can choose if the tier is invisible. string."""
 
-    __slots__ = ("text", "outcome", "detail", "via", "attempts")
+    __slots__ = ("text", "outcome", "detail", "via", "attempts", "meta")
 
-    def __init__(self, text="", outcome="unreachable", detail="", via="", attempts=None):
+    def __init__(self, text="", outcome="unreachable", detail="", via="", attempts=None,
+                 meta=None):
         self.text, self.outcome, self.detail, self.via = text, outcome, detail, via
         # Every layer tried, in order, with what it returned. A failure that cannot say how far
         # it got is indistinguishable from a layer that never ran — which is exactly the doubt
         # that made this trail necessary.
         self.attempts = list(attempts or [])
+        # Revalidation material from the origin (etag / last_modified), set by the http
+        # tier; empty for every rung that renders through a browser and never sees them.
+        self.meta = dict(meta or {})
 
     @property
     def ok(self):
@@ -367,13 +374,24 @@ def _ncbi_url(url):
     return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?" + query
 
 
-def _one_attempt(url, timeout, via='http'):
-    """A single gated request. Returns (Result, retryable)."""
+def _one_attempt(url, timeout, via='http', conditional=None):
+    """A single gated request. Returns (Result, retryable).
+
+    `conditional` (a dict of origin validators from the cache sidecar) turns this into a
+    conditional GET with If-None-Match / If-Modified-Since. A 304 comes back as outcome
+    `notmodified` — not the failure the ladder walks past, not retryable: it is the origin
+    confirming our stored copy still matches, which is a different fact from "fetch worked".
+    """
     host = _host_of(url)
     headers = {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/pdf,*/*",
         "Accept-Language": "en-US,en;q=0.9"}
+    if conditional:
+        if conditional.get("etag"):
+            headers["If-None-Match"] = conditional["etag"]
+        if conditional.get("last_modified"):
+            headers["If-Modified-Since"] = conditional["last_modified"]
     req = urllib.request.Request(url, headers=headers)
     # The equivalent curl, so a failure can be reproduced by hand exactly as we issued it.
     trace_log(via, "request", method="GET", url=url, timeout=timeout,
@@ -388,6 +406,11 @@ def _one_attempt(url, timeout, via='http'):
                           bytes=len(raw), final_url=r.geturl(),
                           headers={k: v for k, v in list(r.headers.items())[:12]})
     except urllib.error.HTTPError as e:
+        if e.code == 304:
+            # Only ever answered to a conditional GET. The origin confirms our stored bytes;
+            # outcome notmodified, so the ladder does NOT walk past it like a failure.
+            trace_log(via, "response", status=304, outcome="notmodified")
+            return Result("", "notmodified", "304 (validators matched)"), False
         retryable = e.code in TRANSIENT_STATUS
         outcome = "unreadable" if e.code in WITHHELD_STATUS else "unreachable"
         trace_log(via, "response", status=e.code, error=str(e)[:200], outcome=outcome,
@@ -421,7 +444,19 @@ def _one_attempt(url, timeout, via='http'):
         # 200 with an interstitial. Worth one more try: a throttle often answers this way, and
         # a throttled failure is not a document.
         return Result("", "unreadable", "interstitial or empty (%d chars)" % len(text)), True
-    return Result(text, "ok", "fetched %d chars" % len(text), via=via), False
+    # Origin validators, kept only for direct-http content: an eutils ETag does not
+    # revalidate the paper URL it stands for, and a browser rung never sees the origin's
+    # headers at all. The cache sidecar records these so a later read can ASK the origin
+    # (conditional GET) instead of guessing from a clock.
+    meta = {}
+    if via == "http":
+        etag = r.headers.get("ETag")
+        lmod = r.headers.get("Last-Modified")
+        if etag:
+            meta["etag"] = etag[:256]
+        if lmod:
+            meta["last_modified"] = lmod[:128]
+    return Result(text, "ok", "fetched %d chars" % len(text), via=via, meta=meta), False
 
 
 # The browser driver, which owns the browser and remembers which sites need which mode. It now
@@ -764,19 +799,39 @@ def _purge_negative(url):
         os.remove(_neg_path(url))
 
 
-def _write_cache(path, text):
+def _meta_path(path):
+    """Sidecar beside a cache entry: the origin's validators, our record of WHAT the
+    server said when it handed these bytes over. Absent = revalidation impossible
+    (browser-rung content, or an entry predating the sidecar)."""
+    return path + ".meta.json"
+
+
+def _read_meta(path):
+    try:
+        with open(_meta_path(path), encoding="utf-8") as fh:
+            m = json.load(fh)
+        return m if isinstance(m, dict) else {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def _write_cache(path, text, meta=None):
     """Publish cached text atomically: write a temp file, then rename over the target.
 
     A plain open(path, "w") truncates first, so a reader arriving mid-write sees a partial
-    document. Most partials are caught by looks_unusable, but not the dangerous ones: anything
-    at or above SUBSTANTIAL_CHARS is declared a document without further inspection, so a large
-    page torn at 30KB reads as complete. In this pipeline that is a citation judged against half
-    a source.
+    document. Most partials are caught by looks_unusable, but the dangerous ones are not:
+    anything at or above SUBSTANTIAL_CHARS is declared a document without further
+    inspection, so a large page torn at 30KB reads as complete. In this pipeline that is a
+    citation judged against half a source.
 
-    os.replace is atomic on POSIX, so a reader sees either the whole old file or the whole new
-    one and never a seam. That is cheaper than a lock, which every reader would have to take,
-    and readers here are the common case. The temp name carries the pid so two writers racing on
-    the same URL cannot corrupt each other's scratch file.
+    os.replace is atomic on POSIX, so a reader sees either the whole old file or the whole
+    new one and never a seam. That is cheaper than a lock, which every reader would have to
+    take, and readers here are the common case. The temp name carries the pid so two writers
+    racing on the same URL cannot corrupt each other's scratch file.
+
+    `meta`: None leaves any existing sidecar untouched; a dict (possibly empty) is the
+    truth about validators for THIS content — empty means delete the sidecar, because
+    origin ETags do not transfer to bytes a browser rung produced.
     """
     os.makedirs(SOURCES, exist_ok=True)
     tmp = "%s.%d.tmp" % (path, os.getpid())
@@ -784,6 +839,18 @@ def _write_cache(path, text):
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(text)
         os.replace(tmp, path)
+        if meta is not None:
+            mtmp = _meta_path(tmp)
+            try:
+                if meta:
+                    with open(mtmp, "w", encoding="utf-8") as fh:
+                        json.dump(meta, fh)
+                    os.replace(mtmp, _meta_path(path))
+                elif os.path.exists(_meta_path(path)):
+                    os.remove(_meta_path(path))
+            except Exception:                                   # noqa: BLE001
+                with contextlib.suppress(OSError):
+                    os.remove(mtmp)
     except Exception:                                          # noqa: BLE001
         with contextlib.suppress(OSError):
             os.remove(tmp)
@@ -830,15 +897,53 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
         # normalisation still hits rather than being re-fetched.
         for cand in (path, _legacy_cache_path(url)):
             if os.path.exists(cand) and os.path.getsize(cand) > 0:
-                if time.time() - os.path.getmtime(cand) > SOURCES_TTL:
-                    _note("cache", "expired (older than the %dd TTL)" % (SOURCES_TTL // 86400),
-                          path=cand)
+                age = time.time() - os.path.getmtime(cand)
+                if age <= SOURCES_TTL:
+                    cached = open(cand, encoding="utf-8", errors="ignore").read()
+                    if not looks_unusable(cached):
+                        _note("cache", "hit", chars=len(cached), path=cand)
+                        return Result(cached, "ok", "cached", via="cache", attempts=trail)
+                    _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
                     continue
+                # Past the fresh window the origin is ASKED before the copy is trusted or
+                # discarded (David 2026-09-24): a conditional GET with the stored validators.
+                # A 304 re-certs the copy for another fresh window at the cost of one small
+                # request; an answering 200 falls through and the ladder's http tier re-fetches
+                # the changed document; a failed revalidation (wall, timeout) serves the aged
+                # copy rather than paying the browser ladder hourly — a transport failure is
+                # not a verdict on the document's currency. No validators (browser-rung content,
+                # or a pre-sidecar entry): status quo — expired, refetch.
+                meta = _read_meta(cand)
                 cached = open(cand, encoding="utf-8", errors="ignore").read()
-                if not looks_unusable(cached):
-                    _note("cache", "hit", chars=len(cached), path=cand)
-                    return Result(cached, "ok", "cached", via="cache", attempts=trail)
-                _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
+                if looks_unusable(cached):
+                    _note("cache", "stale (cached copy is an interstitial)", chars=len(cached))
+                    continue
+                if not (meta.get("etag") or meta.get("last_modified")):
+                    _note("cache", "expired (older than the %dd fresh window, no origin "
+                          "validators to ask)" % (SOURCES_TTL // 86400), path=cand)
+                    continue
+                cond, _ = _one_attempt(url, timeout, via="http",
+                                       conditional={"etag": meta.get("etag"),
+                                                    "last_modified": meta.get("last_modified")})
+                if cond.outcome == "notmodified":
+                    try:
+                        os.utime(cand, None)
+                    except OSError:
+                        pass
+                    _note("cache", "revalidated (origin confirmed the stored copy is "
+                          "unchanged)", age_hours=round(age / 3600, 1), chars=len(cached))
+                    return Result(cached, "ok", "cached (revalidated)", via="cache",
+                                  attempts=trail)
+                if cond.ok:
+                    _write_cache(path, cond.text, meta=cond.meta)
+                    _purge_negative(url)
+                    _note("http", "revalidation returned a new copy (document changed)")
+                    cond.attempts = trail
+                    return cond
+                _note("cache", "revalidation failed (%s) — serving the aged copy "
+                      "(%d h)" % (cond.detail, age // 3600), chars=len(cached))
+                return Result(cached, "ok", "cached (revalidation failed; %dh old)"
+                              % (age // 3600), via="cache", attempts=trail)
         _note("cache", "miss", path=path)
         neg = _read_negative(url)
         if neg:
@@ -879,7 +984,9 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
             _note(via, "%s: %s" % (res.outcome, res.detail), attempt=attempt + 1,
                   ms=ms, target=target, chars=len(res.text or ""))
             if res.ok:
-                _write_cache(path, res.text)
+                # meta=None would leave an old sidecar paired to NEW content — always pass the
+                # verdict for this content (empty dict = delete).
+                _write_cache(path, res.text, meta=res.meta)
                 _purge_negative(url)
                 res.attempts = trail
                 return res
@@ -919,7 +1026,9 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
         # if not res.attempts:
         #     _note("browser", "%s: %s" % (res.outcome, res.detail))
         if res.ok:
-            _write_cache(path, res.text)
+            # Rendered bytes carry no origin validators; empty dict clears any sidecar an
+            # earlier http fetch left, so no 304 can ever re-certify browser content.
+            _write_cache(path, res.text, meta={})
             _purge_negative(url)
             res.attempts = trail
             return res
