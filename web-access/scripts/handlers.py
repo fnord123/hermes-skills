@@ -416,9 +416,11 @@ def _fetch_bytes_one(url, timeout, allow_render, raw, max_bytes):
                 if "text" in el["content_type"] or el["content_type"].startswith(
                         ("application/json", "application/xml")):
                     el["content"] = data.decode("utf-8", "replace")
+                    el["encoding"] = "utf-8"
                 else:
                     import base64 as _b64
                     el["content_base64"] = _b64.b64encode(data).decode("ascii")
+                    el["encoding"] = "base64"
     else:
         el["size"] = None
         if r.outcome == "unreachable":

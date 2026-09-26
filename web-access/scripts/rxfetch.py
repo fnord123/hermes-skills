@@ -858,7 +858,8 @@ def _render_bytes_attempt(url, timeout):
     main-document wire bytes via the network layer. Local modes only — browse_task's
     --dump-bytes refuses browserbase itself; a rented client's bytes are not THE bytes."""
     if not os.path.exists(BROWSE_TASK):
-        return Result("", "unreadable", "bytes render unavailable (browse_task missing)")
+        return Result("", "unreadable", "bytes render unavailable (browse_task missing)"
+                ), False
     cmd = [sys.executable, BROWSE_TASK, "--dump-bytes", "--start-url", url]
     host = _host_of(url)
     env = dict(os.environ, RXFETCH_GATE_HELD=host, RXFETCH_TRACE=TRACE)
@@ -868,24 +869,24 @@ def _render_bytes_attempt(url, timeout):
             proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                   timeout=max(timeout, BROWSER_TIMEOUT_FLOOR))
     except subprocess.TimeoutExpired:
-        return Result("", "unreadable", "bytes render timed out")
+        return Result("", "unreadable", "bytes render timed out"), False
     except Exception as exc:                                    # noqa: BLE001
-        return Result("", "unreadable", "bytes render failed: %s" % type(exc).__name__)
+        return Result("", "unreadable", "bytes render failed: %s" % type(exc).__name__), False
     try:
         d = json.loads(proc.stdout or "{}")
     except ValueError:
         return Result("", "unreadable", "bytes render unparseable: %s"
-                      % (proc.stderr or "")[-160:].strip())
+                      % (proc.stderr or "")[-160:].strip()), False
     if not d.get("ok") or not d.get("body_b64"):
         return Result("", "unreadable",
-                      "bytes render: %s" % str(d.get("error") or "no body")[:160])
+                      "bytes render: %s" % str(d.get("error") or "no body")[:160]), False
     try:
         import base64 as _b64
         raw = _b64.b64decode(d["body_b64"])
     except Exception:                                           # noqa: BLE001
-        return Result("", "unreadable", "bytes render: corrupt body_b64")
+        return Result("", "unreadable", "bytes render: corrupt body_b64"), False
     if len(raw) > BYTES_CAP:
-        return Result("", "unreadable", "rendered body exceeds the bytes cap")
+        return Result("", "unreadable", "rendered body exceeds the bytes cap"), False
     meta = {"content_type": (d.get("content_type") or "")[:128],
             "status": d.get("http_status"), "served_via": "rendered",
             "final_url": d.get("final_url")}

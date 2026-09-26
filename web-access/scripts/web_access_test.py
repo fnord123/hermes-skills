@@ -1065,6 +1065,45 @@ try:
 finally:
     _wa.rxfetch.fetch_bytes = _saved_fb
 
+section("the render rung itself: every path returns (Result, bool)")
+# Live-incident pin (2026-09-26): the rung's FAILURE paths returned a bare Result while
+# the ladder unpacked a tuple — a real wall plus a failing child would have crashed
+# fetch-bytes with TypeError. The battery had stubbed every layer above it, so nothing
+# ran this function's branches. Run the REAL rung against a faked browse_task child.
+class _FakeProc:
+    def __init__(self, out_json):
+        self.returncode, self.stdout, self.stderr = 0, out_json, ""
+import json as _json
+_saved_run = rxfetch.subprocess.run
+_saved_bt = rxfetch.BROWSE_TASK
+try:
+    rxfetch.BROWSE_TASK = __file__          # must "exist"; never actually exec'd
+    import base64 as _b64x
+    _doc2 = b"<html>rendered body</html>"
+    _good = _json.dumps(
+        {"ok": True, "body_b64": _b64x.b64encode(_doc2).decode(),
+         "content_type": "text/html", "http_status": 200, "final_url": "https://w.example/"})
+    rxfetch.subprocess.run = lambda *a, **k: _FakeProc(_good)
+    _r, _retry = rxfetch._render_bytes_attempt("https://wall.example/page", 5)
+    chk("render success unpacks as (ok Result with rendered data, bool)",
+        _r.ok and _r.data == _doc2 and _r.meta["served_via"] == "rendered"
+        and isinstance(_retry, bool))
+    rxfetch.subprocess.run = lambda *a, **k: _FakeProc(
+        _json.dumps({"ok": False, "error": "child died"}))
+    _r2, _retry2 = rxfetch._render_bytes_attempt("https://wall.example/page", 5)
+    chk("a failing child is an honest unreadable, NOT a crash",
+        _r2.outcome == "unreadable" and "child died" in _r2.detail
+        and isinstance(_retry2, bool))
+    def _boom(*a, **k):
+        raise RuntimeError("spawn exploded")
+    rxfetch.subprocess.run = _boom
+    _r3, _retry3 = rxfetch._render_bytes_attempt("https://wall.example/page", 5)
+    chk("a spawn explosion is an honest unreadable, NOT a crash",
+        _r3.outcome == "unreadable" and isinstance(_retry3, bool))
+finally:
+    rxfetch.subprocess.run = _saved_run
+    rxfetch.BROWSE_TASK = _saved_bt
+
 section("the renamed doors: old names answer nothing")
 import app as _appmod
 chk("HTTP /fetch is gone from the route table",
