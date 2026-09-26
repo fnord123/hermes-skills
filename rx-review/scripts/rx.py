@@ -896,7 +896,7 @@ REGIMEN_INTAKE_BODY = """Write {itemfile} with the label ingredients of {name}. 
 {brand_note}
 Find its label — AT MOST two searches, then decide:
     python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "{name} supplement facts" --scope products --timeout 60
-    python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "URL" --timeout 60
+    python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "URL" --timeout 60
 
 A search hit that is a DIFFERENT product (different strength, a combination, another form) is not
 a match — do not keep hunting for a closer one. Decide from what you have:

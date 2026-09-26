@@ -238,11 +238,11 @@ then fetch a URL taken FROM the results — copy a result's `url` field verbatim
 
     python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "..." --scope literature
     python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "..." --scope products
-    python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url "<a url from the results>"
+    python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "<a url from the results>"
 
 `--scope literature` searches papers, trials and drug labels (PubMed, Cochrane, DailyMed);
 `--scope products` searches manufacturer and retailer pages for supplement facts and dosing. The
-browser tier is automatic: if fetch reports `"outcome": "unreadable"` (a JS or bot wall, already
+browser tier is automatic: if fetch-content reports `"outcome": "unreadable"` (a JS or bot wall, already
 given a browser render) or `"unreachable"`, search again and fetch a different result. Cite every
 claim; drop any you cannot cite.
 
@@ -747,8 +747,9 @@ Number every claim that rests on a source. Each endnote gives BOTH the URL and t
 
     [n] <source>, "<the verbatim sentence that carries the evidence>" <URL>
 
-Quote the exact sentence that supports the claim, not the article or page title. If the source
-supports the claim but no single sentence says so, write that in the endnote instead."""
+Quote the exact sentence that supports the claim, not the article or page title; name the
+source in plain words, without quoting its title. If the source supports the claim but no
+single sentence says so, write that in the endnote instead."""
 
 
 # Work cards do NOT subscribe. A subscription fires on completion AND on block with no

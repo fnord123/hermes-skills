@@ -33,8 +33,8 @@ t "a worker on a different board"          ALLOW "$OTHER" 'rm -rf /tmp/x'
 echo
 echo "the restricted board — the pipeline's own scripts"
 t "web_access search"                      ALLOW "$DB" 'python3 ~/hermes-skills/web-access/scripts/web_access.py search --query "thorne super epa"'
-t "web_access fetch --browser"             ALLOW "$DB" 'python3 /home/dputzolu/hermes-skills/web-access/scripts/web_access.py fetch --url "https://x.com" --browser'
-t "web_access from the other skills dir"   ALLOW "$DB" 'python3 ~/.hermes/skills/web-access/scripts/web_access.py fetch --url "https://x.com"'
+t "web_access fetch-content --browser"             ALLOW "$DB" 'python3 /home/dputzolu/hermes-skills/web-access/scripts/web_access.py fetch-content --url "https://x.com" --browser'
+t "web_access from the other skills dir"   ALLOW "$DB" 'python3 ~/.hermes/skills/web-access/scripts/web_access.py fetch-content --url "https://x.com"'
 t "browse_task"                            ALLOW "$DB" 'python3 ~/hermes-skills/browse-task/scripts/browse_task.py --task "read it"'
 t "rx.py"                                  ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py labs-report'
 t "rxsplit.py"                             ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rxsplit.py extract --pdf a.pdf'
@@ -71,6 +71,47 @@ t "single & in a reply argument"           ALLOW "$DB" 'python3 ~/hermes-skills/
 t "pipe in a reply argument"               ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 morning | evening"'
 t "redirect chars in a reply argument"     ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 dose <100mg >50"'
 t "dollar-paren in a reply argument"       ALLOW "$DB" 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 $(pill)"'
+
+echo
+echo
+echo "closed-book citation audit (owner ruling 2026-09-24)"
+# The hook reads the card's assignee from the board DB (read-only), keyed on the dispatcher-set
+# HERMES_KANBAN_TASK. These fixtures mirror that: a tasks table with assignees, in a directory
+# named rx-review so the hook's board-scope check fires the same way it does in production.
+FIX="$(mktemp -d)"; trap 'rm -rf "$FIX"' EXIT
+mkdir -p "$FIX/rx-review"
+DBX="$FIX/rx-review/kanban.db"
+python3 - "$DBX" <<'PY'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("create table tasks (id text primary key, assignee text)")
+con.executemany("insert into tasks values (?,?)",
+                [("t_audit", "rx-audit"), ("t_research", "rx-research"), ("t_blind", None)])
+con.commit()
+PY
+
+t5() {  # description, ALLOW|BLOCK, db, task-id ("" = no task env), command
+  local d="$1" want="$2" db="$3" tid="$4" c="$5" out got
+  # NOTE: no quotes inside ${tid:+...} — they would survive expansion into the value.
+  out=$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"terminal","tool_input":{"command":sys.argv[1]}}))' "$c" \
+    | env -u HERMES_KANBAN_TASK ${tid:+HERMES_KANBAN_TASK=$tid} HERMES_KANBAN_DB="$db" bash "$HOOK" 2>/dev/null)
+  got=BLOCK; [ -z "$out" ] && got=ALLOW
+  if [ "$got" = "$want" ]; then pass=$((pass+1)); printf '  ok   %-6s %s\n' "$got" "$d"
+  else fail=$((fail+1)); printf ' FAIL  %-6s (wanted %s) %s\n' "$got" "$want" "$d"; fi
+}
+
+t5 "audit: web_access fetch-content refused"      BLOCK "$DBX" t_audit 'python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "https://x.com"'
+t5 "audit: browse_task refused"           BLOCK "$DBX" t_audit 'python3 ~/hermes-skills/browse-task/scripts/browse_task.py --task "read it"'
+t5 "audit: its scripts still run"         ALLOW "$DBX" t_audit 'python3 ~/hermes-skills/rx-review/scripts/verify.py merge'
+t5 "audit: verify build runs too"         ALLOW "$DBX" t_audit 'python3 ~/.hermes/rx-review/verify.py build --dry-run'
+t5 "audit: no pipe onto a script tail"    BLOCK "$DBX" t_audit 'python3 ~/hermes-skills/rx-review/scripts/rx.py x | cat'
+t5 "audit: assignee unknown -> closed"    BLOCK "$DBX" t_blind  'python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "https://x.com"'
+t5 "audit: unknown, scripts still run"    ALLOW "$DBX" t_blind  'python3 ~/hermes-skills/rx-review/scripts/verify.py merge'
+t5 "audit: task not in the board db"      BLOCK "$DBX" t_ghost  'python3 ~/hermes-skills/web-access/scripts/web_access.py search --query x'
+t5 "audit: unreadable board db -> closed" BLOCK "$FIX/rx-review/missing.db" t_audit 'python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "https://x.com"'
+t5 "research: fetch-content unaffected"           ALLOW "$DBX" t_research 'python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "https://x.com"'
+t5 "research: relaxed operators kept"     ALLOW "$DBX" t_research 'python3 ~/hermes-skills/rx-review/scripts/rx.py correct-item-slug-request "2 morning | evening"'
+t5 "no task env — non-worker untouched"   ALLOW "$DBX" ""       'python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "https://x.com"'
 
 echo
 echo "$pass passed, $fail failed"

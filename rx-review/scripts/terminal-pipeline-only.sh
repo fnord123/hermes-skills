@@ -18,6 +18,10 @@
 # on this board keeps the ordinary global protection - block-secret-reads.sh still applies to
 # every caller, this hook simply returns.
 #
+# CLOSED-BOOK AUDIT (owner ruling 2026-09-24): the citation audit judges only the claim and the
+# passage its items file hands it, so the two web scripts are refused for its assignee before
+# the allowlist admits them — see the closed_book block. Every other assignee is unaffected.
+#
 # REGISTER IT GLOBALLY. It scopes itself to RESTRICTED_BOARD below, so a global registration
 # restricts nothing else - and the global config is tracked in git, while profile configs are
 # not and die on a rebuild. See the scope block for how that works.
@@ -111,6 +115,36 @@ if printf '%s' "$cmd" | grep -qE '&&|;'; then
   block "terminal on the rx-review board blocks command chaining (\`;\` and \`&&\`). Run one command at a time."
 fi
 
+# ── the citation audit is closed-book (owner ruling 2026-09-24) ────────────────────────
+#
+# An audit card judges the claim and the passage its items file hands it — nothing else.
+# Re-fetching at judgment time replaces the pipeline's located evidence with whatever the live
+# page serves today; on 2026-09-20 that made the same citation come back both supported and
+# unsupported. The web scripts below are this board's ONLY route to the network (no rx-* profile
+# carries a web toolset), so the route is shut for this one assignee. Pipeline scripts stay open:
+# a card may still run what its body names.
+#
+# The worker cannot claim a different identity: HERMES_KANBAN_TASK is set by the dispatcher
+# (hermes_cli/kanban_db.py) and never by the worker. The assignee is read READ-ONLY straight
+# from the board DB — spawning the CLI inside a 5-second pre_tool_call hook would blow the
+# timeout, and a mode=ro connection mutates nothing. An assignee that cannot be read fails
+# closed: if the DB is unreadable we may stall a research card, which retries loudly; we do
+# not let an audit card reach the web quietly.
+closed_book=""
+if [ -n "${HERMES_KANBAN_TASK:-}" ] && [ -n "${HERMES_KANBAN_DB:-}" ]; then
+  assignee="$(python3 -c '
+import os, sqlite3
+try:
+    con = sqlite3.connect("file:" + os.environ["HERMES_KANBAN_DB"] + "?mode=ro", uri=True, timeout=2)
+    row = con.execute("select assignee from tasks where id=?",
+                      (os.environ["HERMES_KANBAN_TASK"],)).fetchone()
+    print(row[0] if row and row[0] else "UNKNOWN")
+except Exception:
+    print("UNKNOWN")
+' 2>/dev/null)"
+  case "$assignee" in rx-audit|UNKNOWN|"") closed_book=1 ;; esac
+fi
+
 # The permitted invocations. The script name is exact AND its directory must be one of the
 # pipeline's own, so a same-named script planted elsewhere is not admitted. Paths are matched
 # loosely enough to survive ${HERMES_SKILL_DIR} expansion and either skills directory.
@@ -126,6 +160,28 @@ PIPELINE="$HOME_RE/((\.hermes/rx-review)|(hermes-skills/rx-review/scripts))/(rx|
 # profiles. It wraps search and fetch, so removing the built-in tools costs the board nothing.
 WEBACCESS="$SKILLS_RE/web-access/scripts/web_access\.py"
 BROWSER="$SKILLS_RE/browse-task/scripts/browse_task\.py"
+
+# Closed-book enforcement, HERE because the two web routes are defined HERE. web_access.py and
+# browse_task.py are the network's only door on this board (no rx-* profile carries a web
+# toolset), so refusing them before the allowlist's exit, for this assignee only, is the whole
+# of the ruling. Audit cards need no shell operators either — their work is read the items
+# file, append verdicts, complete — so the characters that would smuggle a second program onto
+# a permitted script's tail are refused for them too. `| & < > $( ` were relaxed board-wide on
+# 2026-08-06 for quoted regimen-correction arguments; those are rx-intake cards, never rx-audit
+# cards, so closing them here costs nothing.
+if [ -n "$closed_book" ]; then
+  if printf '%s' "$cmd" | grep -qE "^[[:space:]]*python3?[[:space:]]+($WEBACCESS|$BROWSER)([[:space:]]|\$)"; then
+    block "terminal on the rx-review board keeps the citation audit closed-book: this card has
+no network access, and the fields in its items file are the whole record. Judge the claim
+against the section text you were given; if the section cannot settle it, say so in the verdict
+(misquoted / unsupported / absent with a reason) rather than seeking more text."
+  fi
+  if printf '%s' "$cmd" | grep -qE '[|<>&$()`]'; then
+    block "a closed-book audit card runs one permitted script with plain arguments — no pipes,
+redirects, substitutions or backgrounding."
+  fi
+fi
+
 if printf '%s' "$cmd" | grep -qE "^[[:space:]]*python3?[[:space:]]+($PIPELINE|$WEBACCESS|$BROWSER)([[:space:]]|\$)"; then
   exit 0
 fi
@@ -134,7 +190,7 @@ block "terminal on the rx-review board runs this pipeline's own scripts only. Pe
     python3 ~/hermes-skills/rx-review/scripts/{rx,rxsplit,fanout,lenses,verify}.py ...
     (alias while the local symlink exists: python3 ~/.hermes/rx-review/{...}.py)
     python3 ~/hermes-skills/web-access/scripts/web_access.py search --query \"...\"
-    python3 ~/hermes-skills/web-access/scripts/web_access.py fetch --url \"...\" [--browser]
+    python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url \"...\" [--browser]
     python3 ~/hermes-skills/browse-task/scripts/browse_task.py --task \"...\" [--start-url ...]
 web_access.py is how this board reaches the web; there is no web_search or web_extract tool.
-If a fetch comes back unreadable, add --browser to the same command."
+If a fetch-content comes back unreadable, add --browser to the same command."

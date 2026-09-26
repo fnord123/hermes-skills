@@ -162,7 +162,15 @@ def fetch(url, timeout=45, use_cache=True, allow_browser=False):
     # schedule; give it generous headroom plus the HTTP round trip.
     http_timeout = max(timeout * 4 + 60, 300)
     try:
-        body = _post("/fetch", payload, http_timeout)
+        # fetch-content's always-array contract (2026-09-25): one element for one URL.
+        # A response without results[] is a transport or shape failure, not an empty
+        # page — it maps to unreachable, never to "the page said nothing".
+        body = _post("/fetch-content", payload, http_timeout)
+        if not body.get("results"):
+            return Result(text="", outcome="unreachable",
+                          detail="service returned no results element: %s"
+                                 % str(body.get("error") or body)[:160])
+        body = body["results"][0]
     except Exception as exc:                                   # noqa: BLE001
         return Result(text="", outcome="unreachable",
                       detail=_service_down_error() + " (%s: %s)"
