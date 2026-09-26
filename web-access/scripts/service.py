@@ -50,6 +50,7 @@ def _repoint_state():
     os.makedirs(home, exist_ok=True)
     handlers.rxfetch.configure(
         sources_dir=os.path.join(home, "cache", "sources"),
+        bytes_dir=os.path.join(home, "cache", "bytes"),
         lock_dir=os.path.join(home, "fetchlocks"),
     )
 

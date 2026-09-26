@@ -892,11 +892,15 @@ def main():
     if not args.dump_text and not args.dump_bytes and not args.task:
         fail("--task is required (or use --dump-text / --dump-bytes)")
 
-    fara_home = cfg.get("FARA_HOME") or ""
+    fara_home = cfg.get("FARA_HOME") or os.environ.get("FARA_HOME") or ""
 
     # --dump-bytes: the main document's WIRE BYTES via the browser network layer, for
     # byte-exact hashing. Local modes only (headless then headful — a browserbase capture
     # would be a rented client's view of the bytes, which we never present as the bytes).
+    # FARA_HOME comes from config.env OR the process env (same fallback as agent_config):
+    # in the container there is no config.env — run_service bakes the env — and a dump
+    # rung that reads only the file silently dies "browser not installed" (David's live
+    # probe, 2026-09-26, caught both dump paths carrying this since the container move).
     if args.dump_bytes:
         fara_python = Path(fara_home) / ".venv" / "bin" / "python"
         if not fara_python.exists():

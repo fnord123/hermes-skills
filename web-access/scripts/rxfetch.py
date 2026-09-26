@@ -73,17 +73,21 @@ SOURCES_TTL = int(os.environ.get("RX_SOURCES_TTL", 3 * 24 * 3600))
 LOCKDIR = os.path.expanduser(os.environ.get("ANALYSIS_FETCH_LOCKDIR") or "~/.hermes/.fetchlocks")
 
 
-def configure(sources_dir=None, lock_dir=None, min_chars=None):
+def configure(sources_dir=None, lock_dir=None, min_chars=None, bytes_dir=None):
     """Adjust the fetcher's knobs.
 
     sources_dir exists for TEST isolation only — a suite pointing the cache at a temp dir so
     fixture fetches never touch the real one. Production callers use the one shared cache and
     do not set it. Leave lock_dir alone unless you genuinely want a separate rate limiter,
-    which you almost never do.
+    which you almost never do. bytes_dir follows sources_dir: the service re-points BOTH
+    caches onto its state volume together, or the bytes cache silently lives in the container
+    filesystem and dies on rebuild (the two caches are one discipline, not two deployments).
     """
-    global MIN_DOCUMENT_CHARS, SOURCES, LOCKDIR
+    global MIN_DOCUMENT_CHARS, SOURCES, LOCKDIR, BYTES_SOURCES
     if sources_dir:
         SOURCES = os.path.expanduser(sources_dir)
+    if bytes_dir:
+        BYTES_SOURCES = os.path.expanduser(bytes_dir)
     if min_chars is not None:
         MIN_DOCUMENT_CHARS = int(min_chars)
     if lock_dir:
