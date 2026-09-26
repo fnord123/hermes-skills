@@ -19,6 +19,7 @@ ENV PYTHONUNBUFFERED=1 \
 # from screenshots — missing glyphs become model noise.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb \
+        xauth \
         fontconfig \
         fonts-liberation \
         ca-certificates \
