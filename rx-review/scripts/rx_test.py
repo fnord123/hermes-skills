@@ -535,6 +535,33 @@ def main():
           vf.find_quote("the range was 49\u201351% in men " * 12, "49-51% in men")[0], "exact",
           "typography differs between a rendered page and extracted text")
 
+    print("\nfind_best_quote — when the endnote's first quote is the page title, the claim decides")
+    _alp_page = ("Alkaline Phosphatase (ALP) Test. GET RESULTS FAST. My Cart is empty. "
+                 "Interpreting results. ALP produced in the intestine can also increase after "
+                 "fatty meals for people with certain blood types. " + "filler text " * 40)
+    _alp_title = "Alkaline Phosphatase (ALP) Test"
+    _alp_ev = ("ALP produced in the intestine can also increase after fatty meals for people "
+               "with certain blood types")
+    # the ALP [20] shape verbatim: title first, evidence second, claim quotes the evidence
+    _k, _p, _q = vf.find_best_quote(_alp_page, [_alp_title, _alp_ev],
+                                    claim='The intestinal isoenzyme rises postprandially: "%s"'
+                                          % _alp_ev)
+    check("the claim's own quoted sentence wins over the title", (_k, _q), ("exact", _alp_ev),
+          "108 of 1,080 audit rows cited a page title as their evidence and judged navigation "
+          "chrome (2026-09-20 run, marker-alkaline-phosphatase-alp.md [20])")
+    _k2, _p2, _q2 = vf.find_best_quote(_alp_page, [_alp_title, _alp_ev],
+                                       claim="a claim quoting nothing")
+    check("with no claim overlap the longest exact span wins", (_k2, _q2), ("exact", _alp_ev),
+          "a title is short and tells the auditor nothing")
+    _item20 = {"report": "a.md", "n": 20, "url": "https://x", "quote": _alp_ev, "claim": "c",
+               "match": "exact", "heading": "Interpreting results", "section": "s",
+               "evidences": ["ALP levels can be elevated without any underlying illness."]}
+    check("the endnote's other quoted sentences ride to the card",
+          "EVIDENCE: ALP levels can be elevated without any underlying illness."
+          in vf._render(_item20), True,
+          "[20]'s second evidence sentence was dropped at save_items — the claim it backed "
+          "was unauditable from the payload")
+
     # The fetcher's own behaviour is tested where the fetcher lives - the web-access skill,
     # in web_access_test.py. rxfetch here is a binding to that skill, so these checks cannot
     # run without it installed, and CI has no skills directory. Skipping is honest; asserting

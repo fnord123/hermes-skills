@@ -60,7 +60,8 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
 # have one enormous "Adverse Reactions" section, and the point is to stay small.
 # Bound the worst single item. The median section is ~2.9k chars, but the tail runs to 9k -
 # and one fat item drags a whole card past its budget.
-MAX_SECTION_CHARS = 5000
+# Owner ruling 2026-09-24: 5,000 was too much surrounding page for a closed-book verdict.
+MAX_SECTION_CHARS = 1000
 CONTEXT_IF_NO_SECTION = 3000
 
 # Cards are sized by the section text they carry, which is tiny compared with whole pages.
@@ -204,18 +205,29 @@ def _norm_needle(quote):
     return _norm(quote).rstrip(_TRAILING_PUNCT)
 
 
-def find_best_quote(text, quotes):
-    """Best match across every quoted run in the endnote. exact beats fuzzy beats absent."""
-    best = ("absent", None, "")
-    for q in quotes or []:
-        kind, pos = find_quote(text, q)
-        if kind == "exact":
-            return kind, pos, q
-        if kind == "fuzzy" and best[0] != "fuzzy":
-            best = (kind, pos, q)
-    if best[0] == "absent" and quotes:
-        best = ("absent", None, max(quotes, key=len))
-    return best
+def find_best_quote(text, quotes, claim=""):
+    """Best match across every quoted run in the endnote. exact beats fuzzy beats absent.
+
+    One endnote often carries several quoted runs — the source's TITLE inside its label plus
+    one evidence sentence per claim citing it — and a title matches the fetched page almost
+    by definition, so the first exact match in endnote order is routinely the title, which
+    carries no evidence and anchors the section window on navigation chrome. The run the
+    citing CLAIM itself quotes is the row's evidence and wins every tier; otherwise the
+    longest run (a title is short and tells the auditor nothing).
+    """
+    spans = [q for q in quotes or [] if q]
+
+    def pick(cands):
+        in_claim = [q for q in cands if q in claim]
+        return max(in_claim or cands, key=len)
+
+    results = [(q,) + find_quote(text, q) for q in spans]
+    for tier in ("exact", "fuzzy"):
+        hits = {q: pos for q, kind, pos in results if kind == tier}
+        if hits:
+            q = pick(list(hits))
+            return tier, hits[q], q
+    return ("absent", None, pick(spans)) if spans else ("absent", None, "")
 
 
 def find_quote(text, quote):
@@ -366,24 +378,28 @@ def cmd_build(args):
     print("  sources fetched     : %d of %d" % (got, len(urls)))
 
     rows, kinds = [], {"exact": 0, "fuzzy": 0, "absent": 0, "unfetched": 0}
-    for report, n, quote, url in notes:
+    for report, n, quotes, url in notes:
+        claim = claim_for(report, n)
         text = texts.get(url) or ""
+        cands = [q for q in quotes if q]
         if not text:
             kinds["unfetched"] += 1
+            quote = max(cands, key=lambda q: (q in claim, len(q))) if cands else ""
             rows.append({"report": report, "n": n, "url": url,
-                         "quote": max(quote, key=len) if quote else "",
-                         "claim": claim_for(report, n), "match": "unfetched",
-                         "heading": "", "section": ""})
+                         "quote": quote, "claim": claim, "match": "unfetched",
+                         "heading": "", "section": "",
+                         "evidences": [q for q in cands if q != quote]})
             continue
-        kind, pos, quote = find_best_quote(text, quote)
+        kind, pos, quote = find_best_quote(text, quotes, claim)
         kinds[kind] += 1
         if pos is None:
             heading, section = "(quote not located)", text[:CONTEXT_IF_NO_SECTION]
         else:
             heading, section = enclosing_section(text, pos, index[url])
         rows.append({"report": report, "n": n, "url": url, "quote": quote,
-                     "claim": claim_for(report, n), "match": kind,
-                     "heading": heading, "section": " ".join(section.split())})
+                     "claim": claim, "match": kind,
+                     "heading": heading, "section": " ".join(section.split()),
+                     "evidences": [q for q in cands if q != quote]})
 
     # Content key + verdict-cache probe. Only located citations (exact/fuzzy) have a real section
     # to anchor on. This stamps the key onto each row and MEASURES the reuse ceiling; actually
@@ -480,13 +496,16 @@ def _resolve_from_cache(rows):
 
 BODY = """Judge whether each source below supports the use the report made of it.
 
-The quote is already located in the source; judge from the section text you are given rather than
-fetching — whether the surrounding section actually means what the claim takes it to mean.
+You are closed-book: you have no network access, and the fields below are the whole record.
+The quote is already located in the source; judge from the section text you are given whether
+the surrounding section actually means what the claim takes it to mean.
 
 Your items are in {items_file}, in this working directory — the only file you need. For each
 item you are given:
   CLAIM    - what the report asserts, in its own words
   QUOTE    - the sentence it cites
+  EVIDENCE - other sentences the endnote quotes verbatim from this source, for the report's
+             other claims that cite the same source
   MATCH    - exact / fuzzy / absent (absent = the quote was not found in the source text)
   SECTION  - the heading the quote sits under, and that section's text
 
@@ -528,15 +547,23 @@ That file holds {count} item(s). Work through every one of them.
 
 
 def _render(r):
-    return "\n".join([
+    lines = [
         "### %s [%d]  (match: %s)" % (r["report"], r["n"], r["match"]),
         "CLAIM   : %s" % (r["claim"] or "(no citing sentence found in the report)"),
         "QUOTE   : %s" % (r["quote"] or "(no quoted text in the endnote)"),
+    ]
+    for q in r.get("evidences") or []:
+        lines.append("EVIDENCE: %s" % q)
+    lines += [
         "SOURCE  : %s" % r["url"],
         "HEADING : %s" % (r["heading"] or "(none)"),
-        "SECTION : %s" % (r["section"] or "(source could not be fetched)"),
+        "SECTION : %s" % (r["section"] or (
+            "the quoted sentence and EVIDENCE lines are all this endnote contains; the page "
+            "could not be read"
+            if r.get("evidences") else "(source could not be fetched)")),
         "",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 

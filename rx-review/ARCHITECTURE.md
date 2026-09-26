@@ -503,7 +503,9 @@ stale merge published as complete the moment round 1's archived chunks counted a
 
 `verify.cmd_build` walks every endnote in every report, resolves each source through the shared
 fetcher, and locates the quoted sentence inside it — the locating is scripted, so a judging card
-never spends a fetch discovering it cannot read its source. A located (section, quote) pair is
+never spends a fetch discovering it cannot read its source. The judging cards are closed-book:
+each judges the claim and the ~1,000-char section its items file hands it, and the terminal hook
+refuses `rx-audit` cards every route to the network. A located (section, quote) pair is
 probed against the verdict cache, and a cached verdict is reused only when today's claim is
 confirmed equivalent to the cached one (embedding similarity to find the candidate, a direct
 equivalence check to allow the reuse); otherwise the citation is judged fresh — the same quoted
@@ -512,8 +514,9 @@ sentence can support one claim and not the next. Per-chunk Workers then return o
 source that cannot be read is `dead-link`, never `unsupported`: calling an unread page
 unsupported would accuse the report of inventing a citation on the strength of our own network
 trouble. The **citation-audit merge** (the audit track's counterpart to a lens merge, gated on
-every per-chunk audit card) concatenates the results into `CONTEXT-AUDIT.md`, and a **sweep**
-card behind the merge goes back over any card that completed having judged only some of its
+every per-chunk audit card) folds the results into `CONTEXT-AUDIT.md` — one line per citation,
+the flagged side when two verdicts for one citation disagree, since nothing may rest on a
+claim the audit discredited — and a **sweep** card behind the merge goes back over any card that completed having judged only some of its
 items — partial completion is invisible from the board, so something has to go back and look.
 Merges and sweeps are linked into the Barrier by listing board cards through the Hermes CLI —
 never by touching `kanban.db` — and only into a Barrier that has not started, because linking a
@@ -1212,6 +1215,15 @@ The second track is a **citation audit**, asking two things of every endnote: do
 text exist in its source, and does it support the use the report made of it. `verify.cmd_build`
 resolves each source through the web-access fetcher and locates the quoted sentence; the
 per-chunk workers then judge the located text against the claim — `supported`,
+
+REPLACEMENT TEXT:
+The second track is a **citation audit**, asking two things of every endnote: does the cited
+text exist in its source, and does it support the use the report made of it. An endnote may
+carry verbatim sentences for more than one claim citing it; the audit judges the endnote whole,
+the CLAIM naming each citing claim and the EVIDENCE lines carrying the endnote's other quoted
+sentences, so one verdict covers each use the report made of the source. `verify.cmd_build`
+resolves each source through the web-access fetcher and locates the quoted sentence; the
+per-chunk workers then judge the located text against the claim — `supported`,
 `context-reversed`, `scope-mismatch`, `overstated`, `misquoted`, `unsupported`, or `absent` —
 and a source that could not be read is `dead-link`, never `unsupported`, because calling an
 unread page unsupported accuses the report of inventing a citation on the strength of our own
@@ -1313,6 +1325,14 @@ script is the only durable record.
 the built-in backend auto-selects from whatever API keys are in the environment and ranks a paid
 provider first, which took out an entire research stage when a stale key outranked the local
 stack. Network access is the `web-access` skill, run through `terminal`.
+
+REPLACEMENT TEXT:
+**No profile has a network toolset.** `web`, `search`, `browser` and `x_search` are removed —
+the built-in backend auto-selects from whatever API keys are in the environment and ranks a paid
+provider first, which took out an entire research stage when a stale key outranked the local
+stack. Network access is the `web-access` skill, run through `terminal`. The citation audit is
+the exception: the terminal hook refuses `rx-audit` cards the web scripts outright, so an audit
+card judges only the text its items file carries.
 
 `rx-logic` and `rx-devil` get **no shell at all**: they reason over reports already written and
 have nothing to fetch.
