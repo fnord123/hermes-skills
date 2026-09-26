@@ -39,7 +39,7 @@ TOOLS = [
                         "content. Use scope 'literature' for research databases (PubMed, "
                         "Semantic Scholar, OpenAlex, Crossref, arXiv); 'products' for "
                         "manufacturer/retailer pages; default 'web' for everything else. "
-                        "Read a found page with the fetch tool before drawing a conclusion "
+                        "Read a found page with the fetch-content tool before drawing a conclusion "
                         "from it."),
         "inputSchema": {
             "type": "object",
@@ -54,27 +54,65 @@ TOOLS = [
         },
     },
     {
-        "name": "fetch",
-        "description": ("Read one URL and return the document verbatim — text, with PDFs "
-                        "handled. Escalation is this tool's job: it climbs cache, NCBI API, "
-                        "plain HTTP, a self-hosted render, and a stealth browser, cheapest "
-                        "first. "
-                        "The outcome is 'ok', 'unreadable' (the server answered but withheld "
-                        "the document — report that it could not be read; never state what "
-                        "an unread page 'says'), or 'unreachable' (no usable response). "
-                        "Never report an unread page as empty."),
+        "name": "fetch-content",
+        "description": ("Read one or more URLs and return each document verbatim — text, "
+                        "with PDFs handled. Escalation is this tool's job: it climbs cache, "
+                        "NCBI API, plain HTTP, a self-hosted render, and a stealth browser, "
+                        "cheapest first. Pass ONE url or a LIST (urls, up to 20; batch runs "
+                        "parallel across hosts, polite-serial per host). The response is "
+                        "always {ok, results: [{url, ...}]} — one element per URL, in order. "
+                        "Each result's outcome is 'ok', 'unreadable' (the server answered but "
+                        "withheld the document — report that it could not be read; never state "
+                        "what an unread page 'says'), or 'unreachable' (no usable response). "
+                        "A result may carry age_hours: how old the served copy is (0 after the "
+                        "origin re-certified it); absence means fetched live just now. Never "
+                        "report an unread page as empty. For byte-exact content or a hash, "
+                        "use fetch-bytes instead — this tool extracts text and truncates."),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "The URL to read."},
+                "url": {"type": "string", "description": "One URL to read."},
+                "urls": {"type": "array", "items": {"type": "string"},
+                         "description": "A batch (up to 20). Pass url OR urls."},
                 "max_chars": {"type": "integer", "minimum": 1,
-                              "description": "Truncate text to this many characters. "
+                              "description": "Truncate each text to this many characters. "
                                              "Default 20000."},
                 "no_browser": {"type": "boolean",
                                "description": "Skip the browser render rungs; fail rather "
                                               "than spend the seconds. Default false."},
             },
-            "required": ["url"],
+        },
+    },
+    {
+        "name": "fetch-bytes",
+        "description": ("Get one or more URLs' EXACT ORIGIN BYTES — for hashing, integrity "
+                        "checks, or verbatim transport. The default answer is METADATA ONLY: "
+                        "sha256 (over the raw bytes, before any decode), size, content_type, "
+                        "served_via, and age_hours when cached — zero file content enters "
+                        "your context. raw=true adds the payload (utf-8 for text types, "
+                        "base64 otherwise) up to max_bytes; over-cap returns metadata and "
+                        "says so — it never truncates a hashable body silently. served_via: "
+                        "'direct' = what a plain HTTP client receives; 'rendered' = the wire "
+                        "bytes a local browser was served (network-layer capture, not the "
+                        "DOM) — anti-bot sites can answer different clients differently, so "
+                        "the field keeps a hash honest about which view it hashes. Never "
+                        "uses the paid remote browser. Response shape is always "
+                        "{ok, results: [...]}, same batching rules as fetch-content."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "One URL."},
+                "urls": {"type": "array", "items": {"type": "string"},
+                         "description": "A batch (up to 20). Pass url OR urls."},
+                "raw": {"type": "boolean",
+                        "description": "Include the payload, not just its metadata. "
+                                       "Default false."},
+                "max_bytes": {"type": "integer", "minimum": 1,
+                              "description": "Payload cap when raw=true. Default 2000000."},
+                "no_render": {"type": "boolean",
+                              "description": "Direct HTTP only; never capture via a local "
+                                             "browser render. Default false."},
+            },
         },
     },
     {
@@ -116,10 +154,17 @@ def _dispatch(name, args):
         body = app._verb_search({"query": args.get("query"),
                                  "scope": args.get("scope"),
                                  "max_results": args.get("max_results")})
-    elif name == "fetch":
+    elif name == "fetch-content":
         body = app._verb_fetch({"url": args.get("url"),
+                                "urls": args.get("urls"),
                                 "max_chars": args.get("max_chars"),
                                 "no_browser": args.get("no_browser")})
+    elif name == "fetch-bytes":
+        body = app._verb_fetch_bytes({"url": args.get("url"),
+                                      "urls": args.get("urls"),
+                                      "raw": args.get("raw"),
+                                      "max_bytes": args.get("max_bytes"),
+                                      "no_render": args.get("no_render")})
     elif name == "do":
         body = app._verb_do({"task": args.get("task"),
                              "start_url": args.get("start_url"),

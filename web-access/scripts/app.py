@@ -11,12 +11,14 @@ three long-running POSTs and a health endpoint, and every fetch that ever
 happens logs one line here, which is what makes the container the single
 audit point the architecture calls for.
 
-    POST /search  {"query", "scope"?, "max_results"?, "timeout"?, "no_metrics"?}
-    POST /fetch   {"url", "max_chars"?, "timeout"?, "no_browser"?, "trace"?,
-                   "min_chars"?, "no_metrics"?}
-    POST /do      {"task", "start_url"?, "max_steps"?, "confirm"?, "cookies"?,
-                   "no_browserbase"?}
-    GET  /health  liveness plus the state each verb depends on
+    POST /search        {"query", "scope"?, "max_results"?, "timeout"?, "no_metrics"?}
+    POST /fetch-content {"url" | "urls", "max_chars"?, "timeout"?, "no_browser"?,
+                         "trace"?, "min_chars"?, "no_metrics"?}
+    POST /fetch-bytes   {"url" | "urls", "raw"?, "max_bytes"?, "timeout"?,
+                         "no_render"?, "trace"?, "no_metrics"?}
+    POST /do            {"task", "start_url"?, "max_steps"?, "confirm"?, "cookies"?,
+                         "no_browserbase"?}
+    GET  /health        liveness plus the state each verb depends on
 
 Bind: LAN-only by deployment choice (compose publishes the container port on
 the docker host's LAN interface, not 0.0.0.0), so the network boundary is the
@@ -52,11 +54,24 @@ def _verb_search(p):
 def _verb_fetch(p):
     return handlers.cmd_fetch(
         url=p.get("url") or "",
+        urls=p.get("urls"),
         max_chars=int(p.get("max_chars") or handlers.DEFAULT_MAX_CHARS),
         timeout=int(p.get("timeout") or 45),
         no_browser=bool(p.get("no_browser")),
         trace=p.get("trace"),
         min_chars=int(p.get("min_chars") or handlers.MIN_CHARS_DEFAULT),
+        no_metrics=bool(p.get("no_metrics")))
+
+
+def _verb_fetch_bytes(p):
+    return handlers.cmd_fetch_bytes(
+        url=p.get("url") or None,
+        urls=p.get("urls"),
+        raw=bool(p.get("raw")),
+        max_bytes=int(p.get("max_bytes") or 2_000_000),
+        timeout=int(p.get("timeout") or 60),
+        no_render=bool(p.get("no_render")),
+        trace=p.get("trace"),
         no_metrics=bool(p.get("no_metrics")))
 
 
@@ -70,11 +85,16 @@ def _verb_do(p):
         no_browserbase=bool(p.get("no_browserbase")))
 
 
-VERBS = {"/search": _verb_search, "/fetch": _verb_fetch, "/do": _verb_do}
+VERBS = {"/search": _verb_search, "/fetch-content": _verb_fetch,
+         "/fetch-bytes": _verb_fetch_bytes, "/do": _verb_do}
 # One audit line per request: verb, what it was asked for, outcome, cost.
 # The container's stdout IS the audit trail.
 _AUDIT = {"/search": lambda p: "query=%s" % (p.get("query") or "")[:120],
-          "/fetch": lambda p: "url=%s" % (p.get("url") or "")[:200],
+          "/fetch-content": lambda p: "url=%s urls=%d" % ((p.get("url") or "")[:200],
+                                                          len(p.get("urls") or [])),
+          "/fetch-bytes": lambda p: "url=%s urls=%d raw=%s" % ((p.get("url") or "")[:200],
+                                                               len(p.get("urls") or []),
+                                                               bool(p.get("raw"))),
           "/do": lambda p: "task=%s confirm=%s" % ((p.get("task") or "")[:120],
                                                    bool(p.get("confirm")))}
 
@@ -96,13 +116,15 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._send(200, handlers.health())
         else:
             self._send(404, {"ok": False,
-                             "error": "unknown path — POST /search /fetch /do, or GET /health"})
+                             "error": "unknown path — POST /search /fetch-content "
+                                      "/fetch-bytes /do, or GET /health"})
 
     def do_POST(self):                                         # noqa: N802
         verb = VERBS.get(self.path)
         if verb is None:
             self._send(404, {"ok": False,
-                             "error": "unknown path — POST /search /fetch /do"})
+                             "error": "unknown path — POST /search /fetch-content "
+                                      "/fetch-bytes /do"})
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)

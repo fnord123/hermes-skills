@@ -466,6 +466,47 @@ asyncio.run(_main())
 """
 
 
+# Raw BYTES dump: navigate, capture the main document's wire body via the network layer
+# (Playwright's response.body()), and return it base64. This is NOT inner_text and NOT the
+# DOM — it is the bytes the server put on the wire, which is what `fetch-bytes` promises.
+# The browser still asks, so anti-bot sites answer; the response says served_via=rendered
+# because those bytes are what A BROWSER was served, which may differ from what any other
+# client sees. Never browserbase: bytes from a metered remote are bytes you rented.
+BYTES_SRC = r"""
+import os, sys, asyncio, json, base64
+import os as _os
+_UA = _os.environ.get("RXFETCH_UA") or ""
+_STEALTH = _os.environ.get("RXFETCH_STEALTH") or ""
+from playwright.async_api import async_playwright
+_url = sys.argv[1]
+_mode = sys.argv[2] if len(sys.argv) > 2 else "headless"
+_headful = _mode == "headful"
+async def _main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(headless=not _headful)
+        try:
+            _ctx = await b.new_context(user_agent=_UA, locale="en-US",
+                                       viewport={"width": 1440, "height": 900})
+            await _ctx.add_init_script(_STEALTH)
+            pg = await _ctx.new_page()
+            r = await pg.goto(_url, wait_until="domcontentloaded", timeout=45000)
+            if r is None:
+                print("__BYTES__" + json.dumps({"error": "navigation produced no response"}))
+            else:
+                body = await r.body()
+                print("__BYTES__" + json.dumps({
+                    "status": r.status, "final_url": r.url,
+                    "content_type": (r.headers or {}).get("content-type", ""),
+                    "size": len(body),
+                    "body_b64": base64.b64encode(body).decode("ascii")}))
+        except Exception as e:
+            print("__BYTES__" + json.dumps({"error": str(e).splitlines()[0][:200]}))
+        finally:
+            await b.close()
+asyncio.run(_main())
+"""
+
+
 # Throttling lives in the web-access skill's fetcher, so that EVERY route to a site - a plain
 # fetch, an escalation to a browser, or this script run on its own - is spaced by one shared
 # per-host timer. Without this, driving a browser directly was the one escalation level that
@@ -606,6 +647,36 @@ def save_learned(cfg, host, mode):
         p.write_text(json.dumps(data, indent=2))
     except Exception:  # noqa: BLE001
         pass
+
+
+def run_dump_bytes(url, mode, xvfb, fara_python, cfg=None):
+    """Main-document wire bytes via the browser's network layer. Returns a dict
+    (status/content_type/size/body_b64, or error). Local modes only — a metered
+    remote's bytes are a different client's view and we do not sell those."""
+    if mode == "browserbase":
+        return {"error": "bytes capture never runs on the metered remote browser"}
+    base = [str(fara_python), "-c", BYTES_SRC, url, mode]
+    cmd = ([xvfb, "-a"] + base) if (mode == "headful" and xvfb) else base
+    env = dict(os.environ, RXFETCH_UA=UA, RXFETCH_STEALTH=STEALTH_INIT)
+    log("BYTES CMD[%s] %s" % (mode, " ".join(cmd)))
+    trace("browser:%s" % mode, "spawn-bytes", argv=cmd, url=url)
+    try:
+        with host_gate(url):
+            r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, env=env, timeout=180)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "%s: %s" % (type(exc).__name__, exc)}
+    for ln in (r.stdout or "").splitlines():
+        if ln.startswith("__BYTES__"):
+            try:
+                d = json.loads(ln[len("__BYTES__"):])
+                trace("browser:%s" % mode, "bytes", http_status=d.get("status"),
+                      size=d.get("size"), error=d.get("error"))
+                return d
+            except Exception:  # noqa: BLE001
+                break
+    return {"error": (r.stderr or r.stdout or "no output").strip().splitlines()[-1][:200]
+            if (r.stderr or r.stdout) else "no output"}
 
 
 def run_probe(url, mode, xvfb, fara_python):
@@ -773,6 +844,9 @@ def main():
     p.add_argument("--dump-text", dest="dump_text", action="store_true",
                    help="return the page's RENDERED TEXT verbatim, with no agent in the loop. "
                         "For a caller that wants the document, not an answer.")
+    p.add_argument("--dump-bytes", dest="dump_bytes", action="store_true",
+                   help="return the main document's WIRE BYTES (network layer, base64) — "
+                        "byte-exact content for hashing. Local render modes only.")
     p.add_argument("--keep-trajectory", dest="keep_trajectory", default=None,
                    help="copy the agent's trajectory (per-round screenshots and its own "
                         "reasoning) to this directory instead of discarding it with the temp dir")
@@ -815,10 +889,37 @@ def main():
     global LOG
     if cfg.get("BROWSE_LOG"):
         LOG = Path(cfg["BROWSE_LOG"])
-    if not args.dump_text and not args.task:
-        fail("--task is required (or use --dump-text to get the page's text verbatim)")
+    if not args.dump_text and not args.dump_bytes and not args.task:
+        fail("--task is required (or use --dump-text / --dump-bytes)")
 
     fara_home = cfg.get("FARA_HOME") or ""
+
+    # --dump-bytes: the main document's WIRE BYTES via the browser network layer, for
+    # byte-exact hashing. Local modes only (headless then headful — a browserbase capture
+    # would be a rented client's view of the bytes, which we never present as the bytes).
+    if args.dump_bytes:
+        fara_python = Path(fara_home) / ".venv" / "bin" / "python"
+        if not fara_python.exists():
+            fail("browser not installed at %s — run the setup in README." % fara_python)
+        xvfb0 = shutil.which("xvfb-run")
+        attempts, d, used = [], {}, None
+        for m in (["headful"] if xvfb0 else ["headless"]) + (["headless"] if xvfb0 else []):
+            d = run_dump_bytes(args.start_url, m, xvfb0, fara_python, cfg)
+            okb = d.get("body_b64") and int(d.get("status") or 0) < 400
+            attempts.append({"mode": m, "result": ("bytes %s" % d.get("size"))
+                             if okb else str(d.get("error") or d.get("status"))[:120]})
+            log("BYTES %s -> %s" % (m, attempts[-1]["result"]))
+            if okb:
+                used = m
+                break
+        if used is None:
+            out({"ok": False, "url": args.start_url, "attempts": attempts,
+                 "error": str(d.get("error") or "no bytes on any local mode")}, 1)
+        out({"ok": True, "url": args.start_url, "mode": "bytes:%s" % used,
+             "attempts": attempts, "http_status": d.get("status"),
+             "final_url": d.get("final_url"), "content_type": d.get("content_type"),
+             "size": d.get("size"), "body_b64": d.get("body_b64")})
+        return
 
     # --dump-text needs a browser but NOT the agent, so it runs before the model config is
     # required and never loads fara-cli. It reuses the per-host mode ladder, which is the part

@@ -163,10 +163,11 @@ class Result(object):
     verbatim quotes, so it may reasonably refuse anything a browser rendered; a product lookup
     may not care. Neither can choose if the tier is invisible. string."""
 
-    __slots__ = ("text", "outcome", "detail", "via", "attempts", "meta", "age_hours")
+    __slots__ = ("text", "outcome", "detail", "via", "attempts", "meta", "age_hours",
+                 "data")
 
     def __init__(self, text="", outcome="unreachable", detail="", via="", attempts=None,
-                 meta=None, age_hours=None):
+                 meta=None, age_hours=None, data=None):
         self.text, self.outcome, self.detail, self.via = text, outcome, detail, via
         # Every layer tried, in order, with what it returned. A failure that cannot say how far
         # it got is indistinguishable from a layer that never ran — which is exactly the doubt
@@ -178,6 +179,8 @@ class Result(object):
         # Hours since the bytes were written or last origin-confirmed; None on a live
         # fetch. See the response projection in handlers.cmd_fetch.
         self.age_hours = age_hours
+        # Raw wire bytes (fetch-bytes lane only); None for every text-lane Result.
+        self.data = data
 
     @property
     def ok(self):
@@ -756,6 +759,192 @@ def _url_hash(url):
 
 def cache_path(url):
     return os.path.join(SOURCES, _url_hash(url) + ".txt")
+
+
+# ── fetch-bytes: the byte-exact lane ──────────────────────────────────────────────────────────
+# fetch-content hands a model a DOCUMENT (extracted text, truncation budget) — the wrong tool
+# for a digest, where one changed byte matters. fetch-bytes hands back the ORIGIN'S OWN BYTES:
+# direct HTTP first; if walled, one local render with the body captured at the NETWORK layer
+# (Playwright response.body()), never the DOM, never bladebro's distilled text, never the paid
+# remote. A rendered capture is byte-exact as delivered TO A BROWSER, and anti-bot sites serve
+# different bytes to different clients — so every response says served_via: direct|rendered and
+# a hash is never silently a different client's hash. The cache is a SEPARATE namespace: raw
+# bytes and extracted text under one key would let a text entry answer a bytes request, which
+# is the exact violation this verb exists to prevent. Same fresh window, same conditional-GET
+# revalidation, sidecar validators included.
+BYTES_SOURCES = os.path.expanduser("~/.hermes/cache/web-access/bytes")
+# A bytes fetch is a download; cap what one request may pull into the cache. Over-cap fails
+# loudly with the declared size when the server declares one — silent truncation of a file
+# someone is about to hash would be the worst possible failure of this verb.
+BYTES_CAP = int(os.environ.get("RXFETCH_BYTES_CAP", 32 * 1024 * 1024))
+
+
+def bytes_cache_path(url):
+    return os.path.join(BYTES_SOURCES, _url_hash(url) + ".bin")
+
+
+def _write_bytes_cache(path, data, meta):
+    """Atomic pair: bytes via tmp+rename, sidecar carrying validators AND the
+    provenance/typing facts (content_type, status, served_via, final_url)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp-%d" % os.getpid()
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+    mtmp = _meta_path(path) + ".tmp-%d" % os.getpid()
+    try:
+        with open(mtmp, "w", encoding="utf-8") as fh:
+            json.dump(meta or {}, fh)
+        os.replace(mtmp, _meta_path(path))
+    except Exception:                                          # noqa: BLE001
+        with contextlib.suppress(OSError):
+            os.remove(mtmp)
+
+
+def _bytes_attempt(url, timeout, conditional=None):
+    """One gated direct request for raw bytes. Returns (Result, retryable).
+
+    No extraction, no decoding: `data` is the wire body, `meta` carries content-type plus
+    whatever origin validators came back. outcome ok with zero bytes is still ok — hashing an
+    empty file is a legitimate question (e3b0c442 is a real answer); what is NOT legitimate is
+    answering it wrongly.
+    """
+    host = _host_of(url)
+    headers = {"User-Agent": UA, "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"}
+    if conditional:
+        if conditional.get("etag"):
+            headers["If-None-Match"] = conditional["etag"]
+        if conditional.get("last_modified"):
+            headers["If-Modified-Since"] = conditional["last_modified"]
+    req = urllib.request.Request(url, headers=headers)
+    trace_log("bytes-http", "request", method="GET", url=url, timeout=timeout)
+    try:
+        with host_gate(host):
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read(BYTES_CAP + 1)
+                if len(raw) > BYTES_CAP:
+                    return Result("", "unreadable",
+                                  "response exceeds the %d MB bytes cap"
+                                  % (BYTES_CAP // (1024 * 1024))), False
+                ctype = (r.headers.get("Content-Type") or "").lower()
+                status = getattr(r, "status", None)
+                final = r.geturl()
+                hdr = r.headers
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return Result("", "notmodified", "304 (validators matched)"), False
+        retryable = e.code in TRANSIENT_STATUS
+        outcome = "unreadable" if e.code in WITHHELD_STATUS else "unreachable"
+        return Result("", outcome, "HTTP %s" % e.code), retryable
+    except Exception as e:                                      # noqa: BLE001
+        transport = type(e).__name__
+        timed_out = isinstance(e, (TimeoutError, socket.timeout)) or \
+            "timeout" in transport.lower()
+        return Result("", "unreadable" if timed_out else "unreachable", transport), True
+
+    meta = {"content_type": ctype[:128], "status": status, "served_via": "direct",
+            "final_url": final}
+    etag, lmod = hdr.get("ETag"), hdr.get("Last-Modified")
+    if etag:
+        meta["etag"] = etag[:256]
+    if lmod:
+        meta["last_modified"] = lmod[:128]
+    return Result("", "ok", "bytes %d (%s)" % (len(raw), ctype[:40]),
+                  via="bytes-http", meta=meta, data=raw), False
+
+
+def _render_bytes_attempt(url, timeout):
+    """The render-with-body-capture rung (David's ruling, 2026-09-25): local browser,
+    main-document wire bytes via the network layer. Local modes only — browse_task's
+    --dump-bytes refuses browserbase itself; a rented client's bytes are not THE bytes."""
+    if not os.path.exists(BROWSE_TASK):
+        return Result("", "unreadable", "bytes render unavailable (browse_task missing)")
+    cmd = [sys.executable, BROWSE_TASK, "--dump-bytes", "--start-url", url]
+    host = _host_of(url)
+    env = dict(os.environ, RXFETCH_GATE_HELD=host, RXFETCH_TRACE=TRACE)
+    trace_log("bytes-render", "spawn", argv=cmd, url=url)
+    try:
+        with host_gate(host):
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                                  timeout=max(timeout, BROWSER_TIMEOUT_FLOOR))
+    except subprocess.TimeoutExpired:
+        return Result("", "unreadable", "bytes render timed out")
+    except Exception as exc:                                    # noqa: BLE001
+        return Result("", "unreadable", "bytes render failed: %s" % type(exc).__name__)
+    try:
+        d = json.loads(proc.stdout or "{}")
+    except ValueError:
+        return Result("", "unreadable", "bytes render unparseable: %s"
+                      % (proc.stderr or "")[-160:].strip())
+    if not d.get("ok") or not d.get("body_b64"):
+        return Result("", "unreadable",
+                      "bytes render: %s" % str(d.get("error") or "no body")[:160])
+    try:
+        import base64 as _b64
+        raw = _b64.b64decode(d["body_b64"])
+    except Exception:                                           # noqa: BLE001
+        return Result("", "unreadable", "bytes render: corrupt body_b64")
+    if len(raw) > BYTES_CAP:
+        return Result("", "unreadable", "rendered body exceeds the bytes cap")
+    meta = {"content_type": (d.get("content_type") or "")[:128],
+            "status": d.get("http_status"), "served_via": "rendered",
+            "final_url": d.get("final_url")}
+    return Result("", "ok", "bytes %d rendered (%s)" % (len(raw), meta["content_type"][:40]),
+                  via="bytes-render", meta=meta, data=raw), False
+
+
+def fetch_bytes(url, timeout=45, use_cache=True, allow_render=True):
+    """The byte-exact lane: origin bytes for hashing/verbatim transport, with the same
+    freshness discipline as the text cache (3d fresh window, then ASK the origin).
+
+    Never descends the text ladder: an interstitial-tolerant browser rung has no place
+    where byte-exactness is the promise. cache -> bytes-http -> bytes-render (local only).
+    """
+    t0 = time.time()
+    path = bytes_cache_path(url)
+
+    def _hit(data, meta, age_h, how):
+        r = Result("", "ok", how, via="bytes-cache", meta=dict(meta), data=data)
+        r.age_hours = age_h
+        return r
+
+    if use_cache and os.path.exists(path) and os.path.getsize(path) > 0:
+        age = time.time() - os.path.getmtime(path)
+        data = open(path, "rb").read()
+        meta = _read_meta(path)
+        if age <= SOURCES_TTL:
+            return _hit(data, meta, age / 3600.0, "cached %d bytes" % len(data))
+        if not (meta.get("etag") or meta.get("last_modified")):
+            pass  # rendered content or pre-validator entry: expired, refetch
+        else:
+            cond, _ = _bytes_attempt(url, timeout,
+                                     conditional={"etag": meta.get("etag"),
+                                                  "last_modified": meta.get("last_modified")})
+            if cond.outcome == "notmodified":
+                with contextlib.suppress(OSError):
+                    os.utime(path, None)
+                r = _hit(data, meta, 0.0, "cached (revalidated) %d bytes" % len(data))
+                return r
+            if cond.ok:
+                _write_bytes_cache(path, cond.data, cond.meta)
+                return cond
+            # Walled revalidation: honest age, no lie (same rule as the text cache).
+            r = _hit(data, meta, age / 3600.0,
+                     "cached (revalidation failed; %dh old)" % (age // 3600))
+            return r
+
+    res, _retry = _bytes_attempt(url, timeout)
+    if not res.ok and allow_render and res.outcome == "unreadable":
+        rendered, _r2 = _render_bytes_attempt(url, timeout)
+        if rendered.ok:
+            res = rendered
+    if res.ok:
+        os.makedirs(BYTES_SOURCES, exist_ok=True)
+        _write_bytes_cache(path, res.data, res.meta)
+    if _metrics_enabled():
+        with contextlib.suppress(Exception):
+            _emit_fetch_event(url, res, ms=int((time.time() - t0) * 1000))
+    return res
 
 
 def _legacy_cache_path(url):

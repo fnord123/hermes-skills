@@ -71,7 +71,7 @@ triggers in *Which failures escalate*; the outcome vocabulary in *`unreachable` 
 `unreadable`*.
 
 ```
-python3 scripts/web_access.py fetch --url "..." [--max-chars 20000]
+python3 scripts/web_access.py fetch-content --url "..." [--max-chars 20000]
 ```
 
 Two properties worth restating here because callers rely on them:

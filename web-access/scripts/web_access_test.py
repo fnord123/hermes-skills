@@ -741,7 +741,7 @@ def _fetch_next(detail):
     _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("", "unreachable", detail)
     body = _wa.cmd_fetch("https://x/y", max_chars=1000, timeout=5,
                          no_browser=True, trace=None, min_chars=200)
-    return (body.get("next") or "")
+    return (body["results"][0].get("next") or "")
 
 
 try:
@@ -765,12 +765,12 @@ _live = _wa.rxfetch.Result("usable document text" * 40, "ok", "fetched 800 chars
 try:
     _wa.rxfetch.fetch = lambda url, **k: _cached
     _b = _wa.cmd_fetch("https://age.example/p", max_chars=1000, timeout=5,
-                       no_browser=True, trace=None, min_chars=200)
+                       no_browser=True, trace=None, min_chars=200)["results"][0]
     chk("a cache-served fetch response carries age_hours, rounded",
         _b.get("age_hours") == 72.3, "(%s)" % _b.get("age_hours"))
     _wa.rxfetch.fetch = lambda url, **k: _live
     _b = _wa.cmd_fetch("https://age.example/p", max_chars=1000, timeout=5,
-                       no_browser=True, trace=None, min_chars=200)
+                       no_browser=True, trace=None, min_chars=200)["results"][0]
     chk("a live fetch response omits age_hours entirely", "age_hours" not in _b)
 finally:
     _wa.rxfetch.fetch = saved_fetch
@@ -965,11 +965,114 @@ try:
     _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("thread " * 200, "ok", "stub",
                                                             via="firecrawl")
     _out = _wa.cmd_fetch(SHARE_OLD, max_chars=1000, timeout=5,
-                         no_browser=False, trace=None, min_chars=200)
-    chk("fetch reports the surface it read, not the alias it was given",
+                         no_browser=False, trace=None, min_chars=200)["results"][0]
+    chk("fetch-content reports the surface it read, not the alias it was given",
         _out.get("url") == SHARE_WWW, "(got %r)" % _out.get("url"))
 finally:
     _wa.rxfetch.fetch = _saved_fetch2
+
+
+# ══ the renamed verbs: always-array, batching rules, and the bytes lane ═══════════════════
+# Contract set from the 2026-09-25 redesign (David): fetch died; fetch-content and
+# fetch-bytes answer {ok, results: [...]}; bytes default to metadata-only so a hash
+# never floods context; served_via keeps every rendered capture honest.
+section("always-array: one URL is a one-element array")
+_saved_fetch3 = _wa.rxfetch.fetch
+try:
+    _wa.rxfetch.fetch = lambda url, **k: _wa.rxfetch.Result("document text " * 40, "ok",
+                                                            "stub", via="http")
+    _b = _wa.cmd_fetch("https://arr.example/a", max_chars=500, timeout=5,
+                       no_browser=True, trace=None, min_chars=20)
+    chk("a single-url fetch-content response is {ok, results:[one]}",
+        _b.get("ok") is True and isinstance(_b.get("results"), list)
+        and len(_b["results"]) == 1 and _b["results"][0]["ok"] is True)
+    chk("the flat text field no longer exists at top level", "text" not in _b)
+finally:
+    _wa.rxfetch.fetch = _saved_fetch3
+
+section("batch validation: request-shape errors are top-level ok:false")
+for _bad, _why in (({"url": "https://x/a", "urls": ["https://x/b"]}, "both params"),
+                   ({}, "neither param"),
+                   ({"urls": ["u%d" % i for i in range(21)]}, "over the 20 cap")):
+    _b = _wa.cmd_fetch(**{"max_chars": 500, "timeout": 5, "trace": None,
+                          "min_chars": 20}, **_bad)
+    chk("%s -> top-level ok:false naming the rule" % _why,
+        _b.get("ok") is False and "error" in _b and "results" not in _b)
+
+section("batch: per-URL verdicts, order preserved, one failure does not abort the rest")
+def _fetch_by_host(url, **k):
+    if "dead" in url:
+        return _wa.rxfetch.Result("", "unreachable", "URLError")
+    return _wa.rxfetch.Result("live document " * 40, "ok", "stub", via="http")
+_saved_fetch4 = _wa.rxfetch.fetch
+try:
+    _wa.rxfetch.fetch = _fetch_by_host
+    _b = _wa.cmd_fetch(urls=["https://a.example/1", "https://dead.example/x",
+                             "https://b.example/2"],
+                       max_chars=500, timeout=5, no_browser=True, trace=None, min_chars=20)
+    chk("batch ok is the AND of the elements", _b.get("ok") is False)
+    chk("all three elements came back, in request order",
+        [r["url"] for r in _b.get("results", [])]
+        == ["https://a.example/1", "https://dead.example/x", "https://b.example/2"])
+    chk("the failed URL carries its own verdict and a next hint, the others stayed ok",
+        _b["results"][1]["ok"] is False and "next" in _b["results"][1]
+        and _b["results"][0]["ok"] and _b["results"][2]["ok"])
+finally:
+    _wa.rxfetch.fetch = _saved_fetch4
+
+section("fetch-bytes: metadata-only by default; sha256 over the raw bytes")
+import hashlib as _hl_bytes
+_doc = b"exact wire bytes \xde\xad for hashing"
+_saved_fb = _wa.rxfetch.fetch_bytes
+try:
+    _wa.rxfetch.fetch_bytes = lambda url, **k: _wa.rxfetch.Result(
+        "", "ok", "bytes %d" % len(_doc), via="bytes-http",
+        meta={"content_type": "application/octet-stream", "status": 200,
+              "served_via": "direct"}, data=_doc)
+    _b = _wa.cmd_fetch_bytes(url="https://hash.example/f.bin", no_metrics=True)
+    _el = _b["results"][0]
+    chk("the default answer is metadata only — zero payload in the response",
+        _el.get("ok") and "content_base64" not in _el and "content" not in _el
+        and "sha256" in _el and _el["size"] == len(_doc))
+    chk("sha256 is the real digest of the raw bytes (not of any decoding)",
+        _el["sha256"] == _hl_bytes.sha256(_doc).hexdigest())
+    chk("served_via rides every bytes answer", _el["served_via"] == "direct")
+    _b = _wa.cmd_fetch_bytes(url="https://hash.example/f.bin", raw=True, no_metrics=True)
+    chk("raw=true returns the base64 payload for binary types",
+        _b["results"][0].get("content_base64")
+        and __import__("base64").b64decode(_b["results"][0]["content_base64"]) == _doc)
+    _b = _wa.cmd_fetch_bytes(url="https://hash.example/f.bin", raw=True,
+                             max_bytes=8, no_metrics=True)
+    chk("over-cap raw says so instead of truncating a hashable body",
+        _b["results"][0].get("raw_included") is False
+        and "sha256" in _b["results"][0] and "content_base64" not in _b["results"][0])
+    # A rendered capture must say so: a browser's bytes are a different client's view.
+    _wa.rxfetch.fetch_bytes = lambda url, **k: _wa.rxfetch.Result(
+        "", "ok", "bytes rendered", via="bytes-render",
+        meta={"content_type": "text/html", "status": 200, "served_via": "rendered"},
+        data=_doc)
+    _el = _wa.cmd_fetch_bytes(url="https://wall.example/page", no_metrics=True)["results"][0]
+    chk("a render-captured hash is labeled served_via=rendered",
+        _el["served_via"] == "rendered")
+    # Cache age flows through the same discipline as the content lane.
+    _wa.rxfetch.fetch_bytes = lambda url, **k: _wa.rxfetch.Result(
+        "", "ok", "cached", via="bytes-cache",
+        meta={"content_type": "text/plain", "served_via": "direct"}, data=_doc,
+        age_hours=50.0)
+    _el = _wa.cmd_fetch_bytes(url="https://cache.example/f", no_metrics=True)["results"][0]
+    chk("a cached bytes answer carries age_hours like any other copy",
+        _el.get("age_hours") == 50.0)
+finally:
+    _wa.rxfetch.fetch_bytes = _saved_fb
+
+section("the renamed doors: old names answer nothing")
+import app as _appmod
+chk("HTTP /fetch is gone from the route table",
+    "/fetch" not in _appmod.VERBS and "/fetch-content" in _appmod.VERBS
+    and "/fetch-bytes" in _appmod.VERBS)
+import mcp_server as _mcps
+chk("the MCP registry lists fetch-content and fetch-bytes, and no plain fetch",
+    {t["name"] for t in _mcps.TOOLS} == {"search", "fetch-content", "fetch-bytes", "do"})
 
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

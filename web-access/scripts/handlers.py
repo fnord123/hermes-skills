@@ -201,7 +201,7 @@ def run_search(query, scope=DEFAULT_SCOPE, max_results=DEFAULT_MAX, timeout=30,
                 "widened": hit.get("widened", False), "cached": True,
                 "count": len(results), "results": results,
                 "note": ("no results — try different terms" if not results else
-                         "read a page with `fetch` before drawing a conclusion from it")}
+                         "read a page with `fetch-content` before drawing a conclusion from it")}
 
     try:
         data, widened = run_search_impl(query, scope, timeout)
@@ -229,18 +229,28 @@ def run_search(query, scope=DEFAULT_SCOPE, max_results=DEFAULT_MAX, timeout=30,
     return {"ok": True, "query": query, "scope": scope, "widened": widened,
             "cached": False, "count": len(results), "results": results,
             "note": ("no results — try different terms" if not results else
-                     "read a page with `fetch` before drawing a conclusion from it")}
+                     "read a page with `fetch-content` before drawing a conclusion from it")}
 
 
-def cmd_fetch(url, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
-              trace=None, min_chars=MIN_CHARS_DEFAULT, no_metrics=False):
-    """The `fetch` verb: read one page. Returns the response dict (same shape as the old CLI).
+def cmd_fetch(url=None, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
+              trace=None, min_chars=MIN_CHARS_DEFAULT, no_metrics=False, urls=None):
+    """The `fetch-content` verb: read one or more pages as DOCUMENTS.
 
-    `trace` may name a file or be truthy (a per-request name under WEBACCESS_HOME); the
-    service appends the execution trace there and reports the path in the response.
+    Always-array contract (David 2026-09-25): the response is
+    `{ok, results: [{url, ...}]}` for one URL or twenty — a caller never branches on
+    input shape. `ok` is the AND of the elements; per-URL failure is a per-element
+    verdict, never a whole-batch abort. Top-level `ok: false` means the REQUEST was
+    malformed (both params, neither, over the cap), not that a site refused.
+
+    Execution: URLs grouped by host, groups run in parallel, hosts run serially —
+    the per-host gate is the anti-ban wall and parallel same-host requests are how
+    you earn the block the gate exists to avoid.
     """
     if no_metrics:
         os.environ["RX_METRICS"] = "0"
+    targets, err = _batch_targets(url, urls)
+    if err:
+        return {"ok": False, "error": err}
     if trace:
         if isinstance(trace, str) and "/" not in str(trace) and "." not in str(trace):
             trace = _home("traces", "fetch-%s.jsonl" % time.strftime("%Y%m%d-%H%M%S"))
@@ -248,6 +258,58 @@ def cmd_fetch(url, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
         os.environ["RXFETCH_TRACE"] = str(trace)
         rxfetch.TRACE = str(trace)
     rxfetch.configure(min_chars=min_chars)
+    results = _run_batch(
+        targets,
+        lambda u: _fetch_content_one(u, max_chars=max_chars, timeout=timeout,
+                                     no_browser=no_browser))
+    body = {"ok": all(r and r.get("ok") for r in results), "results": results}
+    if trace:
+        body["trace"] = str(trace)
+    return body
+
+
+def _batch_targets(url, urls, cap=20):
+    """Validate the one-URL-or-list shape; return (ordered urls, error)."""
+    if url and urls:
+        return None, "pass `url` OR `urls`, not both"
+    targets = [url] if url else list(urls or [])
+    if not targets:
+        return None, "one of `url` or `urls` is required"
+    if len(targets) > cap:
+        return None, ("batch cap is %d URLs, got %d — split the call; each URL runs a "
+                      "full ladder and a per-host gate" % (cap, len(targets)))
+    bad = [t for t in targets if not isinstance(t, str) or not t.strip()]
+    if bad:
+        return None, "every entry must be a non-empty URL string"
+    return targets, None
+
+
+def _run_batch(targets, one):
+    """Parallel across hosts, serial within a host, order preserved."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    groups, order = {}, []
+    for i, u in enumerate(targets):
+        host = rxfetch._host_of(u)
+        if host not in groups:
+            groups[host] = []
+            order.append(host)
+        groups[host].append((i, u))
+    out = [None] * len(targets)
+    locks = {h: threading.Lock() for h in groups}
+
+    def _group(host):
+        with locks[host]:
+            for i, u in groups[host]:
+                out[i] = one(u)
+
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(groups)))) as ex:
+        list(ex.map(_group, order))
+    return out
+
+
+def _fetch_content_one(url, max_chars, timeout, no_browser):
+    """One URL through the content ladder; returns the per-element response body."""
     r = rxfetch.fetch(url, timeout=timeout, allow_browser=not no_browser)
     text = (r.text or "")
     truncated = len(text) > max_chars
@@ -269,8 +331,6 @@ def cmd_fetch(url, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
     # from last week" will report an aged document as live news (the 2026-09-25 incident).
     if r.ok and getattr(r, "age_hours", None) is not None:
         body["age_hours"] = round(r.age_hours, 1)
-    if trace:
-        body["trace"] = str(trace)
     if r.outcome == "unreadable" and no_browser:
         body["next"] = ("the server answered but withheld the document, and the browser tier "
                         "was skipped by no_browser. Re-run this fetch without that flag to "
@@ -294,6 +354,81 @@ def cmd_fetch(url, max_chars=DEFAULT_MAX_CHARS, timeout=45, no_browser=False,
                             "about the page's content — never report it as though the page "
                             "said nothing.")
     return body
+
+
+def cmd_fetch_bytes(url=None, urls=None, raw=False, max_bytes=2_000_000, timeout=60,
+                    no_render=False, trace=None, no_metrics=False):
+    """The `fetch-bytes` verb: origin bytes for hashing / verbatim transport.
+
+    Always-array contract, same as fetch-content. DEFAULT RESPONSE IS METADATA ONLY:
+    sha256 (over the ORIGIN'S BYTES, before any decode), size, content_type,
+    served_via, status, age_hours. Zero bytes transit to context unless raw=true,
+    which adds `content` (utf-8 text for text types, base64 for the rest) capped at
+    max_bytes — over-cap returns the metadata and says so, it never truncates silently.
+
+    `served_via`: "direct" = plain-HTTP client's view of the wire; "rendered" = the
+    bytes a LOCAL BROWSER was served (network-layer capture, not the DOM). Anti-bot
+    sites may answer differently per client; the field makes a hash honest about which
+    client produced it. Never the paid remote.
+    """
+    if no_metrics:
+        os.environ["RX_METRICS"] = "0"
+    targets, err = _batch_targets(url, urls)
+    if err:
+        return {"ok": False, "error": err}
+    if trace:
+        if isinstance(trace, str) and "/" not in str(trace) and "." not in str(trace):
+            trace = _home("traces", "fetchbytes-%s.jsonl" % time.strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(os.path.dirname(os.path.abspath(str(trace))), exist_ok=True)
+        os.environ["RXFETCH_TRACE"] = str(trace)
+        rxfetch.TRACE = str(trace)
+    results = _run_batch(
+        targets, lambda u: _fetch_bytes_one(u, timeout=timeout, allow_render=not no_render,
+                                            raw=raw, max_bytes=max_bytes))
+    body = {"ok": all(r and r.get("ok") for r in results), "results": results}
+    if trace:
+        body["trace"] = str(trace)
+    return body
+
+
+def _fetch_bytes_one(url, timeout, allow_render, raw, max_bytes):
+    r = rxfetch.fetch_bytes(url, timeout=timeout, allow_render=allow_render)
+    meta = dict(r.meta or {})
+    el = {"url": rxfetch.canonical_url(url), "ok": r.ok, "outcome": r.outcome}
+    if r.ok:
+        data = r.data or b""
+        el["sha256"] = hashlib.sha256(data).hexdigest()
+        el["size"] = len(data)
+        el["content_type"] = meta.get("content_type", "")
+        el["served_via"] = meta.get("served_via", "direct")
+        if meta.get("status") is not None:
+            el["status"] = meta["status"]
+        _age = getattr(r, "age_hours", None)
+        if _age is not None:
+            el["age_hours"] = round(_age, 1)
+        if raw:
+            if len(data) > max_bytes:
+                el["raw_included"] = False
+                el["raw_note"] = ("body is %d bytes over max_bytes=%d; metadata still valid"
+                                  % (len(data), max_bytes))
+            else:
+                el["raw_included"] = True
+                if "text" in el["content_type"] or el["content_type"].startswith(
+                        ("application/json", "application/xml")):
+                    el["content"] = data.decode("utf-8", "replace")
+                else:
+                    import base64 as _b64
+                    el["content_base64"] = _b64.b64encode(data).decode("ascii")
+    else:
+        el["size"] = None
+        if r.outcome == "unreachable":
+            el["next"] = ("the host did not answer at all. Check the URL or search for the "
+                          "resource; a bytes fetch never guesses.")
+        else:
+            el["next"] = ("the server answered but withheld the bytes, and the local render "
+                          "capture did not obtain them either. Do not report a hash you do "
+                          "not have.")
+    return el
 
 
 BROWSE_TASK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_task.py")
