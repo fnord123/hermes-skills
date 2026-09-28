@@ -27,6 +27,7 @@ ENV PYTHONUNBUFFERED=1 \
 # the pinned asset fetches below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb \
+        xauth \
         fontconfig \
         fonts-liberation \
         ca-certificates \
