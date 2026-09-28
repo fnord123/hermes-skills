@@ -1113,5 +1113,64 @@ import mcp_server as _mcps
 chk("the MCP registry lists fetch-content and fetch-bytes, and no plain fetch",
     {t["name"] for t in _mcps.TOOLS} == {"search", "fetch-content", "fetch-bytes", "do"})
 
+section("tools/call streams; silence cannot kill it (the 2026-09-27 300s lesson)")
+# Witnessed 2026-09-27: Hermes' streamable-HTTP httpx client read-timeout is
+# 300s BETWEEN BYTES; a healthy 367s do call answered on a silent POST, the
+# session died, the client auto-retried ONCE, and the retry forked a second
+# browser run. The facade must therefore keep bytes flowing for any call that
+# can run long. These tests pin the mechanism against a real socket.
+import http.client, socket, threading
+_saved_dispatch = _mcps._dispatch
+_srv = None
+try:
+    _sock = socket.socket(); _sock.bind(("127.0.0.1", 0)); _port = _sock.getsockname()[1]; _sock.close()
+    _srv = _mcps.make_server(port=_port)
+    threading.Thread(target=_srv.serve_forever, daemon=True).start()
+
+    def _rpc(payload):
+        c = http.client.HTTPConnection("127.0.0.1", _port, timeout=10)
+        c.request("POST", "/mcp", _json.dumps(payload),
+                  {"Content-Type": "application/json"})
+        r = c.getresponse()
+        body = r.read().decode("utf-8", "replace")
+        ctype = r.getheader("Content-Type") or ""
+        c.close()
+        return r.status, ctype, body
+
+    chk("tools/list still answers plain JSON (only tools/call streams)",
+        "application/json" in _rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})[1])
+
+    _mcps._dispatch = lambda name, args: {"ok": True, "echo": name}
+    st, ct, body = _rpc({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                         "params": {"name": "search", "arguments": {}}})
+    import re as _re
+    m = _re.search(r"event: message\ndata: (.*)\n\n", body)
+    chk("a fast tools/call rides an SSE stream whose message frame carries the reply",
+        st == 200 and "text/event-stream" in ct and m is not None
+        and _json.loads(m.group(1)).get("id") == 7
+        and "echo" in _json.loads(m.group(1))["result"]["content"][0]["text"])
+
+    _slow = threading.Event()
+    def _slow_dispatch(name, args):
+        _slow.wait(1.0)
+        return {"ok": True}
+    _mcps._dispatch = _slow_dispatch
+    _saved_ping = _mcps.STREAM_PING_SECS
+    _mcps.STREAM_PING_SECS = 0.1
+    try:
+        st, ct, body = _rpc({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                             "params": {"name": "do", "arguments": {}}})
+        first_ping = body.find(": ping")
+        msg_at = body.find("event: message")
+        chk("a slow tools/call pings BEFORE the reply (bytes never stop)",
+            first_ping != -1 and msg_at != -1 and first_ping < msg_at
+            and body.count(": ping") >= 2)
+    finally:
+        _mcps.STREAM_PING_SECS = _saved_ping
+finally:
+    _mcps._dispatch = _saved_dispatch
+    if _srv is not None:
+        _srv.shutdown()
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

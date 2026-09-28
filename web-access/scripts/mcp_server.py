@@ -10,17 +10,19 @@ facade and the HTTP API are two faces of handlers.py.
 
 Stdlib only, same reasoning as app.py. No web framework in the image.
 
-A `do` call blocks for up to the do-run budget (handlers.DO_TIMEOUT, 21 minutes
-for the 100-round default at the measured ~8.3s/round). That is expected: the
-MCP client holds the call open and the handler owns the child process. Profiles
-registering this server should give it a matching per-call timeout
-(timeout: 1320 in the mcp_servers entry), and treat `do` as a long-poll verb.
+A `do` call runs up to the do-run budget (handlers.DO_TIMEOUT, 21 minutes for
+the 100-round default at the measured ~8.3s/round). tools/call answers over an
+SSE stream with periodic pings, so client idle-read timeouts cannot sever a
+healthy long call (see _stream_reply). Profiles registering this server should
+still give it a matching per-call timeout (timeout: 1320 in the mcp_servers
+entry), and treat `do` as a long-poll verb.
 """
 
 import json
 import os
 import sys
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -28,6 +30,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app                                                 # noqa: E402
 
 MCP_PORT = int(os.environ.get("WEBACCESS_MCP_PORT") or 8911)
+# SSE keepalive cadence for the streamed `do` response (see _stream_reply):
+# must stay well under client read-timeouts between bytes (300 s observed on
+# the Hermes streamable-HTTP path — that cap killed run A and forked run B
+# as an auto-retry on 2026-09-27).
+STREAM_PING_SECS = float(os.environ.get("WEBACCESS_MCP_PING_SECS") or 20)
 PROTOCOL_VERSION = "2025-03-26"
 MAX_BODY = 1024 * 1024
 
@@ -216,9 +223,8 @@ def _handle_rpc(msg):
         return _rpc_result(rid, {"tools": TOOLS})
     if method == "tools/call":
         params = msg.get("params") or {}
-        # Synchronous on purpose: the POST waits out the verb (bounded by the
-        # verb's own budget — handlers.DO_TIMEOUT for do) and carries the answer
-        # back.
+        # The verb runs to completion here (bounded by handlers.DO_TIMEOUT for
+        # do); _stream_reply keeps bytes flowing to the client while it runs.
         body = _dispatch(params.get("name") or "", params.get("arguments") or {})
         text = json.dumps(body, ensure_ascii=False, indent=2)
         return _rpc_result(rid, {"content": [{"type": "text", "text": text}],
@@ -244,6 +250,58 @@ class _McpHandler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _stream_reply(self, msg):
+        """Answer tools/call over an SSE stream (spec-blessed for slow tools).
+
+        A worker thread runs the verb; the stream writes an SSE comment ping
+        every STREAM_PING_SECS so bytes keep flowing while it runs — that is
+        the whole point: clients cut responses that go silent mid-flight, not
+        ones that take long. The JSON-RPC reply rides the final `event:
+        message` frame, then the chunked body terminates and the connection
+        closes.
+        """
+        extra = {}
+        with STATE.lock:
+            if STATE.session:
+                extra["Mcp-Session-Id"] = STATE.session
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        for k, v in extra.items():
+            self.send_header(k, v)
+        self.end_headers()
+
+        box, done = {}, threading.Event()
+
+        def work():
+            try:
+                box["reply"] = _handle_rpc(msg)
+            except Exception as exc:                       # never strand the stream
+                box["reply"] = _rpc_error(msg.get("id"), -32603, str(exc))
+            finally:
+                done.set()
+
+        threading.Thread(target=work, daemon=True).start()
+
+        def chunk(data):
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            self.wfile.write(("%X\r\n" % len(data)).encode("ascii") + data + b"\r\n")
+            self.wfile.flush()
+
+        try:
+            while not done.wait(STREAM_PING_SECS):
+                chunk(b": ping\n\n")
+            reply = box.get("reply")
+            if reply is not None:      # None = notification: nothing to deliver
+                chunk("event: message\ndata: %s\n\n"
+                      % json.dumps(reply, ensure_ascii=False))
+            chunk(b"")                 # zero-length chunk terminates the body
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass                       # client hung up; the verb thread runs on (by design)
+        self.close_connection = True
 
     def do_GET(self):                                           # noqa: N802
         if self.path != "/mcp":
@@ -294,6 +352,16 @@ class _McpHandler(BaseHTTPRequestHandler):
                 raise ValueError("body must be a JSON-RPC object")
         except ValueError:
             self._send(400, {"ok": False, "error": "bad JSON-RPC body"})
+            return
+        # tools/call answers as an SSE stream (spec-blessed for exactly this):
+        # a verb can legitimately run minutes (do: the full agent run; fetch: the
+        # escalation ladder), and clients cut POSTs that fall silent between
+        # bytes (the streamable-HTTP httpx read timeout is 300s — witnessed
+        # 2026-09-27: it killed a healthy 367s do call and its auto-retry
+        # forked a second browser run). Pings keep bytes flowing; the JSON-RPC
+        # reply rides the final `event: message` frame.
+        if msg.get("method") == "tools/call":
+            self._stream_reply(msg)
             return
         reply = _handle_rpc(msg)
         extra = {}
