@@ -92,12 +92,13 @@ deliberate choice, because auto-escalation would mean the model could sign in or
 something without ever choosing to.
 
 ```
-python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 25] [--confirm]
+python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 100] [--confirm]
 ```
 
 Contract details: `status: complete` carries the answer; `needs_input` carries a question for
 the user; `max_rounds`/`timed_out` carry partial findings. Budgets differ from `fetch`'s
-escalation path — a standalone `do` runs up to **30 minutes**, versus the 900s agent rung
+escalation path — a standalone `do` runs up to **50 minutes** (100-round default),
+versus the 900s agent rung
 inside a `fetch` climb (*Timeout budget* below). Architecture, setup and the Fara scaffold are
 in the browser-tier part of the architecture section.
 
@@ -739,15 +740,23 @@ order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
   so old days are auto-cleaned by the OS (e.g. `systemd-tmpfiles` ages `/tmp`)
   instead of one file growing forever. Set `BROWSE_LOG` (or `BROWSE_TASK_LOG`) to
   a persistent path if you want to keep logs indefinitely.
-- Fara1.5-27B on a P40 is **slow** — each step processes a full screenshot; a task
-  can take minutes. `--max-steps` (default 25) bounds cost; the script also caps a
-  run at 30 minutes and, on timeout, kills the **whole** browser process group
-  (`start_new_session` + `killpg`) so no `Xvfb`/`chromium` is left orphaned.
-- Trajectories (per-round screenshots + `data_point.json`) are written to a temp folder and
-  discarded after the result is read — **unless** a trace is enabled. `trace_rounds()` reads the
-  per-round actions, the model's own reasoning, and the screenshot paths into the trace before
-  the folder is deleted, and `--keep-trajectory <dir>` copies the whole folder out. This is what
-  makes "what did the agent see, round by round" answerable after a run rather than lost.
+- The Fara model is **slow** — each step processes a full screenshot; a task
+  can take minutes. `--max-steps` (default 100, David 2026-09-27) bounds cost; the
+  script caps a run at `BROWSE_DO_TIMEOUT` (default 3000s) and, on timeout, kills the
+  **whole** browser process group (`start_new_session` + `killpg`) so no
+  `Xvfb`/`chromium` is left orphaned. The service parent budget
+  (`WEBACCESS_DO_TIMEOUT`, 3120s) sits above it so the child dies with its own
+  diagnostics; MCP/Hermes clients need a matching per-call timeout (~3180s).
+- Trajectories (per-round screenshots + `solver_log/events.jsonl` + `data_point.json`)
+  are written to a temp folder; after every run `persist_run()` copies them to
+  `<WEBACCESS_HOME>/do-runs/<stamp>-<host>/` on the state volume, appends one parseable
+  index line to `<WEBACCESS_HOME>/logs/do-runs.jsonl`, and logs `RUNDIR <path>` —
+  retention keeps the 20 most recent runs. This exists because rounds 14-30 of the
+  first live USPS run (2026-09-27) were unrecoverable when the temp dir was cleaned;
+  since then every run — including failures — is forensic by default. The run dir is
+  SERVER-side state; the model-facing response keeps its black-box shape.
+  `trace_rounds()` additionally folds per-round reasoning into a trace when
+  `RXFETCH_TRACE` is set, and `--keep-trajectory <dir>` copies the folder anywhere.
 - `data_point.json` fields consumed: `status` (`complete` / `waiting_for_user` /
   `max_rounds` / `timed_out` / `aborted`) and `outcome.answer`.
 

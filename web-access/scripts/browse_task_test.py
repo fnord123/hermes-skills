@@ -121,6 +121,51 @@ class BrowseTaskTest(unittest.TestCase):
         self.assertIn("Final Answer: $42", text)          # FULL agent output captured
         self.assertIn("RESULT", text)
 
+    # ── run forensics: the trajectory outlives the temp dir (09-27 lesson) ───
+    def test_run_persisted_to_state_volume(self):
+        home = self.tmp / "state-home"
+        rc, d = self.run_cmd("--task", "find the price", FAKE_STATUS="complete",
+                             FAKE_ANSWER="$42", WEBACCESS_HOME=str(home))
+        self.assertEqual(rc, 0)
+        runs = home / "do-runs"
+        dirs = sorted(p for p in runs.iterdir() if p.is_dir())
+        self.assertEqual(len(dirs), 1)
+        # the harness's own trail (events.jsonl + data_point.json) must be inside
+        self.assertTrue((dirs[0] / "solver_log" / "events.jsonl").exists())
+        self.assertTrue((dirs[0] / "data_point.json").exists())
+        # parseable index line, one per run
+        idx = (home / "logs" / "do-runs.jsonl").read_text().splitlines()
+        self.assertEqual(len(idx), 1)
+        rec = json.loads(idx[0])
+        self.assertEqual(rec["status"], "complete")
+        self.assertEqual(rec["steps"], 3)
+        self.assertEqual(rec["dir"], str(dirs[0]))
+        self.assertIn("RUNDIR", self.__class__.log.read_text())
+
+    def test_run_persist_survives_failure(self):
+        home = self.tmp / "state-home-fail"
+        rc, d = self.run_cmd("--task", "book it", "--confirm", FAKE_STATUS="max_rounds",
+                             WEBACCESS_HOME=str(home))
+        # the run failed, and THAT is exactly when the transcript matters most
+        self.assertEqual(rc, 1)
+        idx = json.loads((home / "logs" / "do-runs.jsonl").read_text().strip())
+        self.assertEqual(idx["status"], "max_rounds")
+        self.assertTrue(Path(idx["dir"]).exists())
+
+    def test_run_persistence_prunes_to_20(self):
+        home = self.tmp / "state-home-prune"
+        runs = home / "do-runs"
+        runs.mkdir(parents=True)
+        for i in range(25):   # stale names sort before any real timestamp
+            (runs / ("19700101-0000%02d-old" % i)).mkdir()
+        self.run_cmd("--task", "x", FAKE_STATUS="complete", WEBACCESS_HOME=str(home))
+        self.assertLessEqual(len([p for p in runs.iterdir() if p.is_dir()]), 20)
+
+    def test_default_step_budget_is_100(self):
+        self.run_cmd("--task", "find the price", FAKE_STATUS="complete")
+        rec = json.loads(self.__class__.record.read_text())
+        self.assertEqual(rec["max_rounds"], "100")       # David 2026-09-27: 100 default
+
     @unittest.skipUnless(HAS_XVFB, "xvfb-run not available")
     def test_headful_mode_wraps_with_xvfb(self):
         rc, d = self.run_cmd("--task", "x", FAKE_STATUS="complete", BROWSE_HEADFUL="auto")

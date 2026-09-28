@@ -4,7 +4,7 @@
 The HTTP API (:8910) and the MCP facade (:8911) serve the same handlers
 in one PID, so the service has one lifecycle, one env, and one place to
 look when it is down. Both are ThreadingHTTPServer: a `do` call blocks its
-thread for up to the 30-minute agent budget, and the rest of the service
+thread for up to the do-run budget (handlers.DO_TIMEOUT), and the rest of the service
 keeps answering.
 
 State re-pointing: rxfetch's historical defaults are home-tree paths on the

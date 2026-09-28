@@ -10,10 +10,11 @@ facade and the HTTP API are two faces of handlers.py.
 
 Stdlib only, same reasoning as app.py. No web framework in the image.
 
-A `do` call blocks for up to the 30-minute agent budget. That is expected:
-the MCP client holds the call open and the handler owns the child process.
-Profiles registering this server should give it a matching per-call timeout
-(timeout: 1950 in the mcp_servers entry).
+A `do` call blocks for up to the do-run budget (handlers.DO_TIMEOUT, 52 minutes
+for the 100-round default). That is expected: the MCP client holds the call
+open and the handler owns the child process. Profiles registering this server
+should give it a matching per-call timeout (timeout: 3180 in the mcp_servers
+entry), and treat `do` as a long-poll verb.
 """
 
 import json
@@ -123,7 +124,8 @@ TOOLS = [
                         "verb that can ACT on a site. Without confirm the run is strictly "
                         "read-only by instruction; confirm=true means the user approved "
                         "that exact action — use it only after that approval, never on a "
-                        "guess. A run can take several minutes; the service budgets 30."),
+                        "guess. A run can take up to ~50 minutes at the 100-round "
+                        "default; budget your call timeout accordingly."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -132,8 +134,8 @@ TOOLS = [
                               "description": "The site to start on. Name it whenever the "
                                              "task is about a particular site."},
                 "max_steps": {"type": "integer", "minimum": 1,
-                              "description": "Step budget. Default 25; raise for long "
-                                             "flows."},
+                              "description": "Step budget. Default 100; a full run may "
+                                             "take up to ~50 minutes."},
                 "confirm": {"type": "boolean",
                             "description": "true only after the user approved this exact "
                                            "action. Default false (strictly read-only "
@@ -215,7 +217,8 @@ def _handle_rpc(msg):
     if method == "tools/call":
         params = msg.get("params") or {}
         # Synchronous on purpose: the POST waits out the verb (bounded by the
-        # verb's own budget — 30 minutes for do) and carries the answer back.
+        # verb's own budget — handlers.DO_TIMEOUT for do) and carries the answer
+        # back.
         body = _dispatch(params.get("name") or "", params.get("arguments") or {})
         text = json.dumps(body, ensure_ascii=False, indent=2)
         return _rpc_result(rid, {"content": [{"type": "text", "text": text}],

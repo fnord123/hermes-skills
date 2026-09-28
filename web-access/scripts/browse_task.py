@@ -213,6 +213,11 @@ def browserbase_disabled(args, cfg):
 # how a 173-second cutoff came back as an unexplained "browser timed out".
 AGENT_RUN_TIMEOUT = int(os.environ.get("BROWSE_AGENT_TIMEOUT") or 900)
 
+# Budget for a full `do` run (the agent IS the task here, not a fetch rung).
+# Sized for the 100-round default at ~30s worst-case per round; handlers.DO_TIMEOUT
+# adds the parent margin so the child still dies with its own diagnostics.
+DO_RUN_TIMEOUT = int(os.environ.get("BROWSE_DO_TIMEOUT") or 3000)
+
 
 def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):
     """Layer 6 as a TEXT source: let the agent navigate, then take the landed page verbatim.
@@ -744,6 +749,50 @@ def probe_ladder(url, xvfb, has_bb, fara_python):
     return fallback, False
 
 
+def _runs_home():
+    """State root: the service's persistent volume (WEBACCESS_HOME) in the container."""
+    return Path(os.environ.get("WEBACCESS_HOME") or os.path.expanduser("~/.webaccess-home"))
+
+
+def persist_run(tmpdir, *, task, start_url, model, mode, status, steps, acted):
+    """Copy the agent's trajectory out of the temp dir before Python deletes it.
+
+    Rounds 1-13 of the first live USPS run survived only because a human grabbed
+    solver_log mid-flight (2026-09-27); everything after the tempdir cleanup was
+    unrecoverable. This makes every `do` run forensic by default: one directory per
+    run under <WEBACCESS_HOME>/do-runs/ (events.jsonl, data_point.json, every
+    screenshot), one index line per run in <WEBACCESS_HOME>/logs/do-runs.jsonl for
+    grep/jq, and a RUNDIR line in BROWSE_LOG. Retention: the 20 most recent runs.
+    The path stays SERVER-side — the model-facing response keeps its black-box shape.
+    """
+    try:
+        runs = _runs_home() / "do-runs"
+        runs.mkdir(parents=True, exist_ok=True)
+        files = sorted(glob.glob(os.path.join(tmpdir, "**", "data_point.json"),
+                                 recursive=True), key=os.path.getmtime)
+        src = Path(files[-1]).parent if files else Path(tmpdir)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        slug = re.sub(r"[^a-z0-9]+", "-", (start_url or "").split("//")[-1])
+        dest = runs / ("%s-%s" % (stamp, slug.strip("-")[:40] or "run"))
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(src, dest)
+        idx = {"ts": stamp, "task": (task or "")[:200], "start_url": start_url,
+               "model": model, "mode": mode, "status": status, "steps": steps,
+               "acted": acted, "dir": str(dest)}
+        logf = _runs_home() / "logs" / "do-runs.jsonl"
+        logf.parent.mkdir(parents=True, exist_ok=True)
+        with open(logf, "a") as f:
+            f.write(json.dumps(idx, ensure_ascii=False) + "\n")
+        for old in sorted(d for d in runs.iterdir() if d.is_dir())[:-20]:
+            shutil.rmtree(old, ignore_errors=True)
+        log("RUNDIR " + str(dest))
+        return str(dest)
+    except Exception as exc:                                    # noqa: BLE001
+        log("WARN: could not persist do run: %s" % type(exc).__name__)
+        return None
+
+
 def trace_rounds(output_dir, keep_dir=None):
     """Describe every page fara was shown, and what it decided to do about it.
 
@@ -864,8 +913,8 @@ def main():
                    help="how long to let the page settle before reading it")
     p.add_argument("--start-url", dest="start_url", default="https://www.bing.com/",
                    help="page to open first (default: a search engine)")
-    p.add_argument("--max-steps", dest="max_steps", type=int, default=25,
-                   help="cap on browser actions before giving up (default 25)")
+    p.add_argument("--max-steps", dest="max_steps", type=int, default=100,
+                   help="cap on browser actions before giving up (default 100)")
     p.add_argument("--confirm", action="store_true",
                    help="allow the agent to ACT (sign in, submit, buy, book, post, "
                         "send). Required for any state-changing task and only after "
@@ -1083,7 +1132,7 @@ def main():
 
         timed_out = False
         try:
-            stdout, stderr = proc.communicate(timeout=1800)
+            stdout, stderr = proc.communicate(timeout=DO_RUN_TIMEOUT)
         except subprocess.TimeoutExpired:
             timed_out = True
             try:
@@ -1094,7 +1143,7 @@ def main():
                 stdout, stderr = proc.communicate(timeout=30)
             except Exception:  # noqa: BLE001
                 stdout, stderr = "", ""
-            log("fara-cli TIMEOUT after 1800s; killed process group")
+            log(f"fara-cli TIMEOUT after {DO_RUN_TIMEOUT}s; killed process group")
 
         log(f"fara-cli exit={proc.returncode}")
         if stdout:
@@ -1108,6 +1157,11 @@ def main():
         trace("do:%s" % mode, "result", status=status, steps=steps, answer=(answer or "")[:1200])
         if timed_out and (status or "").lower() not in ("complete", "waiting_for_user"):
             status = "timed_out"
+        # Forensics first: the temp dir is deleted the instant this scope exits, and
+        # rounds past the last human snapshot were lost forever on 2026-09-27. Copy
+        # the trajectory to the state volume and index it BEFORE the scope ends.
+        persist_run(tmp, task=task, start_url=args.start_url, model=model, mode=mode,
+                    status=status, steps=steps, acted=bool(args.confirm))
 
     base = {"task": args.task, "acted": bool(args.confirm)}
     if steps is not None:

@@ -79,7 +79,7 @@ def _verb_do(p):
     return handlers.run_do(
         task=p.get("task") or "",
         start_url=p.get("start_url") or "https://www.bing.com/",
-        max_steps=int(p.get("max_steps") or 25),
+        max_steps=int(p.get("max_steps") or 100),
         confirm=bool(p.get("confirm")),
         cookies=p.get("cookies"),
         no_browserbase=bool(p.get("no_browserbase")))
