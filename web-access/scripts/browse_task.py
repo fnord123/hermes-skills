@@ -213,10 +213,13 @@ def browserbase_disabled(args, cfg):
 # how a 173-second cutoff came back as an unexplained "browser timed out".
 AGENT_RUN_TIMEOUT = int(os.environ.get("BROWSE_AGENT_TIMEOUT") or 900)
 
-# Budget for a full `do` run (the agent IS the task here, not a fetch rung).
-# Sized for the 100-round default at ~30s worst-case per round; handlers.DO_TIMEOUT
-# adds the parent margin so the child still dies with its own diagnostics.
-DO_RUN_TIMEOUT = int(os.environ.get("BROWSE_DO_TIMEOUT") or 3000)
+# Budget for a full `do` run (the agent IS the task, not a fetch rung).
+# Measured cadence on the live Fara brain: ~8.3s/round (action <3s; the rest is
+# page-settle + screenshot + 180k-token prompt), ~2 min cold start (David,
+# 2026-09-27). 100 rounds ≈ 950s worst case -> 1200s = ~35% headroom.
+# handlers.DO_TIMEOUT adds the parent margin so the child dies with its own
+# diagnostics, not a parent kill mid-stream.
+DO_RUN_TIMEOUT = int(os.environ.get("BROWSE_DO_TIMEOUT") or 1200)
 
 
 def run_agent_dump(url, mode, xvfb, cfg, wait_ms, max_steps=12):

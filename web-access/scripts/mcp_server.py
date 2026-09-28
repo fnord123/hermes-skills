@@ -10,11 +10,11 @@ facade and the HTTP API are two faces of handlers.py.
 
 Stdlib only, same reasoning as app.py. No web framework in the image.
 
-A `do` call blocks for up to the do-run budget (handlers.DO_TIMEOUT, 52 minutes
-for the 100-round default). That is expected: the MCP client holds the call
-open and the handler owns the child process. Profiles registering this server
-should give it a matching per-call timeout (timeout: 3180 in the mcp_servers
-entry), and treat `do` as a long-poll verb.
+A `do` call blocks for up to the do-run budget (handlers.DO_TIMEOUT, 21 minutes
+for the 100-round default at the measured ~8.3s/round). That is expected: the
+MCP client holds the call open and the handler owns the child process. Profiles
+registering this server should give it a matching per-call timeout
+(timeout: 1320 in the mcp_servers entry), and treat `do` as a long-poll verb.
 """
 
 import json
@@ -124,7 +124,7 @@ TOOLS = [
                         "verb that can ACT on a site. Without confirm the run is strictly "
                         "read-only by instruction; confirm=true means the user approved "
                         "that exact action — use it only after that approval, never on a "
-                        "guess. A run can take up to ~50 minutes at the 100-round "
+                        "guess. A run can take up to ~20 minutes at the 100-round "
                         "default; budget your call timeout accordingly."),
         "inputSchema": {
             "type": "object",

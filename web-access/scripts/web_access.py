@@ -125,7 +125,7 @@ def main():
             payload["cookies"] = args.cookies
         if args.no_browserbase:
             payload["no_browserbase"] = True
-        path, timeout = "/do", 3180
+        path, timeout = "/do", 1320
     if args.timeout is not None and args.cmd == "search":
         timeout = max(timeout, args.timeout)
 

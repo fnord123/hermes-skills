@@ -435,9 +435,9 @@ def _fetch_bytes_one(url, timeout, allow_render, raw, max_bytes):
 
 BROWSE_TASK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_task.py")
 # A standalone `do` is the whole run (the agent is the point, not a last resort).
-# Sized as a margin ABOVE browse_task.DO_RUN_TIMEOUT (3000, the 100-round default)
+# Margin ABOVE browse_task.DO_RUN_TIMEOUT (1200 = 100 rounds at measured ~8.3s)
 # so the child dies with its own diagnostics, not a parent kill mid-stream.
-DO_TIMEOUT = int(os.environ.get("WEBACCESS_DO_TIMEOUT") or 3120)
+DO_TIMEOUT = int(os.environ.get("WEBACCESS_DO_TIMEOUT") or 1260)
 
 
 def run_do(task, start_url="https://www.bing.com/", max_steps=100, confirm=False,

@@ -97,7 +97,8 @@ python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 100
 
 Contract details: `status: complete` carries the answer; `needs_input` carries a question for
 the user; `max_rounds`/`timed_out` carry partial findings. Budgets differ from `fetch`'s
-escalation path — a standalone `do` runs up to **50 minutes** (100-round default),
+escalation path — a standalone `do` runs up to **~21 minutes** (100 rounds at the
+measured ~8.3s cadence),
 versus the 900s agent rung
 inside a `fetch` climb (*Timeout budget* below). Architecture, setup and the Fara scaffold are
 in the browser-tier part of the architecture section.
@@ -740,13 +741,15 @@ order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
   so old days are auto-cleaned by the OS (e.g. `systemd-tmpfiles` ages `/tmp`)
   instead of one file growing forever. Set `BROWSE_LOG` (or `BROWSE_TASK_LOG`) to
   a persistent path if you want to keep logs indefinitely.
-- The Fara model is **slow** — each step processes a full screenshot; a task
-  can take minutes. `--max-steps` (default 100, David 2026-09-27) bounds cost; the
-  script caps a run at `BROWSE_DO_TIMEOUT` (default 3000s) and, on timeout, kills the
-  **whole** browser process group (`start_new_session` + `killpg`) so no
+- The Fara model is **slow** — each step processes a full screenshot; measured
+  cadence on the live brain is ~8.3s/round (action <3s; rest is settle +
+  screenshot + 180k-token prompt) with a ~2 min cold start. `--max-steps`
+  (default 100, David 2026-09-27) bounds cost; the script caps a run at
+  `BROWSE_DO_TIMEOUT` (default 1200s ≈ 100 rounds + 35% headroom) and, on timeout,
+  kills the **whole** browser process group (`start_new_session` + `killpg`) so no
   `Xvfb`/`chromium` is left orphaned. The service parent budget
-  (`WEBACCESS_DO_TIMEOUT`, 3120s) sits above it so the child dies with its own
-  diagnostics; MCP/Hermes clients need a matching per-call timeout (~3180s).
+  (`WEBACCESS_DO_TIMEOUT`, 1260s) sits above it so the child dies with its own
+  diagnostics; MCP/Hermes clients need a matching per-call timeout (1320s).
 - Trajectories (per-round screenshots + `solver_log/events.jsonl` + `data_point.json`)
   are written to a temp folder; after every run `persist_run()` copies them to
   `<WEBACCESS_HOME>/do-runs/<stamp>-<host>/` on the state volume, appends one parseable
