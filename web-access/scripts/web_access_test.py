@@ -869,10 +869,10 @@ min_tier = _fn("min_tier_for")
 # Measured 2026-08-23: plain http to a reddit post is an interstitial, and to /s/ or .json a 403.
 # The ladder still spent ATTEMPTS tries with 1s/2s backoff on every one of them before it was
 # allowed to escalate — the 06:31 failure burned 19.7s to learn what this table already knows.
-chk("reddit floors at the render tier", min_tier(POST_LL) == "firecrawl",
-    "(got %r)" % min_tier(POST_LL))
-chk("the floor applies to share links too", min_tier(SHARE_LL) == "firecrawl")
-chk("the floor follows the rewrite, not the raw host", min_tier(POST_OLD) == "firecrawl")
+chk("reddit floors at the mirror rung", min_tier(POST_LL) == "mirror",
+    "(got %r)" % min_tier(POST_LL))            # was "firecrawl" until 2026-10-14: mirrors answer
+chk("the floor applies to share links too", min_tier(SHARE_LL) == "mirror")
+chk("the floor follows the rewrite, not the raw host", min_tier(POST_OLD) == "mirror")
 chk("a site with no history has no floor", min_tier("https://example.com/a") is None,
     "(got %r)" % min_tier("https://example.com/a"))
 chk("the developer subdomain has no floor",
@@ -881,11 +881,11 @@ chk("the developer subdomain has no floor",
 # The floor has to change what the ladder DOES, not merely describe it. A floored host must reach
 # the renderer without spending a single http request first.
 _real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
-_seen = {"http": 0, "render": 0}
+_seen = {"http": 0, "render": 0, "mirror": 0}
 
 
 def _count_http(url, timeout, via="http"):
-    _seen["http"] += 1
+    _seen[via] = _seen.get(via, 0) + 1
     return rxfetch.Result("", "unreadable", "stub: bot wall"), False
 
 
@@ -899,14 +899,20 @@ try:
     with tempfile.TemporaryDirectory() as _td:
         rxfetch.configure(sources_dir=_td)
         _r = rxfetch.fetch(POST_LL, allow_browser=True)
-    chk("a floored host makes NO http request", _seen["http"] == 0, "(made %d)" % _seen["http"])
-    chk("a floored host still reaches the renderer", _seen["render"] == 1 and _r.ok)
+    # 2026-10-14: reddit's floor became "mirror" — the host makes NO canonical http request,
+    # but the mirror rung is an http-cost request to a DIFFERENT host. That is the doctrine:
+    # the wall lives at reddit's edge, so reddit itself is never re-asked cheaply.
+    chk("a mirrored host makes NO canonical reddit request", _seen["http"] == 0,
+        "(made %d)" % _seen["http"])
+    chk("a mirrored host tries the mirror rung", _seen.get("mirror", 0) >= 1)
+    chk("a mirrored host still reaches the renderer when mirrors fail",
+        _seen["render"] == 1 and _r.ok)
     chk("the trail says the cheap tiers were skipped, not that they failed",
         any(a.get("layer") == "http" and "skip" in str(a.get("result", "")).lower()
             for a in (_r.attempts or [])),
         "(trail: %r)" % [a.get("layer") for a in (_r.attempts or [])])
 
-    _seen["http"] = _seen["render"] = 0
+    _seen["http"] = _seen["render"] = _seen["mirror"] = 0
     with tempfile.TemporaryDirectory() as _td:
         rxfetch.configure(sources_dir=_td)
         rxfetch.fetch("https://example.com/page", allow_browser=True)
@@ -1171,6 +1177,80 @@ finally:
     _mcps._dispatch = _saved_dispatch
     if _srv is not None:
         _srv.shutdown()
+
+# ── the reddit mirror rung (2026-10-14) ───────────────────────────────────────────────────────
+# Measured that day from .226: every reddit surface — www/old HTML, .json, .rss, even
+# oauth.reddit.com — answers this egress with a wall or the block page, while a redlib mirror
+# serves the identical path for free. The rung swaps ONLY the host, never asks reddit cheaply
+# again, pins the winner, and never tells the client who served the page.
+section("the reddit mirror rung")
+
+BLOCK_PAGE = ("You've been blocked by network security. If you think you've been blocked by "
+              "mistake, file a ticket below and we'll look into it. [File a ticket]"
+              "(https://support.reddithelp.com/hc/en-us/requests/new?ticket_form_id=21879292693140)")
+CHALLENGE_STUB = ("[Skip to main content](https://www.reddit.com/r/LocalLLaMA/top/?"
+                  "solution=cd1dc360&js_challenge=1&jsc_token=2824be10#main-content)")
+chk("the 229-char network-security block page is unusable, not the document",
+    rxfetch.looks_unusable(BLOCK_PAGE))
+chk("the js_challenge stub is unusable, not the document",
+    rxfetch.looks_unusable(CHALLENGE_STUB))
+
+chk("reddit canonicals start at the mirror floor",
+    rxfetch.min_tier_for(POST_LL) == "mirror")
+_mir = rxfetch._redlib_url("https://old.reddit.com/r/x/comments/1abc/two/?limit=3&foo=bar",
+                           "mirror.example")
+chk("the rewrite is a host swap: path and query survive intact",
+    _mir == "https://mirror.example/r/x/comments/1abc/two/?limit=3&foo=bar", str(_mir))
+chk("a non-reddit url can never be mirrored",
+    rxfetch._redlib_url("https://example.com/r/x/", "mirror.example") is None)
+
+_real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
+_real_hosts = rxfetch.REDLIB_HOSTS
+try:
+    rxfetch.REDLIB_HOSTS = ["dead.example", "good.example"]
+    _tried = []
+
+    def _mirror_attempt(url, timeout, via="http"):
+        _tried.append(url)
+        if "dead.example" in url:
+            return rxfetch.Result("", "unreachable", "stub: no server"), True
+        return rxfetch.Result("thread " * 300, "ok", "stub mirror", via=via), False
+
+    rxfetch._one_attempt = _mirror_attempt
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r1 = rxfetch.fetch(POST_LL)
+        chk("dead instance first, then the winner — failover walked the list",
+            len(_tried) == 2 and "dead.example" in _tried[0] and "good.example" in _tried[1],
+            "%r" % _tried)
+        chk("the mirror answer wins the fetch", r1.ok and len(r1.text) > 1000)
+        chk("the winner is pinned for the next fetch",
+            "good.example" in open(rxfetch._redlib_pin_path(), encoding="utf-8").read())
+        chk("content is cached under the CANONICAL reddit key",
+            os.path.exists(rxfetch.cache_path(POST_LL)))
+        chk("mirror content carries no origin validators (no false revalidation of a swap)",
+            not os.path.exists(rxfetch.cache_path(POST_LL) + ".meta.json"))
+        chk("the answer is cached under the canonical key, one request later",
+            all("reddit.com" not in u for u in _tried))
+
+        _tried.clear()
+        r2 = rxfetch.fetch(POST_LL)
+        chk("the mirror copy replays from cache — zero requests", r2.ok and not _tried)
+
+        # BLACK BOX at the handler seam: the client body must never learn the instance.
+        import handlers                                                  # noqa: E402
+        _tried.clear()
+        _open = handlers._fetch_content_one(POST_LL, 4000, 10, True)
+        _blob = str(_open)
+        chk("the handler's client body names no rung and no instance",
+            "good.example" not in _blob and "dead.example" not in _blob
+            and "mirror" not in _blob and "via" not in _open,
+            "(keys: %r)" % sorted(_open))
+        chk("the client still gets the document itself",
+            _open["ok"] and "thread" in _open["text"])
+finally:
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
+    rxfetch.REDLIB_HOSTS = _real_hosts
 
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

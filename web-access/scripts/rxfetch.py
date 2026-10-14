@@ -127,7 +127,12 @@ WITHHELD_STATUS = {401, 403, 429}
 BOT_WALL_STRONG_RE = re.compile(
     r"checking your browser|just a moment|verify you are human|are you a robot"
     r"|attention required|needs javascript to work|site requires javascript"
-    r"|javascript is (not available|disabled|required)", re.I)
+    r"|javascript is (not available|disabled|required)"
+    # Reddit's network-security block page, measured 2026-10-14: a ~229-char HTTP 200 that
+    # READS LIKE PROSE ("You've been blocked by network security. If you think...") and so
+    # sailed past every length/prose rule and was served as the document. The challenge stub
+    # carries the same DNA in its link tokens. These phrases are block-page chrome, not body.
+    r"|blocked by network security|js_challenge|jsc_token", re.I)
 BOT_WALL_WEAK_RE = re.compile(
     r"enable javascript|captcha|access denied|cloudflare|403 forbidden", re.I)
 # The stealth browser annotates a page it could not get past with its own marker line. Matching
@@ -727,7 +732,13 @@ def canonical_url(url):
 # worth ATTEMPTS tries and exponential backoff to meet again: on 2026-08-23 that ceremony cost
 # 19.7s per reddit fetch before the ladder was permitted to escalate to the tier that works.
 # Keyed by canonical host, so a rule cannot be dodged by pasting an alias.
-HOST_MIN_TIER = {REDDIT_CANONICAL_HOST: "firecrawl"}
+HOST_MIN_TIER = {REDDIT_CANONICAL_HOST: "mirror"}
+# Re-measured 2026-10-14 from .226: reddit's edge now answers EVERY static surface from this
+# egress — www/old HTML unreadable (JS challenge), .json a challenge stub, .rss and even
+# oauth.reddit.com the "blocked by network security" page — while a redlib mirror serves the
+# identical path (subreddit views AND post pages with comment threads) over one plain request.
+# The floor therefore moved from "firecrawl" (a paid render per link) to "mirror" (a free
+# host-swap); "firecrawl" is the rollback value if every instance dies.
 
 
 def min_tier_for(url):
@@ -736,6 +747,68 @@ def min_tier_for(url):
         from urllib.parse import urlsplit                             # noqa: PLC0415
         return HOST_MIN_TIER.get((urlsplit(canonical_url(url)).hostname or "").lower())
     except Exception:                                                 # noqa: BLE001
+        return None
+
+
+# ── reddit mirror rung ────────────────────────────────────────────────────────────────────────
+# Redlib instances exist to serve exactly this traffic; the path structure is identical, so the
+# rewrite is a host swap. Two facts learned the hard way on 2026-10-14: instances CHURN (2 of 3
+# candidates were dead within the hour), and one instance is a fleet-wide dependency — so the
+# list is configuration, a known-good winner is pinned for a short window, and a dead or hung
+# instance costs ONE short attempt before the next is tried. Instance names stay in the trace
+# (internal): client-facing bytes never learn who served the page, same discipline as every
+# other rung name. This rung is TEXT-LANE ONLY: fetch-bytes promises ORIGIN bytes and a mirror
+# is not the origin — reddit bytes stay byte-lane-or-fail.
+REDLIB_HOSTS = [h.strip() for h in
+                (os.environ.get("REDLIB_HOSTS") or "safereddit.com").split(",") if h.strip()]
+REDLIB_TIMEOUT = int(os.environ.get("REDLIB_TIMEOUT", 20))   # per instance; hung != dead
+REDLIB_PIN_TTL = 6 * 3600
+
+
+def _redlib_pin_path():
+    return os.path.join(SOURCES, "_redlib_pin.json")
+
+
+def _redlib_order():
+    """Candidate instances, known-good pin first while it is fresh, then configured order."""
+    order = []
+    try:
+        d = json.load(open(_redlib_pin_path(), encoding="utf-8"))
+        if time.time() - d.get("ts", 0) <= REDLIB_PIN_TTL and d.get("host"):
+            order.append(d["host"])
+    except Exception:                                           # noqa: BLE001
+        pass
+    for h in REDLIB_HOSTS:
+        if h not in order:
+            order.append(h)
+    return order
+
+
+def _redlib_pin(host):
+    """Remember which instance just worked, atomically; failure here is never a fetch failure."""
+    try:
+        os.makedirs(SOURCES, exist_ok=True)
+        tmp = "%s.%d.tmp" % (_redlib_pin_path(), os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"host": host, "ts": time.time()}, fh)
+        os.replace(tmp, _redlib_pin_path())
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def _redlib_url(url, host):
+    """`url` served by mirror `host`: scheme/path/query preserved — one document, one path.
+
+    Returns None for anything that is not a reddit content URL, so a non-reddit fetch can
+    never be re-pointed by a bug in this module.
+    """
+    try:
+        from urllib.parse import urlsplit, urlunsplit                # noqa: PLC0415
+        p = urlsplit(url)
+        if (p.hostname or "").lower() not in REDDIT_CONTENT_HOSTS:
+            return None
+        return urlunsplit(("https", host, p.path or "/", p.query, ""))
+    except Exception:                                                # noqa: BLE001
         return None
 
 
@@ -1061,6 +1134,7 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
 
         cache        a file we already wrote               free, no request
         ncbi-api     NCBI URLs ONLY - NCBI's own API       one request, no bot wall
+        mirror       REDDIT URLs ONLY - redlib host swap   one request, no bot wall
         http         the page itself, retried              one request
         browser      a real browser renders it             seconds, a whole process
 
@@ -1172,7 +1246,20 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
     # recorded on the trail rather than being silent: a tier that never ran and a tier that failed
     # are different facts, and a reader who cannot tell them apart cannot audit the ladder.
     floor = min_tier_for(url)
-    if floor:
+    mirrors = []
+    if floor == "mirror":
+        # Reddit: the mirror rung takes the http rung's place — same cost (one plain request),
+        # and it is the only surface measured to answer. Canonical http stays skipped: its
+        # occasional challenge-lottery win is page chrome without the document, and a mirror
+        # answers the same path in full. The instance host is trace-only (internal).
+        _note("http", "skipped (this host answers the cheap tiers with a wall)")
+        for host in _redlib_order():
+            m = _redlib_url(url, host)
+            if m:
+                mirrors.append(host)
+                targets.append((m, "mirror"))
+        last = Result("", "unreadable", "cheap tiers skipped: this host starts at mirror")
+    elif floor:
         _note("http", "skipped (this host answers the cheap tiers with a wall)")
         last = Result("", "unreadable", "cheap tiers skipped: %s starts at %s"
                       % (_host_of(url), floor))
@@ -1182,24 +1269,39 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
 
     for target, via in targets:
         delay = 1.0
-        for attempt in range(ATTEMPTS):
+        # A mirror instance gets ONE short attempt: dead instances fail fast on their own, and a
+        # hung one must cost REDLIB_TIMEOUT, not ATTEMPTS backoffs before the next is tried.
+        tries = 1 if via == "mirror" else ATTEMPTS
+        tmo = REDLIB_TIMEOUT if via == "mirror" else timeout
+        for attempt in range(tries):
             t0 = time.time()
-            res, retryable = _one_attempt(target, timeout, via=via)
+            res, retryable = _one_attempt(target, tmo, via=via)
             ms = int((time.time() - t0) * 1000)
             _note(via, "%s: %s" % (res.outcome, res.detail), attempt=attempt + 1,
                   ms=ms, target=target, chars=len(res.text or ""))
             if res.ok:
-                # meta=None would leave an old sidecar paired to NEW content — always pass the
-                # verdict for this content (empty dict = delete).
-                _write_cache(path, res.text, meta=res.meta)
+                # Mirror content carries the MIRROR's validators at best; the cache revalidator
+                # asks the canonical origin, so store it validator-free like browser content —
+                # the fresh window then re-runs the ladder instead of re-certifying a swap.
+                _write_cache(path, res.text, meta=({} if via == "mirror" else res.meta))
+                if via == "mirror" and mirrors:
+                    _redlib_pin(_host_of(target))
                 _purge_negative(url)
                 res.attempts = trail
                 return res
             last = res
-            if not retryable or attempt == ATTEMPTS - 1:
+            if not retryable or attempt == tries - 1:
                 break
             time.sleep(delay)
             delay *= 2
+
+    if mirrors and last.outcome != "unreadable":
+        # Every instance dead is not "unreachable, browser pointless": the document may still
+        # be alive on reddit behind a render that wins the challenge. Normalize so the paid
+        # rungs still get their chance, exactly as the pre-mirror floor did.
+        _note("mirror", "exhausted (%d instance(s)) — escalating to the render rungs"
+              % len(mirrors))
+        last = Result("", "unreadable", last.detail)
 
     # Last, and only when asked: drive a real browser. This tier is ORDERS of magnitude more
     # expensive than the ones above - a browser process, a page render, seconds instead of
