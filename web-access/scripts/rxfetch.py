@@ -143,6 +143,26 @@ BOT_WALL_WEAK_RE = re.compile(
 JS_RENDERABLE_WALL_RE = re.compile(
     r"making sure you're not a bot|verifying your browser|anubis"
     r"|checking your browser|just a moment|verify you are human", re.I)
+
+
+def _wall_verdict(text):
+    """Name the wall BEFORE trusting the structure. Measured 2026-10-18: a 1.3KB Anubis
+    challenge page carries real prose and passed looks_unusable's structural heuristics —
+    it was served as CONTENT (ok:true) through the whole ladder. A page under 6000 chars
+    carrying a JS-gate phrase IS the gate, whatever its prose reads like. Between 6000 and
+    SUBSTANTIAL_CHARS the existing strong-marker doctrine still condemns the page (David's
+    design — this function only RENAMES that verdict as the JS family so the ladder aims the
+    render at the gated mirror); at >=SUBSTANTIAL_CHARS the substantial-text rule protects a
+    document that merely MENTIONS such phrases. Order is the contract: phrase test first.
+    """
+    if text and JS_RENDERABLE_WALL_RE.search(text[:4000]):
+        if len(text) < 6000:
+            return "JS challenge wall (%d chars)" % len(text)
+    if looks_unusable(text):
+        if JS_RENDERABLE_WALL_RE.search(text[:4000]):
+            return "JS challenge wall (%d chars)" % len(text)
+        return "interstitial or empty (%d chars)" % len(text)
+    return None
 # The stealth browser annotates a page it could not get past with its own marker line. Matching
 # the marker rather than the wall's wording is what makes it length-proof: it is emitted by our
 # own tooling, so a document that merely discusses captchas cannot produce it.
@@ -463,14 +483,12 @@ def _one_attempt(url, timeout, via='http', conditional=None):
     else:
         text = _html_to_text(raw.decode("utf-8", "ignore"))
 
-    if looks_unusable(text):
-        # 200 with an interstitial. Worth one more try: a throttle often answers this way, and
-        # a throttled failure is not a document. The verdict names the WALL FAMILY because the
-        # body is about to be dropped, and "a browser would pass this gate" is a fact the ladder
-        # needs downstream to pick its escalation target (mirror render vs canonical render).
-        verdict = "interstitial or empty (%d chars)" % len(text)
-        if JS_RENDERABLE_WALL_RE.search(text[:4000]):
-            verdict = "JS challenge wall (%d chars)" % len(text)
+    verdict = _wall_verdict(text)
+    if verdict:
+        # 200 with an interstitial or a challenge gate — not a document. The verdict names the
+        # WALL FAMILY because the body is about to be dropped, and "a browser would pass this
+        # gate" is a fact the ladder needs downstream to pick its escalation target (mirror
+        # render vs canonical render).
         return Result("", "unreadable", verdict), True
     # Origin validators, kept only for direct-http content: an eutils ETag does not
     # revalidate the paper URL it stands for, and a browser rung never sees the origin's

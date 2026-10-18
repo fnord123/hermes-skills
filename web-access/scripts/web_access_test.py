@@ -1260,6 +1260,47 @@ finally:
 # never yielded to a render of ours — 900s, zero findings, 2026-10-14).
 section("the JS challenge wall renders the mirror")
 
+# The exact miss of 2026-10-18, pinned: an Anubis gate WITH REAL PROSE (~1.3KB) passed
+# looks_unusable's structural heuristics and was served as ok:true CONTENT. The phrase test
+# must run first, and small + phrase = gate regardless of how document-like the prose is.
+ANUBIS_PROSE_PAGE = (
+    "Verifying your browser\n\nCalculating...\nDifficulty: 2, Speed: 0kH/s\n\n"
+    "You are seeing this because the administrator of this website has set up Anubis to "
+    "protect the server against the scourge of AI companies aggressively scraping websites. "
+    "This can and does cause downtime for the websites, which makes their resources "
+    "inaccessible for everyone. Anubis is a compromise. Anubis uses a Proof-of-Work scheme "
+    "in the vein of Hashcash, a proposed proof-of-work scheme for reducing email spam. The "
+    "idea is that at individual scales the additional load is ignorable, but at mass scraper "
+    "levels it adds up and makes scraping much more expensive. Ultimately, this is a "
+    "placeholder solution so that more time can be spent on fingerprinting and identifying "
+    "headless browsers via font rendering so that the challenge proof of work page doesn't "
+    "need to be presented to users that are much more likely to be legitimate. Please note "
+    "that Anubis requires the use of modern JavaScript features. Disable blockers.")
+chk("the 1.3KB Anubis prose page is a WALL, not a document (the miss of 2026-10-18)",
+    (rxfetch._wall_verdict(ANUBIS_PROSE_PAGE) or "").startswith("JS challenge wall"))
+LONG_DOC_WITH_PHRASE = ("A survey of web bot-management systems notes that Cloudflare shows "
+                        'a "Just a moment" interstitial while solving challenges, and that '
+                        "Anubis uses proof-of-work gates to shed scrapers. " +
+                        " ".join("Chapter %d examines %s, where the deployment was measured "
+                                 "against a strict latency budget and operators reported mixed "
+                                 "results for vendor %d." % (i, ["TLS fingerprinting",
+                                 "font-render probes", "challenge budgets", "cookie attestation"][i % 4],
+                                 i) for i in range(60)))
+# Pre-existing doctrine (BOT_WALL_STRONG_RE, David's design): a strong wall marker condemns the
+# page under SUBSTANTIAL_CHARS (20K) regardless of length. _wall_verdict does NOT change that
+# verdict — it NAMES the family so the ladder can pick its render aim. Two honest pins follow.
+chk("mid-length doc with a strong marker: rejected (pre-existing doctrine), now NAMED as JS wall",
+    (rxfetch._wall_verdict(LONG_DOC_WITH_PHRASE) or "").startswith("JS challenge wall"))
+VERY_LONG_DOC = LONG_DOC_WITH_PHRASE + ("Additional appendix material with distinct observations "
+                                        "about measurement error bars across every vendor. " * 120)
+chk("a >=20K doc merely mentioning gate phrases survives — the substantial-text rule predates "
+    "the wall-naming and is untouched",
+    len(VERY_LONG_DOC) >= 20000 and rxfetch._wall_verdict(VERY_LONG_DOC) is None)
+chk("ordinary small clean prose is not a wall",
+    rxfetch._wall_verdict("A perfectly readable short article about quokkas. " * 9) is None)
+chk("structural garbage still reads as interstitial (family preserved)",
+    (rxfetch._wall_verdict("   \n\t\n  ") or "").startswith("interstitial or empty"))
+
 ANUBIS_STUB = ("Making sure you&#39;re not a bot! body, html { height: 100%; display: flex; } "
                "#status { font-variant-numeric: tabular-nums; } Powered by Anubis")
 chk("an Anubis gate reads as a wall a browser dissolves",
