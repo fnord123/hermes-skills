@@ -135,6 +135,14 @@ BOT_WALL_STRONG_RE = re.compile(
     r"|blocked by network security|js_challenge|jsc_token", re.I)
 BOT_WALL_WEAK_RE = re.compile(
     r"enable javascript|captcha|access denied|cloudflare|403 forbidden", re.I)
+# The subset of walls a REAL BROWSER dissolves: JS proof-of-work gates (Anubis — "Making sure
+# you're not a bot!", measured 2026-10-16 across the public redlib fleet — and Cloudflare's
+# JS challenge family). Distinguished from other refusals because escalation is not a lottery:
+# these gates are DESIGNED to pass browsers, so rendering them is a near-guarantee, while
+# rendering a block page ("blocked by network security") would just animate the wall.
+JS_RENDERABLE_WALL_RE = re.compile(
+    r"making sure you're not a bot|verifying your browser|anubis"
+    r"|checking your browser|just a moment|verify you are human", re.I)
 # The stealth browser annotates a page it could not get past with its own marker line. Matching
 # the marker rather than the wall's wording is what makes it length-proof: it is emitted by our
 # own tooling, so a document that merely discusses captchas cannot produce it.
@@ -457,8 +465,13 @@ def _one_attempt(url, timeout, via='http', conditional=None):
 
     if looks_unusable(text):
         # 200 with an interstitial. Worth one more try: a throttle often answers this way, and
-        # a throttled failure is not a document.
-        return Result("", "unreadable", "interstitial or empty (%d chars)" % len(text)), True
+        # a throttled failure is not a document. The verdict names the WALL FAMILY because the
+        # body is about to be dropped, and "a browser would pass this gate" is a fact the ladder
+        # needs downstream to pick its escalation target (mirror render vs canonical render).
+        verdict = "interstitial or empty (%d chars)" % len(text)
+        if JS_RENDERABLE_WALL_RE.search(text[:4000]):
+            verdict = "JS challenge wall (%d chars)" % len(text)
+        return Result("", "unreadable", verdict), True
     # Origin validators, kept only for direct-http content: an eutils ETag does not
     # revalidate the paper URL it stands for, and a browser rung never sees the origin's
     # headers at all. The cache sidecar records these so a later read can ASK the origin
@@ -1247,6 +1260,7 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
     # are different facts, and a reader who cannot tell them apart cannot audit the ladder.
     floor = min_tier_for(url)
     mirrors = []
+    mirror_wall = ""   # first mirror URL that answered with a JS challenge (Anubis family)
     if floor == "mirror":
         # Reddit: the mirror rung takes the http rung's place — same cost (one plain request),
         # and it is the only surface measured to answer. Canonical http stays skipped: its
@@ -1290,6 +1304,12 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
                 res.attempts = trail
                 return res
             last = res
+            if via == "mirror" and not mirror_wall and res.detail.startswith("JS challenge wall"):
+                # The instance is ALIVE — it is running a gate that passes browsers. Remember
+                # where the document demonstrably lives; that URL, not the canonical (whose own
+                # wall no render of ours has ever won, measured 2026-10-14: 900s, zero findings),
+                # is what the render rungs should knock on.
+                mirror_wall = target
             if not retryable or attempt == tries - 1:
                 break
             time.sleep(delay)
@@ -1309,19 +1329,25 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
     # a caller that opted in. It is also the only tier that can read a JavaScript-rendered page,
     # which is why `unreadable` was previously a dead end that sent the work back to the user.
     if allow_browser and last.outcome == "unreadable":
+        # Anubis corollary (2026-10-16): when a mirror served a JS challenge wall, the document
+        # is behind THAT gate — and the gate is designed to admit browsers. Render the mirror
+        # copy, not the canonical: reddit's own edge defeats renderers too, redlib's does not.
+        render_target = mirror_wall or url
+        if mirror_wall:
+            _note("mirror", "JS challenge wall — rendering the mirror copy, not the canonical url")
         # Tier 4: Firecrawl (self-hosted JS render -> full markdown), replacing the retired
         # headless/headful local render (_browser_attempt, kept below for reference/rollback).
-        res = _firecrawl_attempt(url, timeout)
+        res = _firecrawl_attempt(render_target, timeout)
         _note("firecrawl", "%s: %s" % (res.outcome, res.detail), chars=len(res.text or ""))
         # Tier 5: bladebro stealth render — only if Firecrawl was blocked. The last FREE rung.
         if not res.ok:
-            b = _bladebro_attempt(url, timeout)
+            b = _bladebro_attempt(render_target, timeout)
             _note("bladebro", "%s: %s" % (b.outcome, b.detail), chars=len(b.text or ""))
             if b.ok:
                 res = b
         # Tier 6: browserbase (paid, remote stealth) — only if both free rungs failed AND enabled.
         if not res.ok:
-            bb = _browserbase_attempt(url, timeout)
+            bb = _browserbase_attempt(render_target, timeout)
             _note("browserbase", "%s: %s" % (bb.outcome, bb.detail), chars=len(bb.text or ""))
             if bb.ok:
                 res = bb

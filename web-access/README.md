@@ -228,7 +228,7 @@ text, reporting which one did in `via`:
 |---|---|---|---|---|
 | 1 | `cache` | reads a file we wrote earlier, keyed by URL hash | none | free — no network at all |
 | 2 | `ncbi-api` | one HTTPS GET to NCBI E-utilities (`efetch`). **NCBI URLs only** | none | one request, no bot wall |
-| 2b | `mirror` | redlib host swap for **reddit URLs only** — same path, an instance that answers; instances churn, so the list is config (`REDLIB_HOSTS`) and the winner is pinned 6h. Text lane only: `fetch-bytes` promises ORIGIN bytes and a mirror is not the origin | none | one request, no bot wall |
+| 2b | `mirror` | redlib host swap for **reddit URLs only** — same path, an instance that answers; instances churn, so the list is config (`REDLIB_HOSTS`) and the winner is pinned 6h. An instance answering with a JS challenge wall (Anubis) sends the **mirror URL** to the render rungs — the gate admits browsers; the canonical's wall does not. Text lane only: `fetch-bytes` promises ORIGIN bytes and a mirror is not the origin | none (render only if gated) | one request, no bot wall |
 | 3 | `http` | one `urllib` GET, retried with backoff; HTML stripped to text by regex, PDFs by PyMuPDF | none | one request |
 | 4 | `firecrawl` | self-hosted Firecrawl (`.226:3002`) renders the page (its Playwright pool runs the JS) and returns clean, **full** markdown | none | one request to a local service |
 | 5 | `browser:bladebro` | the bladebro **stealth** browser, one-shot in a fresh container, reached ONLY when Firecrawl is blocked — its edge is aggressive commercial anti-bot (e.g. Amazon). Returns bladebro's distilled content | none | ~seconds, a fresh container + Chromium |

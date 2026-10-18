@@ -1252,5 +1252,75 @@ finally:
     rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
     rxfetch.REDLIB_HOSTS = _real_hosts
 
+# ── the JS challenge wall renders the MIRROR (Anubis, 2026-10-16) ───────────────────────────
+# Measured that day: the public redlib fleet fronts anonymous visitors with Anubis
+# ("Making sure you're not a bot!"), a JS proof-of-work gate. Plain HTTP can't solve it;
+# a browser passes by design. These pins hold the ONE decision that makes it safe: the render
+# targets the mirror URL that showed the gate, never the canonical (reddit's own edge has
+# never yielded to a render of ours — 900s, zero findings, 2026-10-14).
+section("the JS challenge wall renders the mirror")
+
+ANUBIS_STUB = ("Making sure you&#39;re not a bot! body, html { height: 100%; display: flex; } "
+               "#status { font-variant-numeric: tabular-nums; } Powered by Anubis")
+chk("an Anubis gate reads as a wall a browser dissolves",
+    bool(rxfetch.JS_RENDERABLE_WALL_RE.search(ANUBIS_STUB)))
+chk("reddit's network-security block page is NOT renderable chrome — rendering animates a wall",
+    not rxfetch.JS_RENDERABLE_WALL_RE.search(BLOCK_PAGE))
+
+_real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
+_real_hosts = rxfetch.REDLIB_HOSTS
+try:
+    rxfetch.REDLIB_HOSTS = ["gate1.example", "gate2.example"]
+    _seen_js = {"mirror": [], "render": []}
+
+    def _walled(url, timeout, via="http"):
+        _seen_js["mirror"].append(url)
+        return rxfetch.Result("", "unreadable", "JS challenge wall (330 chars)"), True
+
+    def _render(url, timeout):
+        _seen_js["render"].append(url)
+        return rxfetch.Result("thread " * 300, "ok", "stub render", via="firecrawl")
+
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _walled, _render
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r = rxfetch.fetch(POST_LL, allow_browser=True)
+        chk("both gated instances were walked", len(_seen_js["mirror"]) == 2)
+        chk("the JS wall escalates exactly ONE render", len(_seen_js["render"]) == 1)
+        chk("the render targets the gated MIRROR url, never the canonical",
+            _seen_js["render"][0].startswith("https://gate1.example"), _seen_js["render"][0])
+        chk("the document arrives", r.ok and len(r.text) > 1000)
+        chk("the mirror-rendered copy caches under the canonical key",
+            os.path.exists(rxfetch.cache_path(POST_LL)))
+        chk("the trail names the redirect of aim (internal trace only)",
+            any("mirror copy" in str(a.get("result", "")) for a in (r.attempts or [])))
+        chk("a render win does NOT pin an http instance (it never served ok over http)",
+            not os.path.exists(rxfetch._redlib_pin_path()))
+
+        _seen_js["mirror"].clear()
+        _seen_js["render"].clear()
+        r2 = rxfetch.fetch(POST_LL, allow_browser=True)
+        chk("the rendered document replays from cache — zero requests, zero renders",
+            r2.ok and not _seen_js["mirror"] and not _seen_js["render"])
+
+    # The corollary must NOT leak: a non-JS refusal keeps the legacy escalation (canonical),
+    # because "a browser would pass this" was never established for any host.
+    _seen_js["mirror"].clear()
+    _seen_js["render"].clear()
+
+    def _withheld(url, timeout, via="http"):
+        return rxfetch.Result("", "unreadable", "HTTP 403"), False
+
+    rxfetch._one_attempt = _withheld
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r3 = rxfetch.fetch(POST_LL, allow_browser=True)
+    chk("a non-JS mirror refusal still renders the canonical (legacy path intact)",
+        len(_seen_js["render"]) == 1 and _seen_js["render"][0] == POST_LL,
+        "%r" % _seen_js["render"])
+finally:
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
+    rxfetch.REDLIB_HOSTS = _real_hosts
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
