@@ -141,8 +141,11 @@ Agents run with file tools on this machine as `dputzolu`. Today the orchestrator
 `config.env` (LiteLLM/browserbase keys), the page cache and `learned.json` are all readable by
 any agent that goes looking — the credential guard filters *terminal command text*, not
 `read_file`. Moving them into a container removes that class of exposure structurally rather
-than by another text filter. It also deletes bladebro's SSH hop (the service runs beside it on
-`.226`) and creates one place where every fetch can be audited.
+than by another text filter. Bladebro's SSH hop dies in the same move — but only once
+`BLADEBRO_SSH=sh -c` is set in `webaccess/.env` (the code default is the host-era `ssh docker`
+transport, and there is no ssh binary in the image: unset means the tier fails
+FileNotFoundError — measured 2026-10-18; the container spawns the one-shot itself through the
+mounted docker.sock). One place where every fetch can be audited.
 
 ## Deploy config (`service.yaml`)
 
@@ -231,15 +234,18 @@ text, reporting which one did in `via`:
 | 2b | `mirror` | redlib host swap for **reddit URLs only** — same path, an instance that answers; instances churn, so the list is config (`REDLIB_HOSTS`) and the winner is pinned 6h. An instance answering with a JS challenge wall (Anubis) sends the **mirror URL** to the render rungs — the gate admits browsers; the canonical's wall does not. Text lane only: `fetch-bytes` promises ORIGIN bytes and a mirror is not the origin | none (render only if gated) | one request, no bot wall |
 | 3 | `http` | one `urllib` GET, retried with backoff; HTML stripped to text by regex, PDFs by PyMuPDF | none | one request |
 | 4 | `firecrawl` | self-hosted Firecrawl (`.226:3002`) renders the page (its Playwright pool runs the JS) and returns clean, **full** markdown | none | one request to a local service |
-| 5 | `browser:bladebro` | the bladebro **stealth** browser, one-shot in a fresh container, reached ONLY when Firecrawl is blocked — its edge is aggressive commercial anti-bot (e.g. Amazon). Returns bladebro's distilled content | none | ~seconds, a fresh container + Chromium |
+| 5 | `browser:bladebro` | the bladebro **stealth** browser, one-shot in a fresh container spawned via the mounted docker.sock (`BLADEBRO_SSH=sh -c`), reached ONLY when Firecrawl is blocked — its edge is the walls Firecrawl's pool cannot pass (Anubis PoW, measured 2026-10-18; aggressive commercial anti-bot, e.g. Amazon). Returns bladebro's distilled content | none | ~seconds, a fresh container + Chromium |
 | 6 | `browserbase` | a **remote managed** Chromium built to defeat bot detection; **OFF by default** (`WEB_ALLOW_BROWSERBASE=1` to enable), driven via `browse_task --mode browserbase` | none | seconds **plus money** — metered third party |
 
 **Render order is cheapest-that-works, and each rung escalates only on a *detected* failure**
 (HTTP shell/interstitial → Firecrawl; Firecrawl blocked/empty → bladebro; both free rungs
 failed → browserbase). The complementary A/B is the reason for the order: Firecrawl wins
-JS/full-text/speed and clears most walls, while bladebro's narrow win is stealth against the
-hardest commercial anti-bot — so trying Firecrawl then bladebro covers each one's blind spot
-for free before paying.
+JS/full-text/speed, while bladebro's narrow win is stealth — measured 2026-10-18, that split
+has one named member: Firecrawl's Playwright pool does NOT solve Anubis proof-of-work (its
+challenge page reports 0kH/s rendered); bladebro passes it. **A render's OUTPUT faces the same
+wall verdict the http bodies face** (`_render_guard`): a browser that could not pass a gate
+returns the gate, and that is a FAILED rung, never content — the wall as ok:true was served
+exactly once, on the day both halves of this were discovered.
 
 **Order is by cost, and `browserbase` is always last.** Layers 4, 5 and 6 all use the same
 free local browser and differ in how hard they try. Spending the model is cheaper than
