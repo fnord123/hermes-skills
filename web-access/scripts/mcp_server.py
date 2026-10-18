@@ -75,7 +75,12 @@ TOOLS = [
                         "A result may carry age_hours: how old the served copy is (0 after the "
                         "origin re-certified it); absence means fetched live just now. Never "
                         "report an unread page as empty. For byte-exact content or a hash, "
-                        "use fetch-bytes instead — this tool extracts text and truncates."),
+                        "use fetch-bytes instead — this tool extracts text and truncates. "
+                        "This is the fleet's sanctioned web-retrieval lane: never shell-fetch "
+                        "a page with curl, wget, or urllib. max_chars truncates from the top "
+                        "— there is no range or offset fetch; when the runtime saves an "
+                        "oversized result whole to a local file, page that file instead of "
+                        "re-requesting the URL."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -105,7 +110,10 @@ TOOLS = [
                         "DOM) — anti-bot sites can answer different clients differently, so "
                         "the field keeps a hash honest about which view it hashes. Never "
                         "uses the paid remote browser. Response shape is always "
-                        "{ok, results: [...]}, same batching rules as fetch-content."),
+                        "{ok, results: [...]}, same batching rules as fetch-content. "
+                        "Same sanctioned lane: never shell-fetch bytes directly. "
+                        "Re-requesting a URL replays its cache entry — a second request "
+                        "is not independent verification of the first."),
         "inputSchema": {
             "type": "object",
             "properties": {

@@ -1403,5 +1403,26 @@ finally:
     rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
     rxfetch.REDLIB_HOSTS = _real_hosts
 
+# ── the tool descriptions ARE the contract ───────────────────────────────────────────────────
+# The registry header states it: models read the TOOLS descriptions, not a prose file. On
+# 2026-10-18 an agent still reached for curl/urllib to read a page anyway — so the lane rule,
+# the no-range truth, and the spillover-is-the-local-copy rule live IN the descriptions
+# (fleet-wide reach), and these pins keep them from rotting out of it.
+section("tool descriptions carry the retrieval-lane contract")
+import mcp_server as _mcp_srv                                    # noqa: E402
+_fc_desc = next(t for t in _mcp_srv.TOOLS if t["name"] == "fetch-content")["description"]
+_fb_desc = next(t for t in _mcp_srv.TOOLS if t["name"] == "fetch-bytes")["description"]
+chk("fetch-content names itself the sanctioned retrieval lane",
+    "sanctioned web-retrieval lane" in _fc_desc)
+chk("fetch-content names the forbidden shell fetchers",
+    all(w in _fc_desc for w in ("curl", "wget", "urllib")))
+chk("fetch-content kills the range-fetch myth (truncation is from the top)",
+    "no range or offset" in _fc_desc)
+chk("fetch-content sends oversize readers to the saved file, not a refetch",
+    "page that file" in _fc_desc and "instead of re-requesting" in _fc_desc)
+chk("fetch-bytes holds the same lane", "sanctioned lane" in _fb_desc)
+chk("fetch-bytes says a re-request replays cache, not independent verification",
+    "replays its cache entry" in _fb_desc)
+
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
