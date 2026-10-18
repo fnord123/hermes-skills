@@ -163,6 +163,23 @@ def _wall_verdict(text):
             return "JS challenge wall (%d chars)" % len(text)
         return "interstitial or empty (%d chars)" % len(text)
     return None
+
+
+def _render_guard(res):
+    """A browser that could not pass the gate returns THE GATE. Never launder a wall into
+    a document: the same verdict the http tier applies must judge the render tiers' OUTPUT.
+    Measured 2026-10-18: firecrawl answered a gated redlib mirror with 'ok: rendered 1322
+    chars' — those 1322 chars were Anubis's challenge page ("Speed: 0kH/s": the PoW script
+    never ran in that pool's chromium), which would have been served and cached as content.
+    A gated render falls to the next rung; if every rung shows the gate, the caller's final
+    answer is the wall VERDICT — never the wall as content."""
+    if not res.ok:
+        return res
+    v = _wall_verdict(res.text or "")
+    if v:
+        return Result("", "unreadable", "render still gated: %s" % v,
+                      via=getattr(res, "via", "render"))
+    return res
 # The stealth browser annotates a page it could not get past with its own marker line. Matching
 # the marker rather than the wall's wording is what makes it length-proof: it is emitted by our
 # own tooling, so a document that merely discusses captchas cannot produce it.
@@ -1355,17 +1372,17 @@ def _fetch_impl(url, timeout=45, use_cache=True, allow_browser=False):
             _note("mirror", "JS challenge wall — rendering the mirror copy, not the canonical url")
         # Tier 4: Firecrawl (self-hosted JS render -> full markdown), replacing the retired
         # headless/headful local render (_browser_attempt, kept below for reference/rollback).
-        res = _firecrawl_attempt(render_target, timeout)
+        res = _render_guard(_firecrawl_attempt(render_target, timeout))
         _note("firecrawl", "%s: %s" % (res.outcome, res.detail), chars=len(res.text or ""))
         # Tier 5: bladebro stealth render — only if Firecrawl was blocked. The last FREE rung.
         if not res.ok:
-            b = _bladebro_attempt(render_target, timeout)
+            b = _render_guard(_bladebro_attempt(render_target, timeout))
             _note("bladebro", "%s: %s" % (b.outcome, b.detail), chars=len(b.text or ""))
             if b.ok:
                 res = b
         # Tier 6: browserbase (paid, remote stealth) — only if both free rungs failed AND enabled.
         if not res.ok:
-            bb = _browserbase_attempt(render_target, timeout)
+            bb = _render_guard(_browserbase_attempt(render_target, timeout))
             _note("browserbase", "%s: %s" % (bb.outcome, bb.detail), chars=len(bb.text or ""))
             if bb.ok:
                 res = bb

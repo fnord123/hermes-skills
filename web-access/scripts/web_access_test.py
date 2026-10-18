@@ -1301,6 +1301,46 @@ chk("ordinary small clean prose is not a wall",
 chk("structural garbage still reads as interstitial (family preserved)",
     (rxfetch._wall_verdict("   \n\t\n  ") or "").startswith("interstitial or empty"))
 
+# The second miss of the same day: the render rung itself returned the Anubis gate as a
+# SUCCESSFUL render ('firecrawl ok: rendered 1322 chars'). The render tiers' OUTPUT now
+# faces the same verdict as http bodies — a gated render is a failed rung, not content.
+gated_render = rxfetch.Result(ANUBIS_PROSE_PAGE, "ok", "stub: firecrawl rendered", via="firecrawl")
+guarded = rxfetch._render_guard(gated_render)
+chk("a render that returned the gate is NOT ok", not guarded.ok)
+chk("its detail names the gate as a still-gated render",
+    "render still gated" in guarded.detail and "JS challenge wall" in guarded.detail,
+    guarded.detail)
+real_render = rxfetch.Result("thread " * 300, "ok", "stub: real render", via="firecrawl")
+chk("a real render passes the guard untouched",
+    rxfetch._render_guard(real_render) is real_render)
+
+# End-to-end: every mirror gated AND every render rung gated => the caller gets the wall
+# VERDICT (unreadable), never the wall as content, and nothing is written to the cache.
+_fc_real, _bb_real, _bl_real = (rxfetch._firecrawl_attempt, rxfetch._bladebro_attempt,
+                                rxfetch._browserbase_attempt)
+_oa_real = rxfetch._one_attempt
+try:
+    rxfetch._one_attempt = lambda url, timeout, via="http": (
+        rxfetch.Result("", "unreadable", "JS challenge wall (1298 chars)"), True)
+    rxfetch._firecrawl_attempt = lambda url, timeout: rxfetch.Result(
+        ANUBIS_PROSE_PAGE, "ok", "stub: rendered the gate", via="firecrawl")
+    rxfetch._bladebro_attempt = lambda url, timeout: rxfetch.Result(
+        ANUBIS_PROSE_PAGE, "ok", "stub: rendered the gate", via="bladebro")
+    rxfetch._browserbase_attempt = lambda url, timeout: rxfetch.Result(
+        "", "unreachable", "stub: disabled")
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r_all = rxfetch.fetch(POST_LL, allow_browser=True)
+    chk("all rungs gated => the answer is a wall verdict, not wall-as-content",
+        not r_all.ok and "JS challenge wall" in r_all.detail and "render still gated" in r_all.detail,
+        r_all.detail)
+    chk("a gated wall is NEVER cached as content",
+        not os.path.exists(rxfetch.cache_path(POST_LL)))
+finally:
+    rxfetch._one_attempt = _oa_real
+    rxfetch._firecrawl_attempt, rxfetch._bladebro_attempt = _fc_real, _bl_real
+    rxfetch._browserbase_attempt = _bb_real
+
 ANUBIS_STUB = ("Making sure you&#39;re not a bot! body, html { height: 100%; display: flex; } "
                "#status { font-variant-numeric: tabular-nums; } Powered by Anubis")
 chk("an Anubis gate reads as a wall a browser dissolves",
