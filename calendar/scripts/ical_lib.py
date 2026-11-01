@@ -161,7 +161,7 @@ def resolve_feeds(env: dict[str, str]) -> list[tuple[str, str, str]]:
     two_houses = env_value(pallo_env, "TWOHOUSES_ICAL_URL")
     if two_houses and not two_houses.startswith("<"):
         feeds.append(("2houses", two_houses, "[Gina] "))
-    kayak = env_value(pallo_env, "KAYAK_TRIPS_ICAL_URL")
+    kayak = env_value(pallo_env, "KAYAK_ICAL_URL")
     if kayak and not kayak.startswith("<"):
         feeds.append(("kayak", kayak, "[Trip] "))
     return feeds
