@@ -165,3 +165,16 @@ paths — the doctrine must stay reusable.
   dead one ("the old request: … the new request adds …") and would have
   built to a blend. The playbook states the rule at the top of the Author
   stage: the issue body supersedes any earlier request for this skill.
+- **A temp-lab test suite follows `TMPDIR` — and an agent shell's TMPDIR
+  can sit inside a git checkout.** The lint self-test builds its lab with
+  `mkdtemp`; the linter prefers `git ls-files` for the script inventory
+  and disk-walks only when git *fails* — "git answered with zero files"
+  reads as "this skill has no scripts". When TMPDIR points inside any
+  repo, git succeeds inside the lab and lists nothing, so every
+  entry-point-gated rule silently MISSes and the suite goes red while the
+  real repo is green. Tell: the identical suite run with a neutral
+  `TMPDIR=/tmp` goes green, and a standalone repro outside the checkout
+  fires the rules fine. Rule: run repo suites from a neutral TMPDIR
+  before declaring CI red; never trust the agent sandbox's scratch for
+  hermeticity. (Live 2026-11-01: 13 phantom failures nearly sent a wave
+  chasing a nonexistent "unpromoted rules" fix.)
