@@ -32,9 +32,12 @@ pipeline, like any other skill.
 - `templates/PROFILE.example` — the `{{tokens}}` used in SKILL.md after the
   host-neutrality transform, each with where its value comes from. The
   filled instance file is host-bound and is NOT committed.
-- No `scripts/` yet: SKILL.md ("The tool") declares
-  `scripts/trace-handoff.py` as a script contract. The pipeline's Scripter
-  stage implements it to that contract.
+- `scripts/trace-handoff.py` — the one verb SKILL.md declares ("The
+  tool"): reconstruct a pipeline role's handoff order from its own
+  `state.db`, read-only.
+- `scripts/skill_json.py` — generated vendored copy of the house JSON
+  contract (`tools/vendor.py check` gates divergence; edit
+  `tools/skill_json.py` and run `tools/vendor.py sync`).
 
 ## Import fidelity (issue #43)
 
