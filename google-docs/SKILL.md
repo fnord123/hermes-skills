@@ -52,6 +52,10 @@ Activate when the user wants to:
 
 - **Spreadsheets** — numbers, tables, cells, tabs, totals. That is a different
   surface; use the sheets/donations tooling, not this.
+- **Design documents (DDs).** Writing, restructuring, or reworking a Design Doc
+  from the owner's in-doc comments belongs to `gdocs-design-docs`. There every
+  edit is a proposal the owner accepts in Google Docs; this skill's edits land
+  directly.
 - **Sending or sharing** a document to someone, or moving it between folders.
   This skill writes document *contents*; it does not manage sharing.
 - A document the agent **cannot reach**. This skill only sees documents in the
