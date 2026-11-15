@@ -17,9 +17,15 @@ carry host values (assignee, paths, model ids, run history).
 
 ## Tokens
 
-`{{ASSIGNEE}}` `{{REPO_DIR}}` `{{CARDS_DIR}}` `{{MID_MODEL}}`
-`{{HOUSE_SKILL}}` `{{STD_SKILL}}` — define per topic; document each token
-and where its value comes from in a `PROFILE.example` beside the templates.
+The token registry is the `PROFILE.example` beside the templates (here:
+`templates/PROFILE.example`): every token the tree consumes must be declared
+there with where its value comes from, and the gate is "only declared tokens
+present" — the grep below must yield a subset of the registry:
+`grep -rhoE '\{\{[A-Z_]+\}\}' . | sort -u`. Define tokens per topic when
+transforming a new doc and add them to the registry in the same change. (The
+original skill-kanban extraction listed its topic tokens inline instead of
+deferring to the registry, and carried two worked-example names that were
+never install tokens — the inventory grep is what catches that drift.)
 
 ## Procedure
 

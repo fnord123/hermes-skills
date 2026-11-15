@@ -37,7 +37,7 @@ library. This is a DIFFERENT rule set from the hermes-agent in-repo standard
 is an eight-section house order, and `tools/lint_skills.py` is the enforcement
 mechanism. Do not port rules between the two repos.
 
-This file is the skill's **canonical home**: the skill-review pipeline roles
+This file is the skill's **canonical home**: the pipeline roles
 (author, audit, STE100, scripter, verifier, commit, fleet) grade against it
 and install it from this repo — they do not carry hand-made copies.
 
@@ -99,16 +99,21 @@ prints ONE JSON object on stdout (`{"ok": true, ...}`; failures are
 
 Output shape: `{"ok": true, "profile": "<p>", "session_id": "<s>",
 "kanban_calls": [{"order": N, "call": "<name>", "args": {...}, "result":
-{...}}, ...], "other_tools": {"terminal": N, "...": N}}`. Errors: no
-`state.db` for the profile, or no session with tool calls →
-`{"ok": false, "error": "..."}` with exit 1; a missing argument prints the
-usage with exit 2.
+{...}}, ...], "other_tools": {"terminal": N, "...": N}}`. The profile DB
+resolves from the `HERMES_HOME` env var (default `~/.hermes`): the script
+opens `{{HERMES_HOME}}/profiles/<profile>/state.db` — never a hardcoded
+home. Errors are uniform (house pattern): every failure path — no
+`state.db` for the profile, no session with tool calls, a missing
+argument — prints `{"ok": false, "error": "..."}` with exit 1; for a
+missing argument the usage text rides inside `error`:
+`{"ok": false, "error": "usage: trace-handoff <profile>"}`.
 
 ## The rubric — read it every session, don't trust memory
 
-1. `{{REPO_DIR}}/CONVENTIONS.md` — authoritative. **Uppercase.** Watch the
-   decoy: lowercase `conventions.md` / `readme.md` also exist in the repo
-   (246 and 236 chars) and are NOT the docs.
+1. `{{REPO_DIR}}/CONVENTIONS.md` — authoritative. **Uppercase**: the
+   tracked doc is exactly `CONVENTIONS.md` — confirm with
+   `git ls-files 'CONVENTIONS.md'`, never with a remembered listing; a
+   lowercase look-alike in any listing is not the doc.
 2. `{{REPO_DIR}}/README.md` — repo-level rules.
 3. `tools/lint_skills.py` — mechanical enforcement; run it, but know its limits
    (below). Full rule map: `references/linter-rules.md`.
@@ -169,74 +174,21 @@ usage with exit 2.
 ## Interpreting lint findings
 
 - **0 critical is the ship line** — CI fails only on critical.
-- **Baseline at `1a21e43` (measured 2026-08-28, live `--json`, exit 0): 80 findings —
-  0 critical, 26 major, 54 minor.** The 26 majors classify into exactly three fix
-  classes: (1) the 13 contract survivors (top-level-guard 9, json-contract 4, pallo +
-  square) — Phase 2 skill-side fixes; (2) the 8 domain-leaks — 7 prose rewords + 1
-  `LEAK_ALLOW` entry (see below); (3) the 5 tools-table — premise-false, linter scope
-  change. The 54 minors: silent-except 30, undocumented-shebang 14, explicit-verb 8,
-     frontmatter/tags 2. TODO.md's snapshot is the standing ledger — re-census before
-     quoting any of it.
-  - **Current state (measured 2026-08-29 at `e5cac4f`): 63 findings — 0 critical,
-    9 major, 54 minor.** All three major classes above are closed: (1) Phase 2 at
-    `0b39488`; (3) promotion at `7767b16` + tools-table scope change at `8fa941a`
-    (the four investment skills are now exempt via `tool_table_exempt()`). Class (2)
-    remains: the 9 majors are the 8 domain-leaks (7 prose rewords + the
-    `agentmail-lite` `LEAK_ALLOW` and pet-care-tracker's tools-table (its real fix is
-    writing `scripts/pet_care.py`).
-  - **Current state (measured 2026-08-31, worktree post `81f7bf3`): 64 findings —
-    0 critical, 9 major, 55 minor.** The 64th is a new `scripts/silent-except`
-    (`pallo-logistics/scripts/gingr_lib.py:76`, added by `81f7bf3`). Same day, the
-    four body/invocation rules (`scripts/invocation`, `readability`,
-    `body/error-sentence`, `body/section-flow`) were promoted major → critical —
-    byte-identical across the flip (all at 0 findings), G7 pins severity + gate,
-    `body/model-context` REJECTED (FP shapes re-probed live, still firing).
-    The flip + docs (CONVENTIONS.md, TODO.md) are in the worktree; the `gate:`
-    commit is the owner's to make.
-  - **Drain of the 2026-08-31 confident-fix classes (measured same day, worktree):
-    46 findings — 0 critical, 1 major, 45 minor** (64 → 46, −18). Closed:
-    `body/domain-leak` 8 → 0 (prose rewords across pallo/whatsapp/calendar/
-    pet-care-tracker/square/daily-briefing/`agentmail-lite` + `LEAK_ALLOW` entries
-    `agentmail-lite: {agentmail}` — product-is-the-domain — and `web-access: {firecrawl}` — added as "an emitted `via` value"; the entry was the wrong
-    fix and was DROPPED 2026-08-31 with the owner's full black-box directive
-    (SKILL.md de-branded + `via`/`attempts`/`detail` removed from the service
-    response itself — see the web-access paragraph below));
-    `body/explicit-verb` 8 → 0
-    (2 genuine verb rewords in rx-review — "Computes the FIB-4…", "Routes a
-    regimen-review reply…"; the square-appointments 6 were premise-false: the rule
-    scanned the second cell of ANY table and was scoped to Purpose-column tables,
-    B11a pins the silence); `frontmatter/tags` 2 → 0 (bambu `3DPrinting`→`3D
-    Printing`, calendar `iCal`→`ICal`; the Capitalized check now judges the first
-    *alphabetic* char so digit-leading tags work — A9a/A9b pin both directions).
-    Survivors, and why none of them is another reword class: 45 minor =
-    `scripts/silent-except` 31 (audited — mostly deliberate `Playwright` fallbacks)
-    + `scripts/undocumented-shebang` 14 (tracked defect: bambu probes ×7,
-    web-access service files ×7 — the fix is deleting/isolating the probes or
-    `_lib`-renaming the services, a judgment call), 1 major = pet-care-tracker's
-    `body/tools-table` (its real defect is handing the model raw curl + bearer
-    token; the fix is writing `scripts/pet_care.py` — a feature, not a cleanup).
-    The drain also touched descriptions in 3 skills (whatsapp, calendar, pallo) —
-    trigger baseline checked before/after: zero routing findings, PREFER intact.
+- **Never quote a remembered census — measure.** `python3 tools/lint_skills.py
+  --json` on the current checkout is the baseline; TODO.md's snapshot is the
+  standing ledger — re-census before quoting any count. A dated "current
+  state" snapshot goes stale the day it is written: `git log` is the
+  changelog, and the rules in this section stand on their own without one.
 - **`scripts/exit-code`**: the house pattern `sys.exit(main())` / `sys.exit(<code>)`
-  is accepted since the 2026-08-27 fixes (it propagates a computed status). It still
-  fires on the known **entry-point-vs-library class** (non-entry files the agent never
-  runs). The discriminator is "does the skill document the script as a command the
-  agent runs", NOT "does it have `def main`" (most of the class has one). Re-measured
-  2026-08-28 at `a5173d2` against live `--json`: the three contract rules total
-  **41 findings** (json-contract 14, top-level-guard 13, exit-code 14) on 23 files in
-  4 skills (bambu-store 17, web-access 10, pallo-logistics 9, square-appointments 5);
-  daily-briefing contributes none (A1 deleted the mirror). The SKILL.md-derived
-  reclassified **28** of the 41 as premise-false (bambu probes/logins,
-     web-access service files, `triplib.py`) — including **all 14 exit-code findings**,
-     so exit-code hits 0 survivors at Phase 1. The remaining 13 (json-contract 4 +
-     top-level-guard 9, 9 files, pallo + square only) are the Phase 2 surface —
-     **CLOSED 2026-08-29**: all 9 converted (vendored `skill_json.py`, `@guard`,
-     `ok()`/`fail()` on every output path); both contract rules at 0 findings,
-     promotion-safe, promotion still the owner's reserved call (Phase 4).
-  Derived set at `a5173d2`: 32 entry points (32 direct + 0 hops — the only in-repo hop
-  consumer, daily-briefing, is gone; the hop mechanism stays for a future skill),
-  measured not projected: `references/entry-point-declaration-spec-2026-08.md`.
-  File-level breakdown: `references/linter-rules.md`.
+  is accepted (it propagates a computed status). It still fires on the known
+  **entry-point-vs-library class** (non-entry files the agent never runs). The
+  discriminator is "does the skill document the script as a command the agent
+  runs", NOT "does it have `def main`" (most of the class has one). The three
+  contract rules (`json-contract`, `top-level-guard`, `exit-code`) are all
+  **critical** — severity lives in `tools/lint_skills.py` itself; battery G6
+  pins it (a demotion back to major breaks the suite). Entry-point derivation
+  spec: `references/entry-point-declaration-spec-2026-08.md`; file-level
+  breakdown: `references/linter-rules.md`.
 - **`scripts/json-contract` is a one-directional token test** (probed 2026-08-28):
   it fires only when a quoted `"ok"` token is absent from source (sound), and is
   satisfied by ANY occurrence — including a comment-only `"ok"` and `"ok"` as a
@@ -244,35 +196,24 @@ usage with exit 2.
   success field while passing). It does not verify what the agent parses from
   stdout; behavioral closure needs a smoke run, which is gated on entry-point
   declaration.
-- **Entry-point declaration (APPROVED 2026-08-28, Phase 1 landed; spec:
-  `references/entry-point-declaration-spec-2026-08.md`):** the owner decided: (1) declare in
-  SKILL.md code (body mechanism — code span or fence, never a manifest as source of
-  truth), (2) `undocumented-shebang` 3a ON at **minor** (warning-layer, never a gate),
-  (3) 3b baseline OFF, (4) Phase-4 promotion of the two contract rules AFTER Phase 2.
-  Phase 1 (linter-only, this round) ported `derive_entrypoints()` + `_skill_inventory()`
-  into `tools/lint_skills.py` and replaced the `_is_library()` gate on the three contract
-  rules. Measured effect at Phase 1: contract 41 → **13** (json-contract 14→4,
-  top-level-guard 13→9, exit-code 14→**0**), repo 94 → **80**, +14
-  `undocumented-shebang` minors (bambu ×7, web-access ×7), five clean skills lose zero
-  (negative control). **`scripts/exit-code` is promotion-safe now (0 findings) but the
-  promotion stays the owner's reserved call** — Phase 1 did not flip severities. Phase 2
-  (mechanical) **landed 2026-08-29**: `tools/skill_json.py` vendored into pallo + square
-  (vendor.py-governed copies), `@guard` on main, every output path through `ok()`/`fail()`
-  on the 9 surviving files (pallo ×6, square ×3) → contract 13 → **0**, repo 80 → **67**,
-  the other 54 findings byte-identical. `ok()`/`fail()` gained `NoReturn` annotations
-  (source + all five vendored copies re-synced). **Phase 4 LANDED 2026-08-29
-  at `7767b16`** (the owner's call, then executed): all THREE contract rules
-  (`json-contract`, `top-level-guard`, `exit-code`) are critical — the repo
-  run was byte-identical across the flip (67 findings, 0 critical), a
-  hermetic lab proved the teeth (3 critical, exit 1), and battery G6 pins
-  it (a demotion back to major breaks the suite).
-  Behavioral convention adopted in the conversion: informational outcomes the agent
-  relays (`ambiguous_trip`, `no_trip_found`, `pallo-trip-status` sweep results) are
+- **Entry-point declaration (spec: `references/entry-point-declaration-spec-2026-08.md`):**
+  scripts are declared in SKILL.md code (body mechanism — code span or fence,
+  never a manifest as source of truth); `undocumented-shebang` is **minor**
+  (warning-layer, never a gate). `derive_entrypoints()` + `_skill_inventory()`
+  in `tools/lint_skills.py` decide which files the three contract rules gate;
+  an entry-point script therefore carries the full house pattern: vendored
+  `skill_json.py` (`tools/vendor.py sync` keeps the copies in lockstep),
+  `@guard` on `main`, `ok()`/`fail()` (`NoReturn`-annotated) on every output
+  path — clean on every declared entry point is what keeps the contract rules
+  at zero findings and their critical gate free of premise-false hits.
+  Behavioral convention: informational outcomes the agent relays
+  (`ambiguous_trip`, `no_trip_found`, `pallo-trip-status` sweep results) are
   `ok: true` with the outcome in `status`; real failures are `ok: false` exit 1.
-  The hop rule is **dormant repo-wide** (no skill has a `.sh` post-A1); battery I7/I8/I9
-  pin its three shapes (thin wrapper hops; work-then-pipe and fan-out do NOT). Known
-  limits: the `ok` token test is still one-directional (behavioral `--smoke` closure is
-  future, gated on entry-point declaration — which now exists).
+  The `.sh`→`.py` hop rule is **dormant repo-wide** (no skill has a `.sh`);
+  battery I7/I8/I9 pin its three shapes (thin wrapper hops; work-then-pipe and
+  fan-out do NOT). Known limits: the `ok` token test is still one-directional
+  (behavioral `--smoke` closure is future work, gated on entry-point
+  declaration — which now exists).
 - **`frontmatter/requires-toolsets` — clause-scoped negation filter (2026-08-28,
   `e1b58e5`)**: a tool mention inside a same-clause prohibition ("Do not substitute
   `curl`", "**No** `curl`...") is not a use — matches governed by a negation cue
@@ -294,15 +235,7 @@ usage with exit 2.
   fires on its OWN name (`agentmail-lite`'s only finding was SKILL.md:2, its own `name:`
   line). Fix class for that: a per-skill `LEAK_ALLOW` entry (precedent:
   `bambu-store: {"myshopify"}`) — never reword the product out of its own description.
-  Of the 8 major leak findings at `1a21e43`: 7 are genuine prose rewords (calendar,
-  pallo, square, web-access, whatsapp-backfill, daily-briefing, pet-care-tracker —
-  target phrasings in TODO.md §4), 1 is the allow-list class (`agentmail-lite`).
-  **Closed 2026-08-31**: 6 skills reworded (`Gingr`→kennel, `AgentMail`→the agent's
-  email, `Hindsight`→long-term memory, `OAuth`→sign-in, `Playwright`→a real browser,
-  `Home Assistant`→tracker, `Schema`→Shape), 1 allow-listed (`agentmail-lite` —
-  product-is-domain); the web-access `firecrawl` entry was the wrong fix and
-  was dropped 2026-08-31 with the full black-box change (see below).
-  TODO.md §4 marked CLOSED. **Standing rule (the owner, 2026-08-31): never add a
+  **Standing rule (the owner, 2026-08-31): never add a
   `LEAK_ALLOW` (or any linter allow-list) entry without explicit direction to
   do so** — fix the prose instead; allow-list only when the owner says so. The
   sanctioned class is narrow: the skill's own product name IS the domain
@@ -316,10 +249,10 @@ usage with exit 2.
   entry-point set is empty — the same mechanism Phase 1 gave the contract rules —
   PLUS, for pet-care-tracker alone, the `scripts/pet_care.py` it should have had
   (TODO.md §5; it currently hands the model raw `curl`/`jq`/bearer-token).
-- **The linter tests itself**: `tools/test_lint_skills.py` is a 93-case battery
-  (87 skill cases + gate tests G2–G7; G7 added 2026-08-31 for the body/invocation
-  promotions; B11a/A9a/A9b the same day for the drain's explicit-verb scope fix
-  and the digit-leading tag fix), run by CI and pre-push. After changing lint rules, run it — a case exists for every
+- **The linter tests itself**: `tools/test_lint_skills.py` is the battery —
+  skill cases plus gate tests (G1–G8), run by CI and pre-push; re-count the
+  cases with `grep -c 'case(' tools/test_lint_skills.py`, never from memory.
+  After changing lint rules, run it — a case exists for every
   audited false positive, and a new rule without a case is a promise, not a mechanism.
   Adding a rule or a filter means adding its cases in the same commit: B14a/B14b
   (model-context must-not-fire controls), E3/E4 (negation-filter pair), I1-I10
@@ -483,7 +416,7 @@ audit rounds:
    is not your changeset — never sweep it into a commit (R4).
 2. The repo has a **pre-push hook that runs what CI runs**
    (`pre-push: lint, lint self-test, vendor and tests ok` — lint, the linter's
-   own 90-test battery, vendor check, skill-script tests). Treat its pass as an
+   own battery, vendor check, skill-script tests). Treat its pass as an
    independent verification witness; its fail blocks the push. **The hook is not
    a static file** — it is generated by the tracked `tools/install-git-hooks.sh`
    (run once per clone; `.git/hooks/` is not version-controlled). When CI steps
@@ -552,7 +485,7 @@ audit rounds:
 
 For `{{REPO_DIR}}` capabilities consumed by Hermes profiles: keep the
 **skill** (script + SKILL.md) over wrapping it in an MCP server, because
-(a) the SKILL.md description IS the routing surface — 22 triggers carry the
+(a) the SKILL.md description IS the routing surface — the trigger list carries the
 routing; MCP tool descriptions are a fraction of that and the when-to-use /
 pitfalls sections have nowhere to live without a companion skill (at which
 point the skill is doing the job anyway); (b) the script has no process to
@@ -655,8 +588,8 @@ fleet distribution:
 2. **The profile does NOT know its copy is managed.** No read-only marker is injected
    at load; nothing stops a bot from editing its installed copy. Drift is detected
    AFTER the fact — and a drifted copy **silently stops receiving updates** until
-   reconciled or `--force`d. That is exactly the `.226` failure mode wearing a hub
-   costume.
+   reconciled or `--force`d. That is exactly the drifted-build-context failure mode wearing
+   a hub costume.
 3. **Mitigations if we tap-distribute the house repo** (cheap → strong): (a) a
    read-only convention line in the skill's SKILL.md (the only thing that reaches the
    model); (b) a per-profile cron running `hermes skills check` and reporting
@@ -665,18 +598,19 @@ fleet distribution:
    profile-local twin) as `skills.external_dirs` by design. Taps and external_dirs are
    not exclusive: existing profiles keep `external_dirs`; tap is for new consumers.
 
-**Measured fleet state (2026-08-31 — superseded census; re-census before quoting):** 12 profiles
-(4 profiles + all 8 rx-* — re-list via each profile's `skills/.hub/lock.json`)
-hold tap-installed copies of 7
-house skills under identifier `skills-sh/{{REPO}}/<skill>` in their
-`skills/.hub/lock.json` — all 7 were `update_available` that day (default profile
-lock: `{{HERMES_HOME}}/skills/.hub/lock.json`). 18 of 20 profile configs plus the global
-`{{HERMES_HOME}}/config.yaml` declare `external_dirs: {{REPO_DIR}}` (live inheritance,
-no drift surface). Decisions (the owner, same day): the stale tap installs stay
-untouched (no catch-up sweep), the all-skills sweep is DEFERRED, and drift handling
-is report-only — no standing reconcile/`--force` authority. A tap copy shadows the
-`external_dirs` copy of the same name — the profile-local copy wins, so a tap copy
-is the one that must be updated.
+**Fleet census — measure, never quote.** Which profiles hold tap-installed
+copies is a per-install fact: enumerate each profile's `skills/.hub/lock.json`
+(the home-based `default` profile's lock is
+`{{HERMES_HOME}}/skills/.hub/lock.json`; the tap identifier form is
+`skills-sh/{{REPO}}/<skill>`). Which profiles inherit via `external_dirs`:
+`grep -l 'external_dirs' {{HERMES_HOME}}/config.yaml
+{{HERMES_HOME}}/profiles/*/config.yaml` — most configs, plus the global one,
+declare `external_dirs: {{REPO_DIR}}` (live inheritance, no drift surface).
+Decisions (the owner, 2026-08-31): stale tap installs stay untouched (no
+catch-up sweep), the all-skills sweep is DEFERRED, and drift handling is
+report-only — no standing reconcile/`--force` authority. A tap copy shadows
+the `external_dirs` copy of the same name — the profile-local copy wins, so
+a tap copy is the one that must be updated.
 
 ## Skill-maintenance kanban (the owner's board, 2026-08-31)
 
@@ -700,15 +634,15 @@ mechanics), `cards/` (the seven bodies as {{placeholder}} templates),
 filled values; a handoff's "read the sibling canonical" points at the
 instance, and a doctrine change is made in the repo copy first, then
 re-substituted into the instance. Full card spec + this fleet's dated
-execution log: `{{HERMES_HOME}}/profiles/{{OPERATOR}}/future-work/
-skill-kanban-card-spec-2026-08-31.md`; instance operating reference
-(filled values, decision ledger, re-census keys):
-`references/skill-kanban-board-2026-08.md`. Canonical card bodies (written
+execution log (instance content — not carried in this repo):
+`{{HERMES_HOME}}/profiles/{{OPERATOR}}/future-work/
+skill-kanban-card-spec-2026-08-31.md`; the instance operating reference
+(filled values, decision ledger, re-census keys) lives beside it under
+the same `future-work/` directory. Canonical card bodies (written
 per card, reused verbatim): `{{HERMES_HOME}}/profiles/{{OPERATOR}}/future-work/
-skill-kanban-cards/<card>.md` (Author: `author.md` — the step-1 test
-card; NO standing `author-canonical.md` exists yet — Audit:
+skill-kanban-cards/<card>.md` (Author: `author.md`; Audit:
 `audit-canonical.md`; STE100 Writing Audit:
-`ste100-audit-canonical.md` (added 2026-09-03); Scripter:
+`ste100-audit-canonical.md`; Scripter:
 `scripter-canonical.md`; Verifier:
 `verifier-canonical.md`; Commit: `commit-canonical.md`; Propagation-Check:
 `propagation-check-canonical.md`). Assembly discipline (learned the hard way,
@@ -749,27 +683,20 @@ successor's body is large or token-bearing, the parent card should
 instruct the worker to READ the sibling canonical file with its file
 tools instead of carrying an inline template.
 
-- **Force-loaded skills are referenced, not restated (the owner, 2026-09-02;
-  superseded in scope 2026-09-03).** `--skill` is repeatable on `kanban
+- **Force-loaded skills are referenced, not restated (the owner, 2026-09-02).**
+  `--skill` is repeatable on `kanban
   create` (action=append; verified in `create --help`). The card body
   carries ONE line referencing the force-loaded skill and NEVER restates
   its rules — the force-loaded SKILL.md is already in the worker's
   context, so restating adds bytes toward the 8 KB cap and a second
-  source of truth. **2026-09-03 (the owner): the `asd-ste100`
-  (ASD-STE100 controlled-language) standard is REMOVED from the Author +
-  Audit card classes** — a dedicated STE100-audit card will carry it
-  instead (authoring it is the owner's; the skill remains installed at
-  `{{HERMES_HOME}}/profiles/{{OPERATOR}}/skills/asd-ste100/`). Author and Audit
-  (incl. retry Authors) are `--skill hermes-skills-repo` ONLY. The
-  STE100 instruction blocks were stripped from `author.md`,
-  `audit-canonical.md`, and the card spec (2026-09-03); any card body or
-  kickoff command still carrying `--skill asd-ste100` or an STE100
-  check step is stale — do not re-add it. **UPDATED 2026-09-03 (card built
-  and wired):** the dedicated card is the STE100 Writing Audit — canonical
-  body `future-work/skill-kanban-cards/ste100-audit-canonical.md`, graph slot
-  2b between Audit and Scripter (spec §2b + §10.3 row 2b). It IS the only
-  card class force-loading `asd-ste100`; its FAIL loop is `[STE100 round
-  N/2]` back to Author (cap 2, separate from the Audit loop's counter).
+  source of truth. Every card class (including retry Authors) is
+  `--skill hermes-skills-repo` ONLY, with exactly one exception: the
+  STE100 Writing Audit card (graph slot 2b, between Audit and Scripter)
+  also force-loads `asd-ste100`; any card body or kickoff command
+  force-loading `asd-ste100` on another card class is stale. Its FAIL
+  loop is `[STE100 round N/3]` back to Author (cap 3 — the loop-caps
+  bullet is the single source for the caps in force — separate from the
+  Audit loop's counter).
 
 - **Card-class change protocol (proven 2026-09-03, the STE100 removal).** A
   force-load / instruction change to a card class lives in PARALLEL sources of
@@ -940,17 +867,12 @@ successor and show-checked it; the child was `ready` in the board DB). Also prod
   the owner asked): Author↔Audit and Scripter↔Verifier are self-contained (each
   increment re-reads the parent's title in "Parent task results" / its own title);
   STE100 rides a PAYLOAD field (`ste100_round`, copied from the Author's title
-  into the Audit payload). **Verification status: BOTH increments are now
-  live-proven** (step-2 red chain — round-1 titles in the board DB; 2026-09-04
-  pre-ipo run — the second STE100 FAIL's retry-Author title carried
-  `[STE100 round 2/2]`, worker-created from the round field, not
-  hand-assembled). The cap-PARK branch (a FAIL on the LAST allowed round →
-  block + findings table, NO successor) remains unproven for the STE100 LOOP —
-  BOTH 2026-09-04 full runs (pre-ipo, stock) PASSED on the last allowed round
-  instead of exhausting it. Do not trust the loop PARK branch until a red-team
-  seed proves it. (DISTINCT branch: the commit card's pre-flight PARK is now
-  live-proven in production — the 2026-09-04 stock run's dirty-tree block,
-  concurrent-workstream bullet below.) Also: per-card "params" (runtime cap,
+  into the Audit payload). The cap-PARK branch (a FAIL on the LAST allowed round
+  -> block + findings table, NO successor) needs a red-team seed before it is
+  trusted: full runs that PASS on the last allowed round do not prove the PARK
+  path fires. Do not trust an unproven branch. (DISTINCT branch: the commit
+  card's pre-flight PARK — dirty-tree block, see the concurrent-workstream
+  bullet below.) Also: per-card "params" (runtime cap,
   model) are CREATOR-SIDE values — the kickoff command and the parent's
   `kanban_create` args consume them; the card's WORKER never sees them. The
   canonical body is the worker's source of truth for the successor's exact args.
@@ -962,64 +884,22 @@ successor and show-checked it; the child was `ready` in the board DB). Also prod
   `todo` >24h, parked cards; a cron ping, not a task).
 - Audit's PASS branch has a shortcut: a script-less skill goes straight to Commit
   (no no-op Scripter round-trip).
-- **Pipeline status: ALL SEVEN cards live-proven green (2026-09-04
-  pre-ipo-investment-analysis relaunch, commit f8cee42).** The full chain ran
-  end-to-end — 10 cards, all done: Author → Audit PASS → STE100 FAIL (5 writing
-  classes) → retry Author → Audit PASS → STE100 FAIL (2 phrasal verbs) → retry
-  Author → Audit PASS → STE100 PASS on the LAST allowed round (2/2) → Commit
-  (pushed f8cee42, version unchanged) → Propagation-Check PASS. The bounded
-  loop worked as designed: the STE100 cap of 2 was consumed exactly, the run
-  PASSED on the last allowed round (no PARK needed), and the complete-first
-  handoff held 10/10 including both FAIL loopbacks — zero cards ever in
-  `todo`. Propagation-Check census: 17 profiles + default (via global) see the
-  skill live via external_dirs; 13 tap consumers `update_available` — left
-  untouched per the standing report-only decision (a per-run check is EXPECTED
-  to surface these; propose the sweep to the owner, never act); 0
-  profile-local twins. **Second full run
-  2026-09-04 (municipal-bond-analysis, commit `51493e5`):** 8 cards, one
-  STE100 FAIL round + one retry + PASS — the first live run of the card
-  under its current name **Propagation-Check** (the separate
-  periodic fleet-wide census job keeps the Fleet-Update-Check name; designed,
-  not yet built). Two self-report/manifest defects, each
-  caught by a DIFFERENT role, entered the record: (1) the retry Author's
-  summary claimed "SKILL.md ONLY", but the scratch draft still carried
-  the round-0 report-template.md fix — the Audit caught it by verifying
-  physical state and CORRECTED the commit manifest in the successor's
-  handoff payload (disclosed, deliberate non-FAIL: a FAIL would have
-  burned the last Author round on a manifest typo, not a doc defect);
-  (2) the Commit worker's own body carried FOUR conflicting sha256
-  transcription variants of one template file (the known long-hex-
-  crossing-model-boundaries failure mode) and resolved them against the
-  disk hash, with the STE100 role posting a mid-run correction. The isolation
-  design worked exactly as specified — no single role's word carried a
-  wrong fact into the commit. **Third full run 2026-09-04 (stock-investment-analysis, the family-hub target) — gate COMPLETE: final STE100 PASS at round 2/2 (the last allowed round — the second run after pre-ipo to consume the full budget and pass on the last one). Recap: 11 Author edits (SKILL.md only; README byte-identical), cross-reference check CLEAN (all outbound routing sentences verified against the three siblings' actual descriptions), Audit PASS 19/19 (triggers 14→14, protected surface byte-identical), STE100 FAIL r0 (4 GATING — long sentences in this round's new prose, each with a pre-written AFTER rewrite), retry Author 385s (exactly the 4 splits), re-audit PASS, STE100 r1/2 FAIL (1 GATING - a 35w three-clause semicolon run-on at Phase 1 step 3, introduced by the r0 rewrite but missed by the r0 scan), retry Author [round 2/2] applied exactly that one split (reverse-swap scope proof, new draft sha 805da2c3), re-audit PASS, final STE100 PASS at round 2/2. The first Commit card then PARKed at pre-flight 1b: dirty worktree from the CONCURRENT rx-review workstream's in-flight edit (the commit pre-flight PARK branch, now live-proven in production — see the concurrent-workstream bullet below). Proven response protocol: let the other workstream commit its own work — never discard or complete it (da554e0 landed); re-verify the run's anchors after the external commit (draft 805da2c3 + live anchors unchanged — verify, don't assume); PUSH the owner's mid-run doctrine commit (STE100 cap 2→3, 8519ecd) BEFORE firing, or pre-flight 1c (`0 0`) would have failed on the unpushed local commit; re-run as a NEW card with the manifest mirrored + a re-run-context note (naming the still-at-risk file); annotate the old blocked card SUPERSEDED by comment, never delete. Final commit SHA + Propagation-Check verdict still to be recorded on completion.** Open role-scope question (2026-09-04,
-  raised by the owner, unresolved):** may an Audit correct a handoff manifest
-  at all (vs FAIL it)? Proposed doctrine, pending the owner: the Audit may
-  correct the commit manifest in the handoff payload ONLY with a disclosed
-  numbered verdict-table row (never edits document content), and every
-  successor consumer re-derives the staged file list from physical state
-  (scratch vs live, `git ls-files`), never trusting handoff prose —
-  codify in doctrine + instance `audit-canonical.md` / `commit-canonical.md`
-  once approved. **STE100 GATING scope = this round's work product ONLY**
-  (confirmed in all three 2026-09-04 runs: pre-ipo, muni, stock): GATING
+- **STE100 GATING scope = this round's work product ONLY.** GATING
   covers the prose this round's Author wrote; a pre-pipeline skill's
-  inherited prose debt (muni: ~21 further >25w sentences + ~24 semicolon
-  lines; stock: same class) is recorded ADVISORY for the owner, never
-  gated — so a wording pass cannot balloon into a whole-file rewrite,
-  and a full-file conformance pass, if the owner wants it, is a separate
-  run. The per-round GATING window is NOT exhaustive over the whole file (2026-09-04 stock run: r0 missed a 35w run-on in prose the round touched but did not rewrite; r1 caught it) - the second round of the bounded loop is the net, not redundancy. The FAIL rows carry BEFORE/AFTER rewrites pre-written, so the retry
-  Author is mechanical (muni: 369s, 6 sentence splits, clean re-audit +
-  clean final STE100; stock: 385s, 4 splits, clean re-audit). Related kickoff technique for family-hub targets
-  (skills whose PREFER clauses and cross-references mesh with siblings —
-  the four investment skills are one such mesh): add a named
-  cross-reference consistency check to the Author card's PIPELINE INPUT
-  (verify every outbound routing sentence against the referenced
-  skill's ACTUAL description — read, not grep); both 2026-09-04 hub runs
-  found the mesh consistent in both directions, and the Audit
-  re-verified by independently reading all three sibling descriptions.
-  The original six cards remain proven green AND red as of step 4
-  (2026-09-01; spec §11-12); STE100 (slot 2b, 2026-09-03) is now live
-  too. Commit card (real, `commit-canonical.md`):
+  inherited prose debt (long sentences, semicolon lines) is recorded
+  ADVISORY for the owner, never gated — so a wording pass cannot balloon
+  into a whole-file rewrite, and a full-file conformance pass, if the
+  owner wants it, is a separate run. The per-round GATING window is NOT
+  exhaustive over the whole file — the second round of the bounded loop
+  is the net, not redundancy. FAIL rows carry BEFORE/AFTER rewrites
+  pre-written, so the retry Author is mechanical.
+- **Kickoff check for family-hub targets** (skills whose PREFER clauses
+  and cross-references mesh with siblings — the investment skills are one
+  such mesh): add a named cross-reference consistency check to the Author
+  card's PIPELINE INPUT — verify every outbound routing sentence against
+  the referenced skill's ACTUAL description (read, not grep); the Audit
+  re-verifies by independently reading the sibling descriptions.
+- **Commit card** (`commit-canonical.md`):
   manifest-anchored seam check (every file `file | scratch path | sha256
   anchor`), pre-flight FIRST (`git status --short` EMPTY, `main...origin/main`
   = `0 0`, branch `main`), stage by explicit list only, pre-push hook as
@@ -1030,21 +910,16 @@ successor and show-checked it; the child was `ready` in the board DB). Also prod
   anchor in the manifest -> must PARK at the seam step, no commit/push,
   git clean; (B) plant an untracked probe file at repo root with CORRECT
   anchors -> must PARK at pre-flight 1b BEFORE any copy, and must NOT
-  delete the probe (the card says never clean a pre-existing conflict). Both
-  Both parked with 0 successors and clean git. Propagation-Check (real, report-
-    only census; named Fleet-Update-Check until the 2026-09-04 rename — see the
-    pipeline intro): the standing decision is NO update
-  reconcile / NO edits — and the canonical now carries an explicit "do not
+  delete the probe (the card says never clean a pre-existing conflict).
+- **Propagation-Check** (report-only census): the standing decision is NO
+  update reconcile / NO edits — the canonical carries an explicit "do not
   edit any skill file at all, including the one you load to do this job"
-  line, because a fleet-check worker edited the hermes-skills-repo skill
-  MID-RUN three times on 2026-09-01 (accurate content, not owner-directed).
-  Standing rule: if a worker learns something durable it records it in its
-  completion summary + a `kanban_comment`; the OWNER maintains the skills.
-  Census trap: the headline count and the table must agree — the step-4
-  green run said "17/20" in the headline while its own table (and an
-  independent re-parse of every profile config) said 18/20; it had dropped
-  the home-based `default` profile from the headline. When they disagree,
-  the table + a fresh independent re-parse win.
+  line, because a fleet-check worker edited the very skill it had loaded
+  mid-run (accurate content, not owner-directed). Standing rule: if a
+  worker learns something durable it records it in its completion summary
+  + a `kanban_comment`; the OWNER maintains the skills. Census trap: the
+  headline count and the table must agree — when they disagree, the table
+  + a fresh independent re-parse win.
 
 - **Commit pre-flight PARK from a concurrent workstream (live-proven 2026-09-04,
   stock run).** The house repo is shared: a concurrent rx-review workstream had

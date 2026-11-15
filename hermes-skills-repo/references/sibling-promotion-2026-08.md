@@ -3,11 +3,11 @@
 Reference record of the first profile-local → house-repo skill promotion.
 
 ## What triggered it
-the owner asked "Naomi's been editing the google doc skill, check it." The shared
+the owner asked "a peer profile's bot has been editing the google doc skill, check it." The shared
 `{{REPO_DIR}}/google-docs` was untouched (local + `origin/main` at the last
 commit, tree clean). The real change was a **profile-local** twin in another
-profile: `{{HERMES_HOME}}/profiles/a peer profile/skills/productivity/google-docs-raw-api/`
-(its SOUL identifies the bot as Naomi Nagata, CMO). It was built from a real
+profile: `{{HERMES_HOME}}/profiles/<peer-profile>/skills/productivity/google-docs-raw-api/`
+(its SOUL gives the bot a persona name and title). It was built from a real
 incident: a concurrent Docs-UI edit shifted character indexes and three
 positional deletes each clipped one char off a short heading (`Plan`→`lan`,
 `Cost:`→`Cot:`, `Phase 2`→`Phae 2`).
@@ -53,7 +53,7 @@ First 404 test returned the raw `<HttpError ...>` string: the catch was
 
 ## What was deliberately NOT done
 - **Twin not slimmed to a pointer** — that edits another profile's curator-managed
-  skill; left for the owner/Naomi sign-off.
+  skill; left for the owner and the peer profile's operator to sign off.
 - No `old_name` field in the verb output (the Drive `files.update` response with
   `fields=id,name` returns only the new name; don't invent a field you don't have).
 

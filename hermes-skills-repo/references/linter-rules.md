@@ -121,7 +121,7 @@ IP carries the exact hostname verbatim so the author's fix is copy-paste and
 must NOT hedge with 'canonical hostname'; an UNMAPPED private IP says 'use the
 host's canonical hostname from the house host docs' and must NOT invent a
 plausible-sounding hostname. Pitfall found live: the first draft's octet-sanity guard
-was `<= 223`, which silently dropped the map's own `.226`/`.228` — only the
+was `<= 223`, which silently dropped the map's own highest octets — only the
 real mapped-IP battery case (J1) caught it; sanity guards must tolerate the
 highest octets in your own fixture data.
 

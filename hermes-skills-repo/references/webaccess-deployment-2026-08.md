@@ -60,34 +60,30 @@ ever; the container may log them internally.
   93-case linter battery; repo census must be unchanged (46 findings, no
   web-access domain-leak).
 
-## Consumer census (2026-08-31, 20 profiles + default; rx-* = the 9 profiles
-sharing the one gateway key)
+## Consumer census (measure per install — a dated local count is a false fact
+on every other install)
 
-| Mode | Profiles |
+| Mode | How to measure (per-profile config) |
 |---|---|
-| MCP only (web-access in `skills.disabled`) | 5 profiles (instance census — re-list via per-profile `skills.disabled`) — one profile gets all 3 MCP tools incl. `do`; the other four include only `search`+`fetch` (three added 2026-08-31, committed `a726e7c`; their gateways not yet restarted, so the loaded skill index still carries the skill until restart) |
-| Skill only (`skills.external_dirs: {{REPO_DIR}}`, no MCP block) | 13 profiles (instance census — re-list via per-profile `skills.external_dirs` + mcp block) |
-| Neither | 2 profiles (instance census) |
+| MCP only (web-access in `skills.disabled`) | `mcp_servers: webaccess:` block present AND `web-access` in `skills.disabled` |
+| Skill only (`skills.external_dirs: {{REPO_DIR}}`, no MCP block) | `skills.external_dirs` includes `{{REPO_DIR}}`, no webaccess MCP block |
+| Neither | the remainder |
 
-- **Three-profile trim (2026-08-31):** the owner directed
-  removing the `web-access` skill from the three (add each to
-  `skills.disabled`), making them MCP-only like the existing MCP-only profiles. Blast radius
-  verified BEFORE the change: none of the three has a cron job or hook
-  referencing `web_access.py`, and all three keep the live MCP server — a clean
-  trim, no capability gap. Executed + committed (`a726e7c`); the three gateway
-  restarts are still pending (a running gateway keeps its loaded skill index
-  until restarted); re-census after.
+- **MCP-only conversion of a profile:** add `web-access` to
+  `skills.disabled`. Verify the blast radius BEFORE the change: no cron job or
+  hook references `web_access.py`, and the live MCP server keeps its tools — a
+  clean trim, no capability gap. A running gateway keeps its loaded skill
+  index until restarted, so restart, then re-census.
 - The skill is MCP-first by design (SKILL.md: "MCP tools (preferred)… Use
   these.") — dual-wired profiles call `mcp_webaccess_*` and fall to the shim
   for cron/terminal paths.
-- **Third path under the surface**: 14 configs carry the builtin Hermes web
+- **Third path under the surface**: some configs carry the builtin Hermes web
   toolset `web: search_backend: searxng / extract_backend: firecrawl` — the
-  BUILTIN tools pointed at the same backends, independent of both the skill and
-  the MCP server. Present in 14 profiles (instance census — re-list via per-profile builtin
-  `web:` toolset config).
-- Note: `web-access` (the skill) is not a profile in `{{HERMES_HOME}}/profiles/` —
-  the rx-review skill has no profile directory; the 9 rx-* profiles are the
-  model gateway-key-sharing set.
+  BUILTIN tools pointed at the same backends, independent of both the skill
+  and the MCP server. Enumerate via the per-profile builtin `web:` toolset
+  config.
+- Note: `web-access` is a skill, not a profile — do not expect a
+  `{{HERMES_HOME}}/profiles/web-access/` directory in any census.
 
 ## Re-census recipe
 

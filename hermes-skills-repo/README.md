@@ -4,7 +4,7 @@ The house-repo rubric skill for `hermes-skills` — the rule set, linter
 interpretation, and pipeline mechanics every skill in this repo is authored
 and graded against. This repo copy is its **canonical home**: it was adopted
 from the previously hand-made per-role copies (issue #43) so the
-skill-review pipeline roles install it from here instead of carrying copies.
+pipeline roles install it from here instead of carrying copies.
 
 ## Why this skill exists
 

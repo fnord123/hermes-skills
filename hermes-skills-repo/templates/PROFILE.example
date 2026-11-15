@@ -57,11 +57,18 @@ SERVICE_HOST=<your-service-hostname>
 
 ## Which files carry which tokens
 
-- `SKILL.md` — REPO_DIR, HERMES_HOME, CARDS_DIR, REPO, FLEET_REPO, OPERATOR,
-  CREATED_BY, ASSIGNEE, MID_MODEL, HIGH_MODEL, REVIEW_KEY.
-- `references/skills-hub-tap-distribution-2026-08.md` — HERMES_HOME, REPO_DIR,
-  OPERATOR.
-- `references/webaccess-deployment-2026-08.md` — REPO_DIR, HERMES_HOME,
-  SERVICE_HOST.
-- `${HERMES_SKILL_DIR}` in SKILL.md is NOT an instance token — it is the
+Computed with `grep -rhoE '\{\{[A-Z_]+\}\}' <file> | sort -u` per file -
+recompute after any edit; this map is the audit of the "only declared
+tokens present" gate (the registry is the block above):
+
+- `SKILL.md` - ASSIGNEE, CREATED_BY, FLEET_REPO, HERMES_HOME, HIGH_MODEL, MID_MODEL, OPERATOR, REPO, REPO_DIR, REVIEW_KEY.
+- `references/host-neutral-doctrine-extraction-2026-09.md` - REPO_DIR.
+- `references/linter-rules.md` - REPO_DIR.
+- `references/litellm-keys-and-kanban-pinning-2026-09.md` - ASSIGNEE, HERMES_HOME, HIGH_MODEL, MID_MODEL, OPERATOR, REPO_DIR, REVIEW_KEY, SERVICE_HOST.
+- `references/sibling-promotion-2026-08.md` - HERMES_HOME, REPO_DIR.
+- `references/skills-hub-tap-distribution-2026-08.md` - HERMES_HOME, OPERATOR, REPO, REPO_DIR.
+- `references/webaccess-deployment-2026-08.md` - HERMES_HOME, REPO_DIR, SERVICE_HOST.
+- `CARDS_DIR` is consumed by the pipeline instance env (the dispatcher
+  reads it from the profile), not by the skill prose.
+- `${HERMES_SKILL_DIR}` in SKILL.md is NOT an instance token - it is the
   Hermes runtime marker for this skill's own install directory.

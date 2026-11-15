@@ -59,8 +59,8 @@ plus `hermes skills --help` output. Not marketing.
   a tap/hub-installed SKILL.md loads (contrast: plugin skills DO get a load banner).
 - If a bot edits its installed copy, nothing stops it at write time. Consequence is
   deferred: `check`/`update` see the hash mismatch and the skill silently stops
-  receiving updates until reconciled or `--force`d. Same failure class as the .226
-  build-context drift, at skill granularity.
+  receiving updates until reconciled or `--force`d. Same failure class as
+  build-context drift on a shared build machine, at skill granularity.
 - `list-modified`/`diff`/`reset` (the user-modified tracking) cover BUNDLED skills;
   hub/tap skills lean on the lock hash instead.
 - Taps vs `skills.external_dirs`: external_dirs is the fleet mechanism ALREADY in use
@@ -100,21 +100,18 @@ plus `hermes skills --help` output. Not marketing.
   skills dirs, no config.yaml) shadows the real home-based default in naive
   `ls`-based censuses — treat `profiles/<x>/config.yaml` as the unit, and
   remember the default profile's home is `{{HERMES_HOME}}` itself.
-- **Measured fleet state (2026-09-01, after commit `3888faa`; re-census before
-  quoting):** 20 profiles. Channel A (external_dirs `{{REPO_DIR}}`): 18
-  configs — 17 profile configs + `{{HERMES_HOME}}/config.yaml` (which serves the
-  home-based `default` profile) — live inheritance for 18/20 profiles (one profile
-  has no config at its home → `[]`; another overrides
-  `external_dirs: []` → sees none). Channel B: 13 profiles hold one shared set of 7
-  tap skills (agentmail-lite, daily-briefing, investment-hypothesis-investigation,
-  municipal-bond-analysis, pet-care-tracker, pre-ipo-investment-analysis,
-  stock-investment-analysis), lock hashes UNIFORM across holders; no tap copy of
-  calredteam anywhere. Pre-existing drift (NOT caused by any commit; visible since
-  at least the 2026-08-31 census): 84 lock entries = 64 orphan locks (dir absent —
-  all 7 in four profiles + daily-briefing, the two investment
-  skills, pre-ipo, stock in all 9 rx-*) + 27 real local edits (9 rx-* ×
-  agentmail-lite/municipal-bond-analysis/pet-care-tracker: disk hash != lock hash;
-  the ones `update` would skip without `--force`).
+- **Fleet state: measure, don't quote.** Channel A (external_dirs
+  `{{REPO_DIR}}`): count the configs declaring it —
+  `grep -l 'external_dirs' {{HERMES_HOME}}/config.yaml {{HERMES_HOME}}/profiles/*/config.yaml`;
+  expect most profiles, with two failure shapes seen live: a profile with no
+  config at its home → `[]`; a profile overriding `external_dirs: []` → sees
+  none. Channel B: profiles whose `skills/.hub/lock.json` carries tap entries
+  (identifier form `skills-sh/{{REPO}}/<skill>`). Drift classes to look for
+  (this fleet's first census found both classes live): ORPHAN locks (lock
+  entry whose directory is absent) and REAL local edits (disk hash != lock
+  hash — the ones `update` would skip without `--force`). Enumerate per
+  profile, and compare lock hashes across holders to see whether they drifted
+  apart.
 
 ## Mitigation ladder (if we ever tap-distribute house skills)
 
