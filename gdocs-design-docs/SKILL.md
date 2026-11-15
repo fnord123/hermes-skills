@@ -28,7 +28,8 @@ metadata:
 Write design documents (DDs) in Google Docs with the gdocs tools. A DD states a
 problem, weighs the options, records the chosen solution with its trade-offs,
 then explains the design in depth. The document must teach a new reader and
-survive a hostile review.
+survive a hostile review. The document's language follows the ASD-STE100
+standard. See "Writing rules".
 
 Every write this skill makes is a proposal. The owner accepts or rejects each
 proposal in Google Docs. The document never changes without the owner.
@@ -140,6 +141,12 @@ Propose the document in this order. Depth may vary. The order does not.
 
 ## Writing rules
 
+- **The document conforms to ASD-STE100.** Every design document this skill
+  produces must follow the ASD-STE100 standard (Simplified Technical English).
+  Write short declarative sentences. Give each step one instruction. Use no
+  idioms. Leave no sentence open to two readings. The `asd-ste100` skill is
+  the authoritative style source. Check every passage against it before you
+  propose it.
 - **Embedded links everywhere.** Every external reference (a pull request, a
   web page, a ticket) sits inside the referring text as an embedded link.
 - **Chapter links too.** Reference another chapter with an embedded link. Link
@@ -159,7 +166,6 @@ Propose the document in this order. Depth may vary. The order does not.
 - **Concrete numbers and names.** "User Alice connects her bank account,
   then ..." beats an abstraction. State the scale of the problem. Scale often
   decides the solution.
-- **Short sentences, simple words.** This is a review document, not a novel.
 - **Diagrams beat prose for structure.** Link the editable source file under
   each picture.
 - **Paste code rarely.** Only genuinely novel algorithms belong in code. Link
