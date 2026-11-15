@@ -113,7 +113,7 @@ argument puts the usage text inside `error`:
 
 1. `{{REPO_DIR}}/CONVENTIONS.md` — authoritative. **Uppercase**: the
    tracked doc is exactly `CONVENTIONS.md` — confirm with
-   `git ls-files 'CONVENTIONS.md'`, never with a remembered listing; a
+   `git ls-files 'CONVENTIONS.md'`, never with a remembered listing. A
    lowercase look-alike in any listing is not the doc.
 2. `{{REPO_DIR}}/README.md` — repo-level rules.
 3. `tools/lint_skills.py` — mechanical enforcement; run it, but know its limits
@@ -176,10 +176,10 @@ argument puts the usage text inside `error`:
 
 - **0 critical is the ship line** — CI fails only on critical.
 - **Never quote a remembered census — measure.** `python3 tools/lint_skills.py
-  --json` on the current checkout is the baseline; TODO.md's snapshot is the
+  --json` on the current checkout is the baseline. TODO.md's snapshot is the
   standing ledger — re-census before quoting any count. A dated "current
-  state" snapshot goes stale the day it is written: `git log` is the
-  changelog, and the rules in this section stand on their own without one.
+  state" snapshot goes stale the day it is written. `git log` is the
+  changelog. The rules in this section stand on their own without one.
 - **`scripts/exit-code`**: the house pattern `sys.exit(main())` / `sys.exit(<code>)`
   is accepted (it propagates a computed status). It still fires on the known
   **entry-point-vs-library class** (non-entry files the agent never runs). The
@@ -603,10 +603,10 @@ fleet distribution:
    not exclusive: existing profiles keep `external_dirs`; tap is for new consumers.
 
 **Fleet census — measure, never quote.** Which profiles hold tap-installed
-copies is a per-install fact: enumerate each profile's `skills/.hub/lock.json`
-(the home-based `default` profile's lock is
-`{{HERMES_HOME}}/skills/.hub/lock.json`; the tap identifier form is
-`skills-sh/{{REPO}}/<skill>`). Which profiles inherit via `external_dirs`:
+copies is a per-install fact: enumerate each profile's `skills/.hub/lock.json`.
+The home-based `default` profile's lock is
+`{{HERMES_HOME}}/skills/.hub/lock.json`. The tap identifier form is
+`skills-sh/{{REPO}}/<skill>`. Which profiles inherit via `external_dirs`:
 `grep -l 'external_dirs' {{HERMES_HOME}}/config.yaml
 {{HERMES_HOME}}/profiles/*/config.yaml` — most configs, plus the global one,
 declare `external_dirs: {{REPO_DIR}}` (live inheritance, no drift surface).

@@ -1,8 +1,8 @@
 # hermes-skills-repo
 
 The house-repo rubric skill for `hermes-skills` — the rule set, linter
-interpretation, and pipeline mechanics every skill in this repo is authored
-and graded against. This repo copy is its **canonical home**. The pipeline
+interpretation, and pipeline mechanics this repo uses to author and grade
+every skill. This repo copy is its **canonical home**. The pipeline
 adopted it from the previously hand-made per-role copies (issue #43). The
 roles install it from here instead of carrying copies.
 
@@ -32,9 +32,9 @@ pipeline, like any other skill.
 - `templates/PROFILE.example` — the `{{tokens}}` used in SKILL.md after the
   host-neutrality transform, each with where its value comes from. The
   filled instance file is host-bound and is NOT committed.
-- No `scripts/` yet: `scripts/trace-handoff.py` is declared as a script
-  contract in SKILL.md ("The tool"); the pipeline's Scripter stage
-  implements it to that contract.
+- No `scripts/` yet: SKILL.md ("The tool") declares
+  `scripts/trace-handoff.py` as a script contract. The pipeline's Scripter
+  stage implements it to that contract.
 
 ## Import fidelity (issue #43)
 

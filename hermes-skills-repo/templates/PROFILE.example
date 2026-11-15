@@ -68,7 +68,7 @@ present" gate (the registry is the block above):
 - `references/sibling-promotion-2026-08.md` - HERMES_HOME, REPO_DIR.
 - `references/skills-hub-tap-distribution-2026-08.md` - HERMES_HOME, OPERATOR, REPO, REPO_DIR.
 - `references/webaccess-deployment-2026-08.md` - HERMES_HOME, REPO_DIR, SERVICE_HOST.
-- `CARDS_DIR` is consumed by the pipeline instance env (the dispatcher
-  reads it from the profile), not by the skill prose.
+- The pipeline instance env consumes `CARDS_DIR` (the dispatcher reads it
+  from the profile). The skill prose does not consume it.
 - `${HERMES_SKILL_DIR}` in SKILL.md is NOT an instance token - it is the
   Hermes runtime marker for this skill's own install directory.
