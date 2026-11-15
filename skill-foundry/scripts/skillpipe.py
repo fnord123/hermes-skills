@@ -395,7 +395,10 @@ def kanban_create(inst: dict, role: str, n: int, label: str, skill: str,
                   worktree: str, idem: str) -> dict:
     profile = assignee_for(inst, role)
     runtime = inst.get(f"RUNTIME_{role.upper()}", "30m")
-    model = inst.get("MID_MODEL") if role in MID_ROLES else None
+    # Every pipeline worker runs on the operator-pinned model (David's
+    # standing direction: high tier, same as the operator). The env var
+    # predates that decision and keeps its name for instance compatibility.
+    model = inst.get("WORKER_MODEL") or inst.get("MID_MODEL")
     script_path = os.path.realpath(__file__)
     instance_path = inst.get("INSTANCE_PATH", "(not set)")
     playbook = os.path.join(inst["CARDS_DIR"], f"{role}-role.md")
@@ -422,7 +425,10 @@ WORK ORDER (binding):
    bodies, or create kanban cards yourself — the script owns all three.
 5. When the script call succeeds, complete this card with a one-line
    summary (issue number + verdict). The script already created the next
-   card. If the script parks the issue, block this card needs_input."""
+   card — UNLESS its output carries card.next_steps (fenced worker): then
+   follow next_steps EXACTLY (create the card with your kanban_create
+   tool, run record-card, only then complete). If the script parks the
+   issue, block this card needs_input."""
     cmd = ["hermes", "kanban", "--board", inst["BOARD"], "create",
            f"{role.capitalize()}: {skill} issue #{n} [{label}]",
            "--body", body,
@@ -438,6 +444,45 @@ WORK ORDER (binding):
     if role == "ste100" and inst.get("STD_SKILL"):
         # the writing standard is force-loaded next to the house skill
         cmd += ["--skill", inst["STD_SKILL"]]
+    if os.environ.get("HERMES_DELEGATED_CHILD_CONTEXT"):
+        # Fenced worker shell: upstream deliberately fences the kanban CLI
+        # in every descendant of a worker (agent/delegation_context.py,
+        # scrub_kanban_env) and leaves the worker's OWN kanban_create tool
+        # open. Do not fight the fence: hand the exact card spec back to
+        # the caller; the worker creates the card via its tool surface and
+        # records it with the record-card verb (GitHub-only, unfenced).
+        secs = runtime.rstrip("sm")
+        seconds = int(secs) * (60 if runtime.endswith("m") else 1)
+        params = {"title": f"{role.capitalize()}: {skill} issue #{n} [{label}]",
+                  "assignee": profile,
+                  "body": body,
+                  "workspace_kind": "dir",
+                  "workspace_path": worktree,
+                  "idempotency_key": idem,
+                  "max_runtime_seconds": seconds,
+                  "skills": ([inst.get("HOUSE_SKILL", "hermes-skills-repo")]
+                             + ([inst["STD_SKILL"]]
+                                if role == "ste100" and inst.get("STD_SKILL")
+                                else []))}
+        if model:
+            params["model"] = model
+        steps = ("FENCED WORKER: this card was NOT created. 1) Call your "
+                 "kanban_create tool with EXACTLY these params: "
+                 + json.dumps(params) + " 2) " +
+                 (f"Record it: python3 {script_path} --instance "
+                  f"{instance_path} record-card --issue {n} "
+                  f"--idempotency-key {idem} "
+                  "--card-id <returned id>. "
+                  if role != "fleet" else
+                  "Fleet cards are not tracked in the state block; skip "
+                  "record-card. ") +
+                 "3) Then complete your own card. If kanban_create returns "
+                 "an existing card whose status is 'blocked', it is a "
+                 "stale idempotency hit: comment 'SUPERSEDED' on it, then "
+                 f"create a fresh card with idempotency_key '{idem}-s2' "
+                 "(all other params unchanged).")
+        return {"deferred": True, "idempotency_key": idem,
+                "params": params, "next_steps": steps}
     proc = run(cmd)
     try:
         data = json.loads(proc.stdout)
@@ -1043,11 +1088,22 @@ def verb_transition(inst: dict, args) -> None:
         trole, tnum = parse_label(target)
         card = kanban_create(inst, trole, n, target, state["skill"],
                              state["worktree"], idem_key(state, n, trole, tnum))
-        state["cards"].setdefault(trole, []).append(card["id"])
-        superseded = card.get("superseded")
+        if card.get("deferred"):
+            # Fenced worker: the worker creates this card via its own
+            # kanban_create tool (see card["next_steps"]) and records it
+            # with `record-card`. Reserve the slot with a placeholder so a
+            # crash between create and record is visible in the state.
+            state["cards"].setdefault(trole, []).append(
+                f"PENDING:{card['idempotency_key']}")
+        else:
+            state["cards"].setdefault(trole, []).append(card["id"])
+            superseded = card.get("superseded")
     note = (f"### {role} round {N} — {verdict} -> {target}\n\n{detail}\n"
-            + (f" Next card: `{card['id']}` ({card['assignee']})\n" if card
-               else " PARKED — owner decides (resume / abandon).\n")
+            + (f" Next card: `{card['id']}` ({card['assignee']})\n"
+               if card and not card.get("deferred") else
+               " Next card PENDING: worker must create it via kanban_create "
+               "tool and run record-card (see transition output).\n"
+               if card else " PARKED — owner decides (resume / abandon).\n")
             + (f" Superseded the blocked card `{superseded}` "
                "(it was parked at block time; a fresh card carries the "
                "dispatch).\n" if superseded else ""))
@@ -1055,6 +1111,32 @@ def verb_transition(inst: dict, args) -> None:
                add_label=target if not target.startswith("parked-") else target,
                remove_labels=[cur])
     out({"issue": n, "from": cur, "to": target, "state": state, "card": card})
+
+
+def verb_record_card(inst: dict, args) -> None:
+    """Worker-side completion of a deferred transition: swap the PENDING
+    placeholder in the issue state block for the real card id created via
+    the worker's kanban_create tool. GitHub-only; unfenced by design."""
+    n = args.issue
+    body_txt = issue_body(inst, n)
+    state = parse_state(body_txt)
+    key = args.idempotency_key or args.card_id
+    sentinel = f"PENDING:{key}"
+    all_ids = [c for ids in state.get("cards", {}).values() for c in ids]
+    if args.card_id in all_ids:
+        out({"ok": True, "issue": n, "card": args.card_id,
+             "recorded": True, "note": "already recorded"})
+    replaced = False
+    for ids in state.get("cards", {}).values():
+        if sentinel in ids:
+            ids[ids.index(sentinel)] = args.card_id
+            replaced = True
+    if not replaced:
+        fail(f"no pending slot '{sentinel}' in issue {n} state — pass "
+             "--idempotency-key from the transition output's "
+             "card.idempotency_key")
+    edit_issue(inst, n, render_body(body_txt, state))
+    out({"ok": True, "issue": n, "card": args.card_id, "recorded": True})
 
 
 def verb_merge(inst: dict, args) -> None:
@@ -1338,6 +1420,15 @@ def guard_main() -> None:
     p.add_argument("--issue", type=int, required=True)
     p.add_argument("--pr", default=None)
 
+    p = sub.add_parser("record-card",
+                       help="worker: swap a PENDING successor slot for the "
+                            "card id created via the kanban_create tool")
+    p.add_argument("--issue", type=int, required=True)
+    p.add_argument("--card-id", required=True)
+    p.add_argument("--idempotency-key", default=None,
+                   help="the deferred card's idempotency key from the "
+                        "transition output (card.idempotency_key)")
+
     p = sub.add_parser("resume", help="owner: parked -> any ready label")
     p.add_argument("--issue", type=int, required=True)
     p.add_argument("--label", required=True)
@@ -1370,6 +1461,7 @@ def guard_main() -> None:
         args.instance or os.environ.get("SKILLPIPE_INSTANCE"))
     handlers = {"intake": verb_intake, "intake-all": verb_intake_all,
                 "transition": verb_transition, "merge": verb_merge,
+                "record-card": verb_record_card,
                 "resume": verb_resume, "comment": verb_comment,
                 "pr-open": verb_pr_open,
                 "status": verb_status, "style-check": verb_style_check,

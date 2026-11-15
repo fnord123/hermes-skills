@@ -47,5 +47,5 @@ report, not an audit.
   where the findings file is the change list above.
 
 When the call succeeds, complete your card with one line. The script
-routes to the scripter, straight to commit (script-less skill), or back to
+routes to the scripter, straight to commit (script-less skill), or back to Unless the output carries `card.next_steps`: then you are in a fenced worker shell, the next card was NOT created, and you must follow `next_steps` exactly — create the card with your `kanban_create` tool (params verbatim), run the shown `record-card` command, then complete. Never block for the fence.
 the author (FAIL).

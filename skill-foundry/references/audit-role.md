@@ -71,4 +71,9 @@ on or send it back with an exact fix list. You never edit the skill.
   and sends the author back with exactly that list.
 
 When the call succeeds, complete your card with one line. The script
-created the next card (STE100, or the author on a FAIL).
+created the next card (STE100, or the author on a FAIL) — unless the
+output carries `card.next_steps`: you are in a fenced worker shell and
+the card was NOT created. Then follow `next_steps` exactly: create the
+card with your `kanban_create` tool (params verbatim), run the shown
+`record-card` command, then complete. Never block the card for the
+fence itself.

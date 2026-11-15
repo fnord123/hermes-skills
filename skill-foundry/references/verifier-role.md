@@ -54,4 +54,4 @@ test. You never edit the skill.
   | observed (verbatim) | required fix.
 
 When the call succeeds, complete your card with one line. The script
-routes to commit (PASS) or back to the scripter (FAIL).
+routes to commit (PASS) or back to the scripter (FAIL). Unless the output carries `card.next_steps`: then you are in a fenced worker shell, the next card was NOT created, and you must follow `next_steps` exactly — create the card with your `kanban_create` tool (params verbatim), run the shown `record-card` command, then complete. Never block for the fence.

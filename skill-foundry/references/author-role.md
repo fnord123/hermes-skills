@@ -80,4 +80,8 @@ the issue at merge.
 
 `<script>` and `<instance>` are in your dispatch card. When the call
 succeeds, complete your card with one line (issue + verdict). The script
-has already created the next role's card.
+has already created the next role's card — unless the output carries
+`card.next_steps`: you are in a fenced worker shell and the card was
+NOT created. Then follow `next_steps` exactly: create the card with
+your `kanban_create` tool (params verbatim), run the shown `record-card`
+command, then complete. Never block the card for the fence itself.

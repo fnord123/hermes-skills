@@ -43,4 +43,4 @@ re-dispatches you with a fresh card; you re-run `merge`.
 ## After a successful merge
 
 Nothing to do — the script created the fleet-check card. Complete your
-card with: issue number, merge SHA, pull request link.
+card with: issue number, merge SHA, pull request link. Unless the output carries `card.next_steps`: then you are in a fenced worker shell, the next card was NOT created, and you must follow `next_steps` exactly — create the card with your `kanban_create` tool (params verbatim), run the shown `record-card` command, then complete. Never block for the fence.

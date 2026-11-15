@@ -61,4 +61,9 @@ not open a new one), then push.
   A second infeasibility declaration on the same skill parks it — declare
   it once, precisely.
 
-When the call succeeds, complete your card with one line.
+When the call succeeds, complete your card with one line. Unless the
+output carries `card.next_steps`: then you are in a fenced worker shell,
+the next card was NOT created, and you must follow `next_steps` exactly
+— create the card with your `kanban_create` tool (params verbatim), run
+the shown `record-card` command, then complete. Never block for the
+fence.

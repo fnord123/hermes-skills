@@ -165,3 +165,108 @@ paths — the doctrine must stay reusable.
   dead one ("the old request: … the new request adds …") and would have
   built to a blend. The playbook states the rule at the top of the Author
   stage: the issue body supersedes any earlier request for this skill.
+- **A temp-lab test suite follows `TMPDIR` — and an agent shell's TMPDIR
+  can sit inside a git checkout.** The lint self-test builds its lab with
+  `mkdtemp`; the linter prefers `git ls-files` for the script inventory
+  and disk-walks only when git *fails* — "git answered with zero files"
+  reads as "this skill has no scripts". When TMPDIR points inside any
+  repo, git succeeds inside the lab and lists nothing, so every
+  entry-point-gated rule silently MISSes and the suite goes red while the
+  real repo is green. Tell: the identical suite run with a neutral
+  `TMPDIR=/tmp` goes green, and a standalone repro outside the checkout
+  fires the rules fine. Rule: run repo suites from a neutral TMPDIR
+  before declaring CI red; never trust the agent sandbox's scratch for
+  hermeticity. (Live 2026-11-01: 13 phantom failures nearly sent a wave
+  chasing a nonexistent "unpromoted rules" fix.)
+
+## Worker "crashes" with no log at all — read the managed-worker log FIRST
+
+When the dispatcher reports `managed_worker_failed` and the card
+auto-blocks after three crashes but `kanban log` shows nothing: the
+worker died from a **deterministic pre-turn fault**, and every
+operator-facing surface lies about it. The board, the worker log, and
+the submitter stderr all say only "Kanban owner refused: Kanban
+execution unknown; retained by owner" — the verdict the owner reserves
+for genuinely *lost* executions. The true exception is written to
+exactly one place: `~/.hermes/profiles/<assignee>/logs/managed-worker.log`
+(upstream NousResearch/hermes-agent#154555 documents the whole
+misdirection chain). Read it before theorizing. Signatures seen live:
+- `ValueError: kanban_skills_unavailable` — the card's `skills`
+  requirement (skillpipe stamps `HOUSE_SKILL`, default
+  `hermes-skills-repo`) does not resolve on the assignee profile. A
+  skill archived out of every skill root, or a profile-to-profile skill
+  symlink whose target was later archived, fails here. `api_call_count
+  = 0` in the assignee's `state.db` sessions, admission
+  `terminal/interrupted`. Fix: restore/copy the skill into a root the
+  assignee scans (or set `HOUSE_SKILL` in the instance file), then
+  `hermes kanban boards switch <board>`, `unblock`, `dispatch`.
+  Persistence: a *copied* skill lands unmanaged (`created_by: null`) —
+  auto-transitions (stale 14d / archive 30d) never consider unmanaged
+  skills — but `curator adopt --all-unmanaged` would put it under the
+  clock, so `hermes --profile <p> curator pin <skill>` in every worker
+  profile and read back the `pinned` flag from that profile's
+  `skills/.usage.json`. Never let several profiles symlink one
+  profile's skill root: the usage ledger of the owner never sees the
+  workers' loads, and one archive silently kills the whole fleet.
+- stdlib shadowing: a file like `inspect.py` left in the task workspace
+  by a prior healthy run kills the submitter at bootstrap (cwd is first
+  on `sys.path`).
+A gateway restart does NOT fix these — 2026-11-15 burned a restart and
+three more doomed runs learning that. Rule: `api_call_count = 0` plus
+"execution unknown" means open the assignee's `managed-worker.log`
+before touching any infrastructure.
+
+## Dead model pinned on the card, not the config
+
+A fleet model rename wedges the foundry unless the operator instance file
+is renamed too: skillpipe stamps `MID_MODEL` from `skillpipe-instance.env`
+as the card's `model_override` AT BIRTH — profile configs stay innocent.
+Symptom chain: HTTP 400 "Invalid model name" -> worker falls back ->
+dropped stream with no read timeout -> worker heartbeats forever, dead
+inside: no ESTAB traffic on the model port, frozen `api_call_count`, no
+tool children, agent.log silent. Witness discipline: cumulative ss byte
+counters and `lastrcv` ACKs are NOT live-token evidence; agent.log
+"API call #N" lines are, and any claim of *progress* requires two
+samples of `api_call_count`/agent.log taken seconds apart — one
+measurement shows state, never motion, and cumulative counters fake
+motion. Repair: fix `MID_MODEL`, `hermes kanban
+set-model <task> <live-model>` on in-flight cards, `reclaim` (kills the
+claim; the session survives respawn), `dispatch`. Reclaim+dispatch is
+turn-cheap — prompt caches make the resume land in seconds. A reclaim
+auto-requeues and the dispatcher can respawn before a later `set-model`
+lands — re-check the spawned run's model in agent.log and bounce again
+if it grabbed a stale pin. House ruling: pipeline roles run at the
+operator's own tier (`MID_MODEL=qwen/qwen3-agentic-high`), not a cheaper
+tier.
+
+## Fenced handoff — role worker cannot create its successor card
+
+Role workers' tool shells carry `HERMES_DELEGATED_CHILD_CONTEXT` **by
+policy, not contamination** — the marker is derived from session lineage
+at runtime (a kanban worker's terminal genuinely IS a delegated child
+context), not inherited from any process environment. Falsified theories,
+do not re-chase them: no gateway, dispatcher, systemd unit, or session
+snapshot file holds it (measure — they all read clean), so no restart
+ever fixes this. It fences every CLI kanban write under its marker root,
+so skillpipe's `transition` dies closed at its LAST step, successor-card
+creation, after all real work (commit, lint, PR) is done — and it has
+bitten EVERY worker handoff since the fence was tightened; there is no
+"it used to work under this regime" precedent to lean on. The transition
+is atomic: no half state, the role correctly blocks the card with the
+diagnosis rather than unsetting the marker (fails-closed boundary is the
+owner's). Recovery: the operator replays the role's exact transition call
+from an unfenced context — the per-(skill,issue,role,round) idempotency
+key dedupes, so the replay produces exactly one successor. Then reconcile
+the parked card: never unblock; `hermes kanban complete <task>
+--result "..."` closes it with evidence (an empty completion is refused).
+Operator replay is the standing pattern until the owner rules on the
+real fix (an upstream fence exemption for kanban workers, or routing
+card creation through the worker's `kanban_*` tool surface). Worker
+ethics this creates, and how to grade it: blocking the card with the
+exact replay command in the comment is CORRECT; a worker that unsets the
+marker to force its handoff through is defeating a fail-closed fence
+even when it discloses the act — flag it at review, do not adopt the
+workaround as doctrine. When you catch yourself grepping processes,
+services, or snapshot files for the marker's source, stop: presence in
+the tool shell with absence everywhere else is the policy signature,
+confirmed.
