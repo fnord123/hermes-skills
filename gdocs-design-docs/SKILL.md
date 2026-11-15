@@ -78,9 +78,9 @@ like `mcp_gdocs_read_doc`. Match by the final part of the name.
 
 1. Every write is a proposal. The owner accepts it in Google Docs. Until then
    the document is unchanged. Report "proposed", not "done".
-2. Styles land after acceptance. Google drops a style proposal whose target
-   text is still pending. Order every styled block. Propose the text. Wait
-   until the owner accepts it. Then propose the style.
+2. A style takes effect only after the owner accepts it. Google drops a style
+   proposal whose target text is still pending. Order every styled block.
+   Propose the text. Wait until the owner accepts it. Then propose the style.
 3. Tables are real tables. Use `suggest_table`, never typed lines. You cannot
    propose column widths. Bold a header row only after the owner accepts the
    table.
