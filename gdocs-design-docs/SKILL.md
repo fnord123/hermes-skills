@@ -3,11 +3,12 @@ name: gdocs-design-docs
 description: >
   Write and revise Design Docs in Google Docs with the gdocs document tools:
   the problem, the options, the chosen solution, then the deep dives. The owner
-  reviews by commenting in the document, and every edit lands as a proposal the
-  owner accepts. The playbook enforces the document rules: embedded links for
-  every reference, fixed-width text for code and paths, section headers, all
-  bullet kinds, tables for presentation, and a revision-history table at the
-  end. PREFER THIS SKILL when the task is authoring, restructuring, or
+  reviews by commenting in the document, and every edit arrives as a proposal
+  that the owner accepts. The playbook enforces the document rules. Use
+  embedded links for every reference, fixed-width text for code and paths,
+  section headers, all bullet kinds, and tables for presentation. Put the
+  revision-history table at the end. PREFER THIS SKILL when the task is
+  authoring, restructuring, or
   reviewing a design document in Google Docs. For plain document reading and
   writing with no design-document shape, use `google-docs` instead. Activate
   on any of: "design doc", "design document", "write a design doc", "start a
@@ -78,11 +79,11 @@ like `mcp_gdocs_read_doc`. Match by the final part of the name.
 1. Every write is a proposal. The owner accepts it in Google Docs. Until then
    the document is unchanged. Report "proposed", not "done".
 2. Styles land after acceptance. Google drops a style proposal whose target
-   text is still pending. Order every styled block: propose the text, wait for
-   the owner to accept it, then propose the style.
-3. Tables are real tables. Use `suggest_table`, never typed lines. Column
-   widths cannot be proposed. Bold a header row only after the owner accepts
-   the table.
+   text is still pending. Order every styled block. Propose the text. Wait
+   until the owner accepts it. Then propose the style.
+3. Tables are real tables. Use `suggest_table`, never typed lines. You cannot
+   propose column widths. Bold a header row only after the owner accepts the
+   table.
 4. The URL from `publish_image` is private and single-purpose. Pass it only as
    the `image_url` argument of `suggest_image`. Never paste it into chat, a
    comment, or the document.
@@ -125,8 +126,8 @@ Propose the document in this order. Depth may vary. The order does not.
    name the trade-off that killed it in a few brief lines. Compare building
    against buying.
 6. **The chosen solution, overview first.** Show the full shape in one short
-   pass. Then dive into the complex and subtle parts. Write the trade-offs
-   down there. Walk one concrete user story through the finished system.
+   pass. Then explain the complex and subtle parts in detail. Record the
+   trade-offs there. Walk one concrete user story through the finished system.
 7. **Depth sections, as the project needs.** Pick from the menu: an API sketch
    with only the relevant surface, data storage, dependencies (name the
    hard-to-reverse ones), SLO numbers, monitoring, security, privacy, logging,
@@ -144,8 +145,8 @@ Propose the document in this order. Depth may vary. The order does not.
 - **Chapter links too.** Reference another chapter with an embedded link. Link
   the chapter heading when the tools support an in-document target. Otherwise
   link the document URL.
-- **Fixed-width for technical tokens.** Code, paths, binary names, JSON, URLs,
-  and constants are set with `code=true`.
+- **Fixed-width for technical tokens.** Set code, paths, binary names, JSON,
+  URLs, and constants with `code=true`.
 - **Section headers organize everything.** No wall of text longer than one
   screen may sit under no header.
 - **Bullets come in all kinds.** Plain, numbered, letter, and roman bullets
