@@ -1,19 +1,20 @@
 ---
 name: hermes-skills-repo
 description: >
-  The hermes-skills house-repo rubric and mechanics: CONVENTIONS.md plus
-  README.md plus tools/lint_skills.py, the eight-section house format, the
-  linter rule map with its known false-positive classes, the lint-rule
-  change procedure, the host-neutrality transform for doctrine docs, house
-  commit and push mechanics, distributing a house skill to profiles, and
-  the skill-maintenance pipeline cards. Use when authoring, extending, or
-  reviewing a skill in the house repo, deciding how to distribute one, or
-  operating the skill-maintenance board. PREFER THIS SKILL whenever work
-  touches a skill folder inside the house repo — authoring a new skill,
-  adding a verb, a compliance review, interpreting lint findings, changing
-  a lint rule, or committing house-repo work — over generic
-  skill-authoring guidance: the house rules differ from the hermes-agent
-  in-repo standard and the linter enforces them. Activate on any of:
+  The hermes-skills house-repo rubric and mechanics: CONVENTIONS.md,
+  README.md, tools/lint_skills.py, the eight-section house format, and the
+  linter rule map with its known false-positive classes. The skill covers
+  the lint-rule change procedure and the host-neutrality transform for
+  doctrine docs. The skill documents house commit and push mechanics,
+  distributing a house skill to profiles, and the skill-maintenance
+  pipeline cards. Use when authoring, extending, or reviewing a skill in
+  the house repo, deciding how to distribute one, or operating the
+  skill-maintenance board. PREFER THIS SKILL over generic
+  skill-authoring guidance whenever work touches a skill folder inside
+  the house repo. This covers authoring a new skill, adding a verb, a
+  compliance review, interpreting lint findings, changing a lint rule, or
+  committing house-repo work. The house rules differ from the
+  hermes-agent in-repo standard, and the linter enforces them. Activate on any of:
   "author a skill in the house repo", "review a house-repo skill",
   "CONVENTIONS.md compliance", "interpret lint_skills.py findings",
   "change a lint rule", "adopt a skill into the house repo", "pass the
@@ -37,9 +38,9 @@ library. This is a DIFFERENT rule set from the hermes-agent in-repo standard
 is an eight-section house order, and `tools/lint_skills.py` is the enforcement
 mechanism. Do not port rules between the two repos.
 
-This file is the skill's **canonical home**: the pipeline roles
+This file is the skill's **canonical home**. The pipeline roles
 (author, audit, STE100, scripter, verifier, commit, fleet) grade against it
-and install it from this repo — they do not carry hand-made copies.
+and install it from this repo. They do not carry hand-made copies.
 
 ## Host neutrality (standing policy — the owner, 2026-09-03, stated twice)
 
@@ -89,23 +90,23 @@ adding no findings, explicit staging, push verified `0 0` +
 
 One script at `${HERMES_SKILL_DIR}/scripts/trace-handoff.py`, invoked as
 `python3 ${HERMES_SKILL_DIR}/scripts/trace-handoff.py <profile>`. Each call
-prints ONE JSON object on stdout (`{"ok": true, ...}`; failures are
-`{"ok": false, "error": "..."}` with exit 1). The script opens the profile's
+prints ONE JSON object on stdout: `{"ok": true, ...}` on success,
+`{"ok": false, "error": "..."}` with exit 1 on failure. The script opens the profile's
 `state.db` read-only (`mode=ro`) and never writes to it.
 
 | Verb | Purpose |
 |---|---|
-| `trace-handoff <profile>` | Prints the profile's newest tool-calling session's `kanban_*` calls in row order (args: title / assignee / parents / task_id) with each create's result (the new card's id + born status), plus a tally of every other tool the session used — the durable proof of handoff order and bank consultation from the worker's OWN record. |
+| `trace-handoff <profile>` | Prints the profile's newest tool-calling session's `kanban_*` calls in row order (args: title / assignee / parents / task_id). Includes each create's result: the new card's id and born status. Tallies every other tool the session used — the durable proof of handoff order and bank consultation, from the worker's OWN record. |
 
 Output shape: `{"ok": true, "profile": "<p>", "session_id": "<s>",
 "kanban_calls": [{"order": N, "call": "<name>", "args": {...}, "result":
 {...}}, ...], "other_tools": {"terminal": N, "...": N}}`. The profile DB
 resolves from the `HERMES_HOME` env var (default `~/.hermes`): the script
 opens `{{HERMES_HOME}}/profiles/<profile>/state.db` — never a hardcoded
-home. Errors are uniform (house pattern): every failure path — no
+home. Errors are uniform (house pattern). Every failure path — no
 `state.db` for the profile, no session with tool calls, a missing
-argument — prints `{"ok": false, "error": "..."}` with exit 1; for a
-missing argument the usage text rides inside `error`:
+argument — prints `{"ok": false, "error": "..."}` with exit 1. A missing
+argument puts the usage text inside `error`:
 `{"ok": false, "error": "usage: trace-handoff <profile>"}`.
 
 ## The rubric — read it every session, don't trust memory
@@ -198,13 +199,13 @@ missing argument the usage text rides inside `error`:
   declaration.
 - **Entry-point declaration (spec: `references/entry-point-declaration-spec-2026-08.md`):**
   scripts are declared in SKILL.md code (body mechanism — code span or fence,
-  never a manifest as source of truth); `undocumented-shebang` is **minor**
+  never a manifest as source of truth). `undocumented-shebang` is **minor**
   (warning-layer, never a gate). `derive_entrypoints()` + `_skill_inventory()`
-  in `tools/lint_skills.py` decide which files the three contract rules gate;
-  an entry-point script therefore carries the full house pattern: vendored
+  in `tools/lint_skills.py` decide which files the three contract rules gate.
+  An entry-point script carries the full house pattern: vendored
   `skill_json.py` (`tools/vendor.py sync` keeps the copies in lockstep),
   `@guard` on `main`, `ok()`/`fail()` (`NoReturn`-annotated) on every output
-  path — clean on every declared entry point is what keeps the contract rules
+  path. Clean output on every declared entry point keeps the contract rules
   at zero findings and their critical gate free of premise-false hits.
   Behavioral convention: informational outcomes the agent relays
   (`ambiguous_trip`, `no_trip_found`, `pallo-trip-status` sweep results) are
@@ -248,11 +249,12 @@ missing argument the usage text rides inside `error`:
   under "Changing a lint rule" operation class (e). The bare-word exclusion is
   load-bearing: a `curl` in prose is a mention, not a call, while real recipe
   command lines keep the mandate. Measure the live census with
-  `python3 tools/lint_skills.py --json`; in this repo the rule's only finding is
-  pet-care-tracker, whose remaining defect is the `scripts/pet_care.py` it never
-  had (TODO.md §5 — it hands the model raw `curl`/`jq`/bearer-token).
+  `python3 tools/lint_skills.py --json`. In this repo the rule's only finding
+  is pet-care-tracker: its remaining defect is the `scripts/pet_care.py` it
+  never had (TODO.md §5). That skill hands the model raw
+  `curl`/`jq`/bearer-token.
 - **The linter tests itself**: `tools/test_lint_skills.py` is the battery —
-  skill cases plus gate tests (G1–G8), run by CI and pre-push; re-count the
+  skill cases plus gate tests (G1–G8), run by CI and pre-push. Re-count the
   cases with `grep -c 'case(' tools/test_lint_skills.py`, never from memory.
   After changing lint rules, run it — a case exists for every
   audited false positive, and a new rule without a case is a promise, not a mechanism.
@@ -692,13 +694,13 @@ tools instead of carrying an inline template.
   its rules — the force-loaded SKILL.md is already in the worker's
   context, so restating adds bytes toward the 8 KB cap and a second
   source of truth. Every card class (including retry Authors) is
-  `--skill hermes-skills-repo` ONLY, with exactly one exception: the
+  `--skill hermes-skills-repo` ONLY. Exactly one exception exists: the
   STE100 Writing Audit card (graph slot 2b, between Audit and Scripter)
-  also force-loads `asd-ste100`; any card body or kickoff command
+  also force-loads `asd-ste100`. Any card body or kickoff command
   force-loading `asd-ste100` on another card class is stale. Its FAIL
-  loop is `[STE100 round N/3]` back to Author (cap 3 — the loop-caps
-  bullet is the single source for the caps in force — separate from the
-  Audit loop's counter).
+  loop is `[STE100 round N/3]` back to Author. The cap is 3, separate
+  from the Audit loop's counter. The loop-caps bullet is the single
+  source for the caps in force.
 
 - **Card-class change protocol (proven 2026-09-03, the STE100 removal).** A
   force-load / instruction change to a card class lives in PARALLEL sources of
@@ -1090,12 +1092,12 @@ successor and show-checked it; the child was `ready` in the board DB). Also prod
 
 ## Error handling
 
-A house-repo step that errors — a lint critical, a failing pre-push hook, a
-parked pipeline card, a linter/CI disagreement — stops the work: capture the
-exact failure (verbatim output, finding list, exit code) and surface it.
-Never work around a gate (no allow-list entries, no severity edits, no
-skipped hooks) without the owner's direction — see the standing rules in
-"Interpreting lint findings" and "Changing a lint rule".
+A house-repo step that errors stops the work. That covers a lint critical,
+a failing pre-push hook, a parked pipeline card, and a linter/CI
+disagreement. Capture the exact failure — verbatim output, finding list,
+exit code — and surface it. Never bypass a gate without the owner's
+direction — no allow-list entries, no severity edits, no skipped hooks.
+See the standing rules in "Interpreting lint findings" and "Changing a lint rule".
 
 Always ask the user for guidance when there is an error; do not proactively try to resolve errors yourself.
 

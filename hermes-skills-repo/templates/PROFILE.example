@@ -27,7 +27,7 @@ REPO=<owner>/hermes-skills
 # skills scope; see the scope trap in SKILL.md). Only if you have one.
 FLEET_REPO=<owner>/Hermes
 
-# The profile that operates the pipeline (kicks off cards, owns decisions).
+# The profile that operates the pipeline (creates cards, owns decisions).
 OPERATOR=<operator-profile>
 
 # The profile recorded as creator on dispatch cards.
@@ -57,9 +57,9 @@ SERVICE_HOST=<your-service-hostname>
 
 ## Which files carry which tokens
 
-Computed with `grep -rhoE '\{\{[A-Z_]+\}\}' <file> | sort -u` per file -
-recompute after any edit; this map is the audit of the "only declared
-tokens present" gate (the registry is the block above):
+Compute this map per file with `grep -rhoE '\{\{[A-Z_]+\}\}' <file> | sort -u`.
+Recompute it after any edit. This map audits the "only declared tokens
+present" gate (the registry is the block above):
 
 - `SKILL.md` - ASSIGNEE, CREATED_BY, FLEET_REPO, HERMES_HOME, HIGH_MODEL, MID_MODEL, OPERATOR, REPO, REPO_DIR, REVIEW_KEY.
 - `references/host-neutral-doctrine-extraction-2026-09.md` - REPO_DIR.

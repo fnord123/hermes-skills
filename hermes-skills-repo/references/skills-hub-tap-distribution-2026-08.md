@@ -102,16 +102,17 @@ plus `hermes skills --help` output. Not marketing.
   remember the default profile's home is `{{HERMES_HOME}}` itself.
 - **Fleet state: measure, don't quote.** Channel A (external_dirs
   `{{REPO_DIR}}`): count the configs declaring it —
-  `grep -l 'external_dirs' {{HERMES_HOME}}/config.yaml {{HERMES_HOME}}/profiles/*/config.yaml`;
-  expect most profiles, with two failure shapes seen live: a profile with no
-  config at its home → `[]`; a profile overriding `external_dirs: []` → sees
-  none. Channel B: profiles whose `skills/.hub/lock.json` carries tap entries
-  (identifier form `skills-sh/{{REPO}}/<skill>`). Drift classes to look for
-  (this fleet's first census found both classes live): ORPHAN locks (lock
-  entry whose directory is absent) and REAL local edits (disk hash != lock
-  hash — the ones `update` would skip without `--force`). Enumerate per
-  profile, and compare lock hashes across holders to see whether they drifted
-  apart.
+  `grep -l 'external_dirs' {{HERMES_HOME}}/config.yaml {{HERMES_HOME}}/profiles/*/config.yaml`.
+  Expect most profiles. Two failure shapes occurred live: a profile with no
+  config at its home returns `[]`, and a profile overriding
+  `external_dirs: []` sees none. Channel B: profiles whose
+  `skills/.hub/lock.json` carries tap entries (identifier form
+  `skills-sh/{{REPO}}/<skill>`). Drift classes to look for (this fleet's
+  first census found both live): ORPHAN locks — a lock entry whose
+  directory is absent. REAL local edits — a disk hash that differs from
+  the lock hash. `update` skips these without `--force`. Enumerate per
+  profile, and compare lock hashes across holders to see whether they
+  drifted apart.
 
 ## Mitigation ladder (if we ever tap-distribute house skills)
 
