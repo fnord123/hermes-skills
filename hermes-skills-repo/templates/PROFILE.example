@@ -1,0 +1,74 @@
+# PROFILE.example — the {{tokens}} used in this skill (host-bound values)
+
+The skill text carries DOCTRINE and references every host-bound value by
+token. The filled values live in YOUR install, not in this repo. Copy this
+file, fill every token, and keep it beside your pipeline instance file.
+
+The skillpipe pipeline already consumes an instance file with overlapping
+keys (`skill-foundry/templates/PROFILE.example`) — where a token below
+shares a name, it is the SAME value.
+
+```
+# The house-repo checkout (the main worktree, on main). This skill's own
+# repo — CONVENTIONS.md, README.md, tools/lint_skills.py live here.
+REPO_DIR=/abs/path/to/hermes-skills
+
+# Hermes' home dir for this install (profiles, state.db, kanban DB under it).
+HERMES_HOME=/abs/path/to/.hermes
+
+# The directory holding the pipeline role playbooks / card canonical bodies
+# (e.g. <REPO_DIR>/skill-foundry/references).
+CARDS_DIR=/abs/path/to/skill-foundry/references
+
+# The GitHub slug of THIS house repo (gh --repo form).
+REPO=<owner>/hermes-skills
+
+# The slug of the fleet repo Hermes' home is checked out from (the OTHER
+# skills scope; see the scope trap in SKILL.md). Only if you have one.
+FLEET_REPO=<owner>/Hermes
+
+# The profile that operates the pipeline (creates cards, owns decisions).
+OPERATOR=<operator-profile>
+
+# The profile recorded as creator on dispatch cards.
+CREATED_BY=<creator-profile>
+
+# Who runs the role cards. Single-runner install: one profile name.
+# Role-isolated install: a role=profile map (author=…, audit=…, …) —
+# see skill-foundry/templates/PROFILE.example for the exact ASSIGNEE
+# syntax the dispatcher consumes.
+ASSIGNEE=<role=profile map or single profile>
+
+# Model ids for the two tiers used by the pipeline (mid = drafting roles,
+# high = profile default for judging roles). Values are whatever your
+# gateway serves.
+MID_MODEL=<your-mid-tier-model-id>
+HIGH_MODEL=<your-high-tier-model-id>
+
+# The dedicated gateway key identity the pipeline roles share (attribution
+# off the operator's chat key). Name/identity only — the key VALUE is never
+# written into any tracked file.
+REVIEW_KEY=<dedicated-review-key-identity>
+
+# The host serving the web-access-style service facades referenced in
+# references/webaccess-deployment-2026-08.md. Only if you run one.
+SERVICE_HOST=<your-service-hostname>
+```
+
+## Which files carry which tokens
+
+Compute this map per file with `grep -rhoE '\{\{[A-Z_]+\}\}' <file> | sort -u`.
+Recompute it after any edit. This map audits the "only declared tokens
+present" gate (the registry is the block above):
+
+- `SKILL.md` - ASSIGNEE, CREATED_BY, FLEET_REPO, HERMES_HOME, HIGH_MODEL, MID_MODEL, OPERATOR, REPO, REPO_DIR, REVIEW_KEY.
+- `references/host-neutral-doctrine-extraction-2026-09.md` - REPO_DIR.
+- `references/linter-rules.md` - REPO_DIR.
+- `references/litellm-keys-and-kanban-pinning-2026-09.md` - ASSIGNEE, HERMES_HOME, HIGH_MODEL, MID_MODEL, OPERATOR, REPO_DIR, REVIEW_KEY, SERVICE_HOST.
+- `references/sibling-promotion-2026-08.md` - HERMES_HOME, REPO_DIR.
+- `references/skills-hub-tap-distribution-2026-08.md` - HERMES_HOME, OPERATOR, REPO, REPO_DIR.
+- `references/webaccess-deployment-2026-08.md` - HERMES_HOME, REPO_DIR, SERVICE_HOST.
+- The pipeline instance env consumes `CARDS_DIR` (the dispatcher reads it
+  from the profile). The skill prose does not consume it.
+- `${HERMES_SKILL_DIR}` in SKILL.md is NOT an instance token - it is the
+  Hermes runtime marker for this skill's own install directory.
