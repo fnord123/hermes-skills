@@ -240,15 +240,17 @@ missing argument the usage text rides inside `error`:
   do so** — fix the prose instead; allow-list only when the owner says so. The
   sanctioned class is narrow: the skill's own product name IS the domain
   (`agentmail-lite`; `bambu-store`/`myshopify` setup-doc precedent).
-- **`body/tools-table` fires UNCONDITIONALLY** — every SKILL.md, no script-less
-  exemption (the check is a whole-body `^\|.*\bPurpose\b` regex; a *files*-table with a
-  Purpose column satisfies it, e.g. daily-briefing). All 5 findings at `1a21e43` are
-  premise-false: the four investment skills + pet-care-tracker have ZERO tracked
-  scripts (verified via `git ls-files`, per the .venv pitfall — not a disk walk).
-  Correct fix is a scope change (operation class (e)): exempt skills whose derived
-  entry-point set is empty — the same mechanism Phase 1 gave the contract rules —
-  PLUS, for pet-care-tracker alone, the `scripts/pet_care.py` it should have had
-  (TODO.md §5; it currently hands the model raw `curl`/`jq`/bearer-token).
+- **`body/tools-table`** requires a table with a Purpose column (the check is a
+  whole-body `^\|.*\bPurpose\b` regex; a *files*-table with a Purpose column
+  satisfies it, e.g. daily-briefing). The rule exempts a skill with no tracked
+  scripts, no derived entry-point references, and no shell-recipe command lines
+  — `tool_table_exempt()`, the computed-premise pattern; its full semantics live
+  under "Changing a lint rule" operation class (e). The bare-word exclusion is
+  load-bearing: a `curl` in prose is a mention, not a call, while real recipe
+  command lines keep the mandate. Measure the live census with
+  `python3 tools/lint_skills.py --json`; in this repo the rule's only finding is
+  pet-care-tracker, whose remaining defect is the `scripts/pet_care.py` it never
+  had (TODO.md §5 — it hands the model raw `curl`/`jq`/bearer-token).
 - **The linter tests itself**: `tools/test_lint_skills.py` is the battery —
   skill cases plus gate tests (G1–G8), run by CI and pre-push; re-count the
   cases with `grep -c 'case(' tools/test_lint_skills.py`, never from memory.

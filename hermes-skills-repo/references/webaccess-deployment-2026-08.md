@@ -53,12 +53,14 @@ ever; the container may log them internally.
   description ("a self-hosted render, and a stealth browser"), and the shim
   docstring are all de-branded.
 - **Verification recipe**: stub `rxfetch.fetch` to return a Result with a
-  firecrawl `via` + full attempts trail, call `cmd_fetch`, enumerate the
-  returned keys and grep every value for the vendor names (all must be False);
-  run `web_access_test.py` (139 cases — the `Result.via`/`.attempts` asserts
-  test the INTERNAL ladder, not the response, so they keep passing) and the
-  93-case linter battery; repo census must be unchanged (46 findings, no
-  web-access domain-leak).
+  firecrawl `via` + full attempts trail. Call `cmd_fetch`. Enumerate the
+  returned keys and grep every value for the vendor names (all must be False).
+  Run `web_access_test.py` — its `Result.via`/`.attempts` asserts test the
+  internal ladder, not the response, so they keep passing — and
+  `python3 tools/test_lint_skills.py`. Take `python3 tools/lint_skills.py
+  --json` before and after: the census must not move, and no web-access
+  domain-leak may appear. Do not quote case or census counts — the commands
+  measure them.
 
 ## Consumer census (measure per install — a dated local count is a false fact
 on every other install)
