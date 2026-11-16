@@ -146,10 +146,15 @@ services:
     command: rabbitmq-server
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
-      interval: 5s
-      timeout: 5s
+      # 2026-10-18: was interval 5s / timeout 5s / start_period 5s — the probe cold-boots an
+      # Erlang VM (~10-20s under load), so it timed out on a HEALTHY broker (manual
+      # check_running: exit 0), flapped the container, and blocked api's service_healthy
+      # gate for minutes at a time. The vendor default measures the probe's patience, not
+      # the broker's health. Generous on purpose: a real outage still flips after 3 probes.
+      interval: 30s
+      timeout: 30s
       retries: 3
-      start_period: 5s
+      start_period: 40s
     logging:
       driver: "json-file"
       options:

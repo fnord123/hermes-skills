@@ -52,7 +52,7 @@ a task the user approved explicitly.
 python3 ~/hermes-skills/web-access/scripts/web_access.py search        --query "QUERY" [--scope literature|products|web] [--max 10]
 python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-content --url "URL" [--max-chars 20000]           # or --urls u1,u2
 python3 ~/hermes-skills/web-access/scripts/web_access.py fetch-bytes   --url "URL" [--raw] [--max-bytes N]       # or --urls u1,u2
-python3 ~/hermes-skills/web-access/scripts/web_access.py do            --task "TASK" [--start-url URL] [--max-steps 25] [--confirm]
+python3 ~/hermes-skills/web-access/scripts/web_access.py do            --task "TASK" [--start-url URL] [--max-steps 100] [--confirm]
 ```
 
 ## Outcomes (both fetch verbs)

@@ -869,10 +869,10 @@ min_tier = _fn("min_tier_for")
 # Measured 2026-08-23: plain http to a reddit post is an interstitial, and to /s/ or .json a 403.
 # The ladder still spent ATTEMPTS tries with 1s/2s backoff on every one of them before it was
 # allowed to escalate — the 06:31 failure burned 19.7s to learn what this table already knows.
-chk("reddit floors at the render tier", min_tier(POST_LL) == "firecrawl",
-    "(got %r)" % min_tier(POST_LL))
-chk("the floor applies to share links too", min_tier(SHARE_LL) == "firecrawl")
-chk("the floor follows the rewrite, not the raw host", min_tier(POST_OLD) == "firecrawl")
+chk("reddit floors at the mirror rung", min_tier(POST_LL) == "mirror",
+    "(got %r)" % min_tier(POST_LL))            # was "firecrawl" until 2026-10-14: mirrors answer
+chk("the floor applies to share links too", min_tier(SHARE_LL) == "mirror")
+chk("the floor follows the rewrite, not the raw host", min_tier(POST_OLD) == "mirror")
 chk("a site with no history has no floor", min_tier("https://example.com/a") is None,
     "(got %r)" % min_tier("https://example.com/a"))
 chk("the developer subdomain has no floor",
@@ -881,11 +881,11 @@ chk("the developer subdomain has no floor",
 # The floor has to change what the ladder DOES, not merely describe it. A floored host must reach
 # the renderer without spending a single http request first.
 _real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
-_seen = {"http": 0, "render": 0}
+_seen = {"http": 0, "render": 0, "mirror": 0}
 
 
 def _count_http(url, timeout, via="http"):
-    _seen["http"] += 1
+    _seen[via] = _seen.get(via, 0) + 1
     return rxfetch.Result("", "unreadable", "stub: bot wall"), False
 
 
@@ -899,14 +899,20 @@ try:
     with tempfile.TemporaryDirectory() as _td:
         rxfetch.configure(sources_dir=_td)
         _r = rxfetch.fetch(POST_LL, allow_browser=True)
-    chk("a floored host makes NO http request", _seen["http"] == 0, "(made %d)" % _seen["http"])
-    chk("a floored host still reaches the renderer", _seen["render"] == 1 and _r.ok)
+    # 2026-10-14: reddit's floor became "mirror" — the host makes NO canonical http request,
+    # but the mirror rung is an http-cost request to a DIFFERENT host. That is the doctrine:
+    # the wall lives at reddit's edge, so reddit itself is never re-asked cheaply.
+    chk("a mirrored host makes NO canonical reddit request", _seen["http"] == 0,
+        "(made %d)" % _seen["http"])
+    chk("a mirrored host tries the mirror rung", _seen.get("mirror", 0) >= 1)
+    chk("a mirrored host still reaches the renderer when mirrors fail",
+        _seen["render"] == 1 and _r.ok)
     chk("the trail says the cheap tiers were skipped, not that they failed",
         any(a.get("layer") == "http" and "skip" in str(a.get("result", "")).lower()
             for a in (_r.attempts or [])),
         "(trail: %r)" % [a.get("layer") for a in (_r.attempts or [])])
 
-    _seen["http"] = _seen["render"] = 0
+    _seen["http"] = _seen["render"] = _seen["mirror"] = 0
     with tempfile.TemporaryDirectory() as _td:
         rxfetch.configure(sources_dir=_td)
         rxfetch.fetch("https://example.com/page", allow_browser=True)
@@ -1112,6 +1118,311 @@ chk("HTTP /fetch is gone from the route table",
 import mcp_server as _mcps
 chk("the MCP registry lists fetch-content and fetch-bytes, and no plain fetch",
     {t["name"] for t in _mcps.TOOLS} == {"search", "fetch-content", "fetch-bytes", "do"})
+
+section("tools/call streams; silence cannot kill it (the 2026-09-27 300s lesson)")
+# Witnessed 2026-09-27: Hermes' streamable-HTTP httpx client read-timeout is
+# 300s BETWEEN BYTES; a healthy 367s do call answered on a silent POST, the
+# session died, the client auto-retried ONCE, and the retry forked a second
+# browser run. The facade must therefore keep bytes flowing for any call that
+# can run long. These tests pin the mechanism against a real socket.
+import http.client, socket, threading
+_saved_dispatch = _mcps._dispatch
+_srv = None
+try:
+    _sock = socket.socket(); _sock.bind(("127.0.0.1", 0)); _port = _sock.getsockname()[1]; _sock.close()
+    _srv = _mcps.make_server(port=_port)
+    threading.Thread(target=_srv.serve_forever, daemon=True).start()
+
+    def _rpc(payload):
+        c = http.client.HTTPConnection("127.0.0.1", _port, timeout=10)
+        c.request("POST", "/mcp", _json.dumps(payload),
+                  {"Content-Type": "application/json"})
+        r = c.getresponse()
+        body = r.read().decode("utf-8", "replace")
+        ctype = r.getheader("Content-Type") or ""
+        c.close()
+        return r.status, ctype, body
+
+    chk("tools/list still answers plain JSON (only tools/call streams)",
+        "application/json" in _rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})[1])
+
+    _mcps._dispatch = lambda name, args: {"ok": True, "echo": name}
+    st, ct, body = _rpc({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                         "params": {"name": "search", "arguments": {}}})
+    import re as _re
+    m = _re.search(r"event: message\ndata: (.*)\n\n", body)
+    chk("a fast tools/call rides an SSE stream whose message frame carries the reply",
+        st == 200 and "text/event-stream" in ct and m is not None
+        and _json.loads(m.group(1)).get("id") == 7
+        and "echo" in _json.loads(m.group(1))["result"]["content"][0]["text"])
+
+    _slow = threading.Event()
+    def _slow_dispatch(name, args):
+        _slow.wait(1.0)
+        return {"ok": True}
+    _mcps._dispatch = _slow_dispatch
+    _saved_ping = _mcps.STREAM_PING_SECS
+    _mcps.STREAM_PING_SECS = 0.1
+    try:
+        st, ct, body = _rpc({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                             "params": {"name": "do", "arguments": {}}})
+        first_ping = body.find(": ping")
+        msg_at = body.find("event: message")
+        chk("a slow tools/call pings BEFORE the reply (bytes never stop)",
+            first_ping != -1 and msg_at != -1 and first_ping < msg_at
+            and body.count(": ping") >= 2)
+    finally:
+        _mcps.STREAM_PING_SECS = _saved_ping
+finally:
+    _mcps._dispatch = _saved_dispatch
+    if _srv is not None:
+        _srv.shutdown()
+
+# ── the reddit mirror rung (2026-10-14) ───────────────────────────────────────────────────────
+# Measured that day from .226: every reddit surface — www/old HTML, .json, .rss, even
+# oauth.reddit.com — answers this egress with a wall or the block page, while a redlib mirror
+# serves the identical path for free. The rung swaps ONLY the host, never asks reddit cheaply
+# again, pins the winner, and never tells the client who served the page.
+section("the reddit mirror rung")
+
+BLOCK_PAGE = ("You've been blocked by network security. If you think you've been blocked by "
+              "mistake, file a ticket below and we'll look into it. [File a ticket]"
+              "(https://support.reddithelp.com/hc/en-us/requests/new?ticket_form_id=21879292693140)")
+CHALLENGE_STUB = ("[Skip to main content](https://www.reddit.com/r/LocalLLaMA/top/?"
+                  "solution=cd1dc360&js_challenge=1&jsc_token=2824be10#main-content)")
+chk("the 229-char network-security block page is unusable, not the document",
+    rxfetch.looks_unusable(BLOCK_PAGE))
+chk("the js_challenge stub is unusable, not the document",
+    rxfetch.looks_unusable(CHALLENGE_STUB))
+
+chk("reddit canonicals start at the mirror floor",
+    rxfetch.min_tier_for(POST_LL) == "mirror")
+_mir = rxfetch._redlib_url("https://old.reddit.com/r/x/comments/1abc/two/?limit=3&foo=bar",
+                           "mirror.example")
+chk("the rewrite is a host swap: path and query survive intact",
+    _mir == "https://mirror.example/r/x/comments/1abc/two/?limit=3&foo=bar", str(_mir))
+chk("a non-reddit url can never be mirrored",
+    rxfetch._redlib_url("https://example.com/r/x/", "mirror.example") is None)
+
+_real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
+_real_hosts = rxfetch.REDLIB_HOSTS
+try:
+    rxfetch.REDLIB_HOSTS = ["dead.example", "good.example"]
+    _tried = []
+
+    def _mirror_attempt(url, timeout, via="http"):
+        _tried.append(url)
+        if "dead.example" in url:
+            return rxfetch.Result("", "unreachable", "stub: no server"), True
+        return rxfetch.Result("thread " * 300, "ok", "stub mirror", via=via), False
+
+    rxfetch._one_attempt = _mirror_attempt
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r1 = rxfetch.fetch(POST_LL)
+        chk("dead instance first, then the winner — failover walked the list",
+            len(_tried) == 2 and "dead.example" in _tried[0] and "good.example" in _tried[1],
+            "%r" % _tried)
+        chk("the mirror answer wins the fetch", r1.ok and len(r1.text) > 1000)
+        chk("the winner is pinned for the next fetch",
+            "good.example" in open(rxfetch._redlib_pin_path(), encoding="utf-8").read())
+        chk("content is cached under the CANONICAL reddit key",
+            os.path.exists(rxfetch.cache_path(POST_LL)))
+        chk("mirror content carries no origin validators (no false revalidation of a swap)",
+            not os.path.exists(rxfetch.cache_path(POST_LL) + ".meta.json"))
+        chk("the answer is cached under the canonical key, one request later",
+            all("reddit.com" not in u for u in _tried))
+
+        _tried.clear()
+        r2 = rxfetch.fetch(POST_LL)
+        chk("the mirror copy replays from cache — zero requests", r2.ok and not _tried)
+
+        # BLACK BOX at the handler seam: the client body must never learn the instance.
+        import handlers                                                  # noqa: E402
+        _tried.clear()
+        _open = handlers._fetch_content_one(POST_LL, 4000, 10, True)
+        _blob = str(_open)
+        chk("the handler's client body names no rung and no instance",
+            "good.example" not in _blob and "dead.example" not in _blob
+            and "mirror" not in _blob and "via" not in _open,
+            "(keys: %r)" % sorted(_open))
+        chk("the client still gets the document itself",
+            _open["ok"] and "thread" in _open["text"])
+finally:
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
+    rxfetch.REDLIB_HOSTS = _real_hosts
+
+# ── the JS challenge wall renders the MIRROR (Anubis, 2026-10-16) ───────────────────────────
+# Measured that day: the public redlib fleet fronts anonymous visitors with Anubis
+# ("Making sure you're not a bot!"), a JS proof-of-work gate. Plain HTTP can't solve it;
+# a browser passes by design. These pins hold the ONE decision that makes it safe: the render
+# targets the mirror URL that showed the gate, never the canonical (reddit's own edge has
+# never yielded to a render of ours — 900s, zero findings, 2026-10-14).
+section("the JS challenge wall renders the mirror")
+
+# The exact miss of 2026-10-18, pinned: an Anubis gate WITH REAL PROSE (~1.3KB) passed
+# looks_unusable's structural heuristics and was served as ok:true CONTENT. The phrase test
+# must run first, and small + phrase = gate regardless of how document-like the prose is.
+ANUBIS_PROSE_PAGE = (
+    "Verifying your browser\n\nCalculating...\nDifficulty: 2, Speed: 0kH/s\n\n"
+    "You are seeing this because the administrator of this website has set up Anubis to "
+    "protect the server against the scourge of AI companies aggressively scraping websites. "
+    "This can and does cause downtime for the websites, which makes their resources "
+    "inaccessible for everyone. Anubis is a compromise. Anubis uses a Proof-of-Work scheme "
+    "in the vein of Hashcash, a proposed proof-of-work scheme for reducing email spam. The "
+    "idea is that at individual scales the additional load is ignorable, but at mass scraper "
+    "levels it adds up and makes scraping much more expensive. Ultimately, this is a "
+    "placeholder solution so that more time can be spent on fingerprinting and identifying "
+    "headless browsers via font rendering so that the challenge proof of work page doesn't "
+    "need to be presented to users that are much more likely to be legitimate. Please note "
+    "that Anubis requires the use of modern JavaScript features. Disable blockers.")
+chk("the 1.3KB Anubis prose page is a WALL, not a document (the miss of 2026-10-18)",
+    (rxfetch._wall_verdict(ANUBIS_PROSE_PAGE) or "").startswith("JS challenge wall"))
+LONG_DOC_WITH_PHRASE = ("A survey of web bot-management systems notes that Cloudflare shows "
+                        'a "Just a moment" interstitial while solving challenges, and that '
+                        "Anubis uses proof-of-work gates to shed scrapers. " +
+                        " ".join("Chapter %d examines %s, where the deployment was measured "
+                                 "against a strict latency budget and operators reported mixed "
+                                 "results for vendor %d." % (i, ["TLS fingerprinting",
+                                 "font-render probes", "challenge budgets", "cookie attestation"][i % 4],
+                                 i) for i in range(60)))
+# Pre-existing doctrine (BOT_WALL_STRONG_RE, David's design): a strong wall marker condemns the
+# page under SUBSTANTIAL_CHARS (20K) regardless of length. _wall_verdict does NOT change that
+# verdict — it NAMES the family so the ladder can pick its render aim. Two honest pins follow.
+chk("mid-length doc with a strong marker: rejected (pre-existing doctrine), now NAMED as JS wall",
+    (rxfetch._wall_verdict(LONG_DOC_WITH_PHRASE) or "").startswith("JS challenge wall"))
+VERY_LONG_DOC = LONG_DOC_WITH_PHRASE + ("Additional appendix material with distinct observations "
+                                        "about measurement error bars across every vendor. " * 120)
+chk("a >=20K doc merely mentioning gate phrases survives — the substantial-text rule predates "
+    "the wall-naming and is untouched",
+    len(VERY_LONG_DOC) >= 20000 and rxfetch._wall_verdict(VERY_LONG_DOC) is None)
+chk("ordinary small clean prose is not a wall",
+    rxfetch._wall_verdict("A perfectly readable short article about quokkas. " * 9) is None)
+chk("structural garbage still reads as interstitial (family preserved)",
+    (rxfetch._wall_verdict("   \n\t\n  ") or "").startswith("interstitial or empty"))
+
+# The second miss of the same day: the render rung itself returned the Anubis gate as a
+# SUCCESSFUL render ('firecrawl ok: rendered 1322 chars'). The render tiers' OUTPUT now
+# faces the same verdict as http bodies — a gated render is a failed rung, not content.
+gated_render = rxfetch.Result(ANUBIS_PROSE_PAGE, "ok", "stub: firecrawl rendered", via="firecrawl")
+guarded = rxfetch._render_guard(gated_render)
+chk("a render that returned the gate is NOT ok", not guarded.ok)
+chk("its detail names the gate as a still-gated render",
+    "render still gated" in guarded.detail and "JS challenge wall" in guarded.detail,
+    guarded.detail)
+real_render = rxfetch.Result("thread " * 300, "ok", "stub: real render", via="firecrawl")
+chk("a real render passes the guard untouched",
+    rxfetch._render_guard(real_render) is real_render)
+
+# End-to-end: every mirror gated AND every render rung gated => the caller gets the wall
+# VERDICT (unreadable), never the wall as content, and nothing is written to the cache.
+_fc_real, _bb_real, _bl_real = (rxfetch._firecrawl_attempt, rxfetch._bladebro_attempt,
+                                rxfetch._browserbase_attempt)
+_oa_real = rxfetch._one_attempt
+try:
+    rxfetch._one_attempt = lambda url, timeout, via="http": (
+        rxfetch.Result("", "unreadable", "JS challenge wall (1298 chars)"), True)
+    rxfetch._firecrawl_attempt = lambda url, timeout: rxfetch.Result(
+        ANUBIS_PROSE_PAGE, "ok", "stub: rendered the gate", via="firecrawl")
+    rxfetch._bladebro_attempt = lambda url, timeout: rxfetch.Result(
+        ANUBIS_PROSE_PAGE, "ok", "stub: rendered the gate", via="bladebro")
+    rxfetch._browserbase_attempt = lambda url, timeout: rxfetch.Result(
+        "", "unreachable", "stub: disabled")
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r_all = rxfetch.fetch(POST_LL, allow_browser=True)
+    chk("all rungs gated => the answer is a wall verdict, not wall-as-content",
+        not r_all.ok and "JS challenge wall" in r_all.detail and "render still gated" in r_all.detail,
+        r_all.detail)
+    chk("a gated wall is NEVER cached as content",
+        not os.path.exists(rxfetch.cache_path(POST_LL)))
+finally:
+    rxfetch._one_attempt = _oa_real
+    rxfetch._firecrawl_attempt, rxfetch._bladebro_attempt = _fc_real, _bl_real
+    rxfetch._browserbase_attempt = _bb_real
+
+ANUBIS_STUB = ("Making sure you&#39;re not a bot! body, html { height: 100%; display: flex; } "
+               "#status { font-variant-numeric: tabular-nums; } Powered by Anubis")
+chk("an Anubis gate reads as a wall a browser dissolves",
+    bool(rxfetch.JS_RENDERABLE_WALL_RE.search(ANUBIS_STUB)))
+chk("reddit's network-security block page is NOT renderable chrome — rendering animates a wall",
+    not rxfetch.JS_RENDERABLE_WALL_RE.search(BLOCK_PAGE))
+
+_real_attempt, _real_fc = rxfetch._one_attempt, rxfetch._firecrawl_attempt
+_real_hosts = rxfetch.REDLIB_HOSTS
+try:
+    rxfetch.REDLIB_HOSTS = ["gate1.example", "gate2.example"]
+    _seen_js = {"mirror": [], "render": []}
+
+    def _walled(url, timeout, via="http"):
+        _seen_js["mirror"].append(url)
+        return rxfetch.Result("", "unreadable", "JS challenge wall (330 chars)"), True
+
+    def _render(url, timeout):
+        _seen_js["render"].append(url)
+        return rxfetch.Result("thread " * 300, "ok", "stub render", via="firecrawl")
+
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _walled, _render
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r = rxfetch.fetch(POST_LL, allow_browser=True)
+        chk("both gated instances were walked", len(_seen_js["mirror"]) == 2)
+        chk("the JS wall escalates exactly ONE render", len(_seen_js["render"]) == 1)
+        chk("the render targets the gated MIRROR url, never the canonical",
+            _seen_js["render"][0].startswith("https://gate1.example"), _seen_js["render"][0])
+        chk("the document arrives", r.ok and len(r.text) > 1000)
+        chk("the mirror-rendered copy caches under the canonical key",
+            os.path.exists(rxfetch.cache_path(POST_LL)))
+        chk("the trail names the redirect of aim (internal trace only)",
+            any("mirror copy" in str(a.get("result", "")) for a in (r.attempts or [])))
+        chk("a render win does NOT pin an http instance (it never served ok over http)",
+            not os.path.exists(rxfetch._redlib_pin_path()))
+
+        _seen_js["mirror"].clear()
+        _seen_js["render"].clear()
+        r2 = rxfetch.fetch(POST_LL, allow_browser=True)
+        chk("the rendered document replays from cache — zero requests, zero renders",
+            r2.ok and not _seen_js["mirror"] and not _seen_js["render"])
+
+    # The corollary must NOT leak: a non-JS refusal keeps the legacy escalation (canonical),
+    # because "a browser would pass this" was never established for any host.
+    _seen_js["mirror"].clear()
+    _seen_js["render"].clear()
+
+    def _withheld(url, timeout, via="http"):
+        return rxfetch.Result("", "unreadable", "HTTP 403"), False
+
+    rxfetch._one_attempt = _withheld
+    with tempfile.TemporaryDirectory() as _td:
+        rxfetch.configure(sources_dir=_td)
+        r3 = rxfetch.fetch(POST_LL, allow_browser=True)
+    chk("a non-JS mirror refusal still renders the canonical (legacy path intact)",
+        len(_seen_js["render"]) == 1 and _seen_js["render"][0] == POST_LL,
+        "%r" % _seen_js["render"])
+finally:
+    rxfetch._one_attempt, rxfetch._firecrawl_attempt = _real_attempt, _real_fc
+    rxfetch.REDLIB_HOSTS = _real_hosts
+
+# ── the tool descriptions ARE the contract ───────────────────────────────────────────────────
+# The registry header states it: models read the TOOLS descriptions, not a prose file. On
+# 2026-10-18 an agent still reached for curl/urllib to read a page anyway — so the lane rule,
+# the no-range truth, and the spillover-is-the-local-copy rule live IN the descriptions
+# (fleet-wide reach), and these pins keep them from rotting out of it.
+section("tool descriptions carry the retrieval-lane contract")
+import mcp_server as _mcp_srv                                    # noqa: E402
+_fc_desc = next(t for t in _mcp_srv.TOOLS if t["name"] == "fetch-content")["description"]
+_fb_desc = next(t for t in _mcp_srv.TOOLS if t["name"] == "fetch-bytes")["description"]
+chk("fetch-content names itself the sanctioned retrieval lane",
+    "sanctioned web-retrieval lane" in _fc_desc)
+chk("fetch-content names the forbidden shell fetchers",
+    all(w in _fc_desc for w in ("curl", "wget", "urllib")))
+chk("fetch-content kills the range-fetch myth (truncation is from the top)",
+    "no range or offset" in _fc_desc)
+chk("fetch-content sends oversize readers to the saved file, not a refetch",
+    "page that file" in _fc_desc and "instead of re-requesting" in _fc_desc)
+chk("fetch-bytes holds the same lane", "sanctioned lane" in _fb_desc)
+chk("fetch-bytes says a re-request replays cache, not independent verification",
+    "replays its cache entry" in _fb_desc)
 
 print("\n%d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

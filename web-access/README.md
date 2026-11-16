@@ -92,12 +92,14 @@ deliberate choice, because auto-escalation would mean the model could sign in or
 something without ever choosing to.
 
 ```
-python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 25] [--confirm]
+python3 scripts/web_access.py do --task "..." [--start-url ...] [--max-steps 100] [--confirm]
 ```
 
 Contract details: `status: complete` carries the answer; `needs_input` carries a question for
 the user; `max_rounds`/`timed_out` carry partial findings. Budgets differ from `fetch`'s
-escalation path — a standalone `do` runs up to **30 minutes**, versus the 900s agent rung
+escalation path — a standalone `do` runs up to **~21 minutes** (100 rounds at the
+measured ~8.3s cadence),
+versus the 900s agent rung
 inside a `fetch` climb (*Timeout budget* below). Architecture, setup and the Fara scaffold are
 in the browser-tier part of the architecture section.
 
@@ -139,8 +141,11 @@ Agents run with file tools on this machine as `dputzolu`. Today the orchestrator
 `config.env` (LiteLLM/browserbase keys), the page cache and `learned.json` are all readable by
 any agent that goes looking — the credential guard filters *terminal command text*, not
 `read_file`. Moving them into a container removes that class of exposure structurally rather
-than by another text filter. It also deletes bladebro's SSH hop (the service runs beside it on
-`.226`) and creates one place where every fetch can be audited.
+than by another text filter. Bladebro's SSH hop dies in the same move — but only once
+`BLADEBRO_SSH=sh -c` is set in `webaccess/.env` (the code default is the host-era `ssh docker`
+transport, and there is no ssh binary in the image: unset means the tier fails
+FileNotFoundError — measured 2026-10-18; the container spawns the one-shot itself through the
+mounted docker.sock). One place where every fetch can be audited.
 
 ## Deploy config (`service.yaml`)
 
@@ -226,17 +231,21 @@ text, reporting which one did in `via`:
 |---|---|---|---|---|
 | 1 | `cache` | reads a file we wrote earlier, keyed by URL hash | none | free — no network at all |
 | 2 | `ncbi-api` | one HTTPS GET to NCBI E-utilities (`efetch`). **NCBI URLs only** | none | one request, no bot wall |
+| 2b | `mirror` | redlib host swap for **reddit URLs only** — same path, an instance that answers; instances churn, so the list is config (`REDLIB_HOSTS`) and the winner is pinned 6h. An instance answering with a JS challenge wall (Anubis) sends the **mirror URL** to the render rungs — the gate admits browsers; the canonical's wall does not. Text lane only: `fetch-bytes` promises ORIGIN bytes and a mirror is not the origin | none (render only if gated) | one request, no bot wall |
 | 3 | `http` | one `urllib` GET, retried with backoff; HTML stripped to text by regex, PDFs by PyMuPDF | none | one request |
 | 4 | `firecrawl` | self-hosted Firecrawl (`.226:3002`) renders the page (its Playwright pool runs the JS) and returns clean, **full** markdown | none | one request to a local service |
-| 5 | `browser:bladebro` | the bladebro **stealth** browser, one-shot in a fresh container, reached ONLY when Firecrawl is blocked — its edge is aggressive commercial anti-bot (e.g. Amazon). Returns bladebro's distilled content | none | ~seconds, a fresh container + Chromium |
+| 5 | `browser:bladebro` | the bladebro **stealth** browser, one-shot in a fresh container spawned via the mounted docker.sock (`BLADEBRO_SSH=sh -c`), reached ONLY when Firecrawl is blocked — its edge is the walls Firecrawl's pool cannot pass (Anubis PoW, measured 2026-10-18; aggressive commercial anti-bot, e.g. Amazon). Returns bladebro's distilled content | none | ~seconds, a fresh container + Chromium |
 | 6 | `browserbase` | a **remote managed** Chromium built to defeat bot detection; **OFF by default** (`WEB_ALLOW_BROWSERBASE=1` to enable), driven via `browse_task --mode browserbase` | none | seconds **plus money** — metered third party |
 
 **Render order is cheapest-that-works, and each rung escalates only on a *detected* failure**
 (HTTP shell/interstitial → Firecrawl; Firecrawl blocked/empty → bladebro; both free rungs
 failed → browserbase). The complementary A/B is the reason for the order: Firecrawl wins
-JS/full-text/speed and clears most walls, while bladebro's narrow win is stealth against the
-hardest commercial anti-bot — so trying Firecrawl then bladebro covers each one's blind spot
-for free before paying.
+JS/full-text/speed, while bladebro's narrow win is stealth — measured 2026-10-18, that split
+has one named member: Firecrawl's Playwright pool does NOT solve Anubis proof-of-work (its
+challenge page reports 0kH/s rendered); bladebro passes it. **A render's OUTPUT faces the same
+wall verdict the http bodies face** (`_render_guard`): a browser that could not pass a gate
+returns the gate, and that is a FAILED rung, never content — the wall as ok:true was served
+exactly once, on the day both halves of this were discovered.
 
 **Order is by cost, and `browserbase` is always last.** Layers 4, 5 and 6 all use the same
 free local browser and differ in how hard they try. Spending the model is cheaper than
@@ -671,7 +680,7 @@ picks the lightest mode that actually works, **transparently, by target site**:
 |---|---|---|
 | costco.com | `browserbase` | Akamai blocks headless **and** headful past the homepage |
 | amazon.* | `headful` | headless is 503-blocked on search; headful loads it |
-| reddit.com | `headless` | loads fine headless |
+| reddit.com | `headless` | UNVERIFIED since 2026-10-14 — reddit's edge walls static fetches AND the OAuth domain from this egress; TEXT fetches answer via the `mirror` rung, never this table. Treat the `do` path on reddit as untested | 
 | newegg.com | `headless` | loads fine headless |
 | *(anything else)* | `headful` if xvfb present, else `headless` | safe default |
 
@@ -739,15 +748,25 @@ order). Any other `BROWSERBASE_*` settings (e.g. `BROWSERBASE_PROXIES`,
   so old days are auto-cleaned by the OS (e.g. `systemd-tmpfiles` ages `/tmp`)
   instead of one file growing forever. Set `BROWSE_LOG` (or `BROWSE_TASK_LOG`) to
   a persistent path if you want to keep logs indefinitely.
-- Fara1.5-27B on a P40 is **slow** — each step processes a full screenshot; a task
-  can take minutes. `--max-steps` (default 25) bounds cost; the script also caps a
-  run at 30 minutes and, on timeout, kills the **whole** browser process group
-  (`start_new_session` + `killpg`) so no `Xvfb`/`chromium` is left orphaned.
-- Trajectories (per-round screenshots + `data_point.json`) are written to a temp folder and
-  discarded after the result is read — **unless** a trace is enabled. `trace_rounds()` reads the
-  per-round actions, the model's own reasoning, and the screenshot paths into the trace before
-  the folder is deleted, and `--keep-trajectory <dir>` copies the whole folder out. This is what
-  makes "what did the agent see, round by round" answerable after a run rather than lost.
+- The Fara model is **slow** — each step processes a full screenshot; measured
+  cadence on the live brain is ~8.3s/round (action <3s; rest is settle +
+  screenshot + 180k-token prompt) with a ~2 min cold start. `--max-steps`
+  (default 100, David 2026-09-27) bounds cost; the script caps a run at
+  `BROWSE_DO_TIMEOUT` (default 1200s ≈ 100 rounds + 35% headroom) and, on timeout,
+  kills the **whole** browser process group (`start_new_session` + `killpg`) so no
+  `Xvfb`/`chromium` is left orphaned. The service parent budget
+  (`WEBACCESS_DO_TIMEOUT`, 1260s) sits above it so the child dies with its own
+  diagnostics; MCP/Hermes clients need a matching per-call timeout (1320s).
+- Trajectories (per-round screenshots + `solver_log/events.jsonl` + `data_point.json`)
+  are written to a temp folder; after every run `persist_run()` copies them to
+  `<WEBACCESS_HOME>/do-runs/<stamp>-<host>/` on the state volume, appends one parseable
+  index line to `<WEBACCESS_HOME>/logs/do-runs.jsonl`, and logs `RUNDIR <path>` —
+  retention keeps the 20 most recent runs. This exists because rounds 14-30 of the
+  first live USPS run (2026-09-27) were unrecoverable when the temp dir was cleaned;
+  since then every run — including failures — is forensic by default. The run dir is
+  SERVER-side state; the model-facing response keeps its black-box shape.
+  `trace_rounds()` additionally folds per-round reasoning into a trace when
+  `RXFETCH_TRACE` is set, and `--keep-trajectory <dir>` copies the folder anywhere.
 - `data_point.json` fields consumed: `status` (`complete` / `waiting_for_user` /
   `max_rounds` / `timed_out` / `aborted`) and `outcome.answer`.
 

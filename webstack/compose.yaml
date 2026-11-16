@@ -29,7 +29,16 @@ name: webstack
 include:
   - ./webaccess/docker-compose.yml
   - ./searxng/docker-compose.yml
-  - ./firecrawl/docker-compose.yaml
+  # env_file is REQUIRED here, not cosmetic: with `include`, the top-level .env is
+  # NOT an interpolation input for member files (compose spec — include.env_file is
+  # what feeds them). Without it every ${VAR:-default} in firecrawl resolved to its
+  # default — firecrawl-api booted with an EMPTY POSTGRES_PASSWORD and crash-looped
+  # on 28P01 for 4 days (found 2026-10-18; the containers predate the include split,
+  # when a flat file read .env directly). webaccess/searxng stay short-form ON
+  # PURPOSE: webaccess interpolates no .env vars, and searxng works today on the
+  # secret baked in its own layer — widening its env would change a live service.
+  - path: ./firecrawl/docker-compose.yaml
+    env_file: .env
 
 # One shared user-defined bridge network for the whole stack. On a
 # user-defined bridge, Docker gives each container DNS entries for both the
