@@ -66,8 +66,15 @@ prefix so plain-text search reaches across all of them:
 | `2houses` | `[Gina] ` | Co-parenting / shared-custody schedule (2Houses). Use these to answer "where is Gina / Sky on date X" — events read "Gina with David" (at the user's house) or "Gina with Christine" (at her mother's). |
 | `kayak` | `[Trip] ` | The user's travel itinerary (Kayak Trips). Each trip has an all-day umbrella event named "<Place> Trip" spanning its dates, plus timed flight / hotel sub-events. |
 
-The `2houses` and `kayak` feeds appear only when configured; with just
-`GCAL_ICAL_KEY` set, the surface is the personal calendar alone.
+The `2houses` and `kayak` feeds appear only when configured —
+`TWOHOUSES_ICAL_URL` lives in `~/.config/pallo-logistics/secrets.env`; the
+kayak feed reads `KAYAK_ICAL_URL` from the process environment (vault-managed
+bearer secret — the consuming profile must list it in
+`terminal.env_passthrough`; there is NO plaintext-file line for it anymore);
+`GCAL_ICAL_KEY` lives in the calendar skill's own `.env`. With just `GCAL_ICAL_KEY` set, the surface is the personal calendar
+alone. **Every feed URL is a bearer secret** — keep it in the chmod-600
+file, never in notes, logs, or replies, and redact the token when quoting a
+fetch error.
 
 Every tool's output also includes a `feed_errors` array. It is normally
 empty; if one feed failed to fetch, the others still return and the failure
@@ -160,6 +167,44 @@ A script that fails prints `{"ok": false, "error": "…"}`.
   fetch calendars yourself.
 - `"iCal fetch HTTP <n>"` or `"iCal fetch network error"` → calendar
   source is unavailable; report the symptom, do not retry endlessly.
+- **`HTTP 410` on the `kayak` feed** = Kayak invalidated its private feed
+  token (gone permanently; a retry never revives it). Say this OUT LOUD as a
+  rotation to-do — a resilient merger puts it in `feed_errors` and the
+  surface keeps returning stale output silently, which is how one link rotted
+  inside a plaintext file for months. Recovery: the user copies the fresh
+  share link from Kayak (it arrives as `webcal://` — swap only the scheme head
+  to `https://`; every character after `//` is byte-fixed, the token lives in
+  the path) → update the vault-held `KAYAK_ICAL_URL` on every profile that
+  holds it (back-end `--overwrite`, then `vault-refresh`) → the rotated VALUE
+  lands only on a full gateway unit restart (a profile restart is a rescan
+  that keeps the old snapshot) → re-run a script and confirm `[Trip]` events
+  return. Never write the URL back into a plaintext file — the env var is the
+  only lane. Kayak has no trips API and its per-trip `.ics` export is static
+  (goes stale on edits), so the subscription feed is the only durable share
+  mechanism.
+- When the user asks how to *grant* access to trip/calendar data, probe
+  first (`calendar-next.py`, read `feed_errors`) and grep the secrets files
+  before proposing any new access mechanism — the feed may already be wired
+  and merely need a URL refresh.
+- **User says they "set" or "shared" a calendar secret but the feed still
+  fails** → the value is almost certainly under the wrong name or in the
+  wrong pipe. The readers accept exactly three keys: `GCAL_ICAL_KEY` (this
+  skill's `.env`), `KAYAK_ICAL_URL` (process env, vault-fed) and
+  `TWOHOUSES_ICAL_URL` (`~/.config/pallo-logistics/secrets.env`). Registering a differently-named
+  secret in the profile's `env_passthrough` (config.yaml) puts it in cron
+  subprocess environments (and, after a gateway reload, even the agent's
+  interactive shell) — but these scripts still read only the three keys
+  above, so a name-mismatched secret stays invisible to the feed no matter
+  how correctly it is registered. Verify env delivery with
+  `echo ${VAR:+set}` and feed health with `feed_errors` as two separate
+  checks. Grep
+  `scripts/ical_lib.py` (`resolve_feeds`) for the exact key name and file
+  the code reads, then report the mismatch as a name/location problem with
+  the one-line fix, not as a failed grant. Never spelunk `state.db`/the
+  vault to chase a secret's value — that needs approval, and the value is
+  not needed. Settle "do I have access?" only by live probe: run
+  `calendar-next.py`, check `feed_errors` is clear and `source` values
+  appear — never infer access from the secret's existence.
 - `"the requested range covers ... days; ask for a window of 400 days or
   fewer"` → narrow `--start`/`--end` to the span the user actually asked
   about and call again.

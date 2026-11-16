@@ -101,7 +101,7 @@ faster, and the per-day loop is the slow/fragile part on long stays.
 
 ### Prerequisites
 - The `calendar` skill, configured with the merged feeds (personal +
-  `TWOHOUSES_ICAL_URL` + `KAYAK_TRIPS_ICAL_URL`). `pallo-trip-*` and `gina-where`
+  `TWOHOUSES_ICAL_URL` + `KAYAK_ICAL_URL`). `pallo-trip-*` and `gina-where`
   compose it as subprocesses.
 - Python 3.10+ and Playwright + Chromium in a venv inside `scripts/`:
   ```
