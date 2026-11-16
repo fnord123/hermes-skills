@@ -76,11 +76,12 @@ The intake request listed the document rules the skill must cover, and
 - **DD as a trigger and a heading shorthand.** The intake request uses "DD" as
   the user's own abbreviation, so the skill defines it in the first line and
   uses it where headings need to stay short.
-- **STE-100 conformance is a writing rule, not a routing change.** The
+- **ASD-STE100 conformance is a writing rule, not a routing change.** The
   requirement binds the language of produced documents, so it belongs in
-  "Writing rules"; the description and trigger list stay untouched. The rule
-  states the core constraints inline and points to `asd-ste100` for the full
-  standard, so it stays executable on profiles that do not carry that skill.
+  "Writing rules". The description and trigger list stay untouched. The rule
+  states the core constraints inline and names `asd-ste100` as the source of
+  the full standard. So the rule works on profiles that do not install that
+  skill.
 
 ## Server semantics the playbook depends on
 
