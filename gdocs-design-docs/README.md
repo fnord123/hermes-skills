@@ -36,6 +36,7 @@ The intake request listed the document rules the skill must cover, and
 | All bullet kinds where appropriate | "Writing rules" |
 | Revision-history table at the end, date + change | "The DD flow" step 9 |
 | Tables whenever they help | "Writing rules", Proposal rule 3 |
+| Document language conforms to ASD-STE100 controlled English | "Writing rules" |
 
 ## Why these sources shaped the playbook
 
@@ -53,6 +54,13 @@ The intake request listed the document rules the skill must cover, and
   for list-shaped content, full-sentence prose for anything carrying an
   argument. That is why "Write arguments in prose" sits next to "Bullets come
   in all kinds".
+- **ASD-STE100 (Simplified Technical English)** is the binding language
+  standard for every document this skill produces. The owner set conformance
+  as a requirement: short declarative sentences, one instruction per step, no
+  idioms, no ambiguity. The `asd-ste100` skill is the authoritative style
+  source, and the pipeline's STE100 gate reviews output against it. The old
+  "Short sentences, simple words" bullet became this binding rule, so it is
+  not a separate line.
 
 ## Judgment calls recorded here
 
@@ -68,6 +76,12 @@ The intake request listed the document rules the skill must cover, and
 - **DD as a trigger and a heading shorthand.** The intake request uses "DD" as
   the user's own abbreviation, so the skill defines it in the first line and
   uses it where headings need to stay short.
+- **ASD-STE100 conformance is a writing rule, not a routing change.** The
+  requirement binds the language of produced documents, so it belongs in
+  "Writing rules". The description and trigger list stay untouched. The rule
+  states the core constraints inline and names `asd-ste100` as the source of
+  the full standard. So the rule works on profiles that do not install that
+  skill.
 
 ## Server semantics the playbook depends on
 
